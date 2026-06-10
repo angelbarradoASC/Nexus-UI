@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<!-- open-nexus desktop product -->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open-Nexus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
+</head>
+<body>
+    <main class="shell">
+        <header class="shell-topbar">
+            <div class="shell-titlebar">
+                <h1>Open-Nexus</h1>
+            </div>
+            <nav class="top-actions" aria-label="Navegacion principal">
+                <a class="is-active" href="/open-nexus">Shell</a>
+                <a href="/nexus-v1">Operador</a>
+                <a href="/nexus-sales">Sales</a>
+                <a href="/nexus-prompts">Prompting</a>
+                <a href="/open-nexus/models">Modelos</a>
+            </nav>
+        </header>
+
+        <div class="shell-body">
+
+            <!-- Zona libre — pendiente de asignar -->
+            <section class="zone-placeholder">
+                <span class="zone-placeholder-label">ZONA LIBRE — pendiente de asignar</span>
+            </section>
+
+            <!-- Mini chat IA -->
+            <section class="card mini-chat-panel">
+                <div class="mini-chat-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Asistente</p>
+                        <h2>Chat IA</h2>
+                    </div>
+                    <span id="chatStatusBadge" class="chat-badge">listo</span>
+                </div>
+                <div id="miniChatHistory" class="mini-chat-history"></div>
+                <form id="miniChatForm" class="mini-chat-form">
+                    <textarea id="miniChatInput" rows="2" placeholder="Escribe una orden o pregunta... (Ctrl+Enter para enviar)"></textarea>
+                    <button type="submit">Enviar</button>
+                </form>
+            </section>
+
+            <!-- Panel de monitorizacion -->
+            <aside class="monitoring-rail">
+                <section class="card monitoring-status-panel">
+                    <p class="eyebrow eyebrow-tight">Recoleccion</p>
+                    <h2>Estado</h2>
+                    <div id="serviceStatusList" class="service-status-list">
+                        <div class="status-skeleton">Cargando...</div>
+                    </div>
+                </section>
+
+                <section class="card monitoring-alarms-panel">
+                    <p class="eyebrow eyebrow-tight">Ultimas 5 alarmas</p>
+                    <h2>Grafana</h2>
+                    <div id="alarmsList" class="alarms-list">
+                        <div class="status-skeleton">Cargando...</div>
+                    </div>
+                </section>
+            </aside>
+
+        </div>
+    </main>
+
+    <script src="/static/js/open_nexus.js?v=20260610"></script>
+</body>
+</html>

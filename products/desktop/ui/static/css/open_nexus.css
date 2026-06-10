@@ -1,0 +1,428 @@
+:root {
+    --bg: #141815;
+    --panel: #1c221e;
+    --panel-soft: #202823;
+    --line: rgba(161, 197, 176, 0.16);
+    --ink: #f4f1ea;
+    --muted: #9fb0a4;
+    --accent: #8fc7b1;
+    --accent-strong: #4d8d74;
+    --radius: 18px;
+    --red-zone: #e8231a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+    background: radial-gradient(circle at top right, rgba(77,141,116,0.18), transparent 25%), var(--bg);
+    color: var(--ink);
+    font-family: "Manrope", sans-serif;
+}
+
+/* ── Shared shell wrapper ──────────────────────────────────────────────────── */
+.shell {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: 100vh;
+}
+
+.shell-topbar {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    padding: 16px 22px;
+}
+
+.shell-titlebar h1 {
+    font-size: 1.2rem;
+    letter-spacing: -0.03em;
+    margin: 0;
+}
+
+h1, h2, p { margin: 0; }
+
+.eyebrow {
+    margin: 0 0 6px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.eyebrow-tight { margin-bottom: 4px; }
+
+.top-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.top-actions a, button {
+    min-height: 40px;
+    border-radius: 999px;
+    padding: 0 16px;
+    border: 1px solid var(--line);
+    background: var(--panel-soft);
+    color: var(--ink);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 13px;
+    font-family: "Manrope", sans-serif;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.top-actions a.is-active {
+    background: var(--accent-strong);
+    border-color: rgba(143, 199, 177, 0.42);
+}
+
+/* ── Shared card ───────────────────────────────────────────────────────────── */
+.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+}
+
+/* ── SHELL PAGE layout ─────────────────────────────────────────────────────── */
+.shell-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 250px;
+    grid-template-rows: 1fr 27vh;
+    gap: 16px;
+}
+
+/* Zona libre — rojo chillon */
+.zone-placeholder {
+    grid-column: 1;
+    grid-row: 1;
+    background: var(--red-zone);
+    border-radius: 24px;
+    border: 2px dashed rgba(255, 255, 255, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zone-placeholder-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
+    user-select: none;
+}
+
+/* Mini chat */
+.mini-chat-panel {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 14px 18px;
+    gap: 10px;
+}
+
+.mini-chat-head {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.mini-chat-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+}
+
+.mini-chat-form {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.mini-chat-form textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #101411;
+    color: var(--ink);
+    padding: 9px 13px;
+    font: 13px/1.5 "IBM Plex Mono", monospace;
+    min-height: unset;
+}
+
+.mini-chat-form textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.mini-chat-form button {
+    flex: 0 0 auto;
+    padding: 0 18px;
+    height: 38px;
+    background: var(--accent-strong);
+    border: none;
+    border-radius: 999px;
+    color: white;
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.mini-chat-form button:hover { filter: brightness(1.1); }
+
+/* Chat bubbles */
+.chat-msg {
+    padding: 5px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.chat-msg-user {
+    background: rgba(77, 141, 116, 0.2);
+    color: var(--accent);
+    align-self: flex-end;
+    max-width: 90%;
+}
+
+.chat-msg-assistant {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--ink);
+    max-width: 100%;
+}
+
+.chat-msg-thinking {
+    color: var(--muted);
+    font-style: italic;
+    font-size: 11px;
+}
+
+.chat-badge {
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(77, 141, 116, 0.25);
+    color: var(--accent);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.chat-badge.thinking {
+    background: rgba(255, 200, 0, 0.15);
+    color: #ffd740;
+}
+
+/* Monitoring rail */
+.monitoring-rail {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow: hidden;
+}
+
+.monitoring-status-panel {
+    flex: 0 0 auto;
+    padding: 14px 16px;
+    gap: 10px;
+}
+
+.monitoring-alarms-panel {
+    flex: 1;
+    min-height: 0;
+    padding: 14px 16px;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.service-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.service-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line);
+}
+.service-row:last-child { border-bottom: none; }
+
+.service-name {
+    color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+}
+
+.svc-badge {
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.svc-up       { background: rgba(77,141,116,0.3);  color: #8fc7b1; }
+.svc-down     { background: rgba(220,50,50,0.25);  color: #ff8080; }
+.svc-degraded { background: rgba(255,180,0,0.2);   color: #ffcc44; }
+
+.alarms-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+}
+
+.alarm-card {
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.03);
+}
+
+.alarm-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+}
+
+.alarm-meta {
+    color: var(--muted);
+    font-size: 10px;
+    font-family: "IBM Plex Mono", monospace;
+    margin-top: 3px;
+    line-height: 1.3;
+}
+
+.alarm-critical .alarm-title { color: #ff8080; }
+.alarm-warning  .alarm-title { color: #ffcc44; }
+.alarm-info     .alarm-title { color: var(--accent); }
+
+.status-skeleton {
+    color: var(--muted);
+    font-size: 11px;
+    font-family: "IBM Plex Mono", monospace;
+}
+
+.empty-state-sm {
+    color: var(--muted);
+    font-size: 11px;
+    font-family: "IBM Plex Mono", monospace;
+    text-align: center;
+    padding: 12px 0;
+}
+
+/* ── MODELOS PAGE layout (no tocar) ───────────────────────────────────────── */
+.layout {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    gap: 18px;
+    flex: 1;
+    min-height: 0;
+}
+
+.layout-models { grid-template-columns: 1fr 320px; }
+
+.rail, .center { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+
+.composer { display: flex; flex-direction: column; gap: 14px; }
+
+textarea, input, select, .response-pane, .stack > div {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: #101411;
+    color: var(--ink);
+    padding: 14px;
+    font: 14px/1.6 "IBM Plex Mono", monospace;
+}
+
+textarea { resize: vertical; min-height: 140px; }
+.response-pane { white-space: pre-wrap; min-height: 280px; overflow: auto; }
+.stack { display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+
+.provider-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field span, .toggle-row span, .status-inline { color: var(--muted); font-size: 13px; }
+.field-wide { grid-column: 1 / -1; }
+
+.toggle-row {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.toggle-row input { width: 20px; height: 20px; padding: 0; }
+
+.form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+    .shell-body {
+        grid-template-columns: 1fr;
+        grid-template-rows: 30vh 27vh auto;
+    }
+    .monitoring-rail {
+        grid-column: 1;
+        grid-row: 3;
+        flex-direction: row;
+    }
+    .layout, .layout-models { grid-template-columns: 1fr; }
+    .provider-form { grid-template-columns: 1fr; }
+}

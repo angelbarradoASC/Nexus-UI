@@ -1,0 +1,36 @@
+{
+  "id": "cisco.switch.prediagnostico",
+  "name": "Pre diagnostico Cisco Switch",
+  "description": "Prepara una linea de investigacion para incidencias sobre switches Cisco y switching de campus o core.",
+  "execution": {
+    "where": "assistant",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "inputs": {
+    "target": {"type": "str", "required": false},
+    "alert_hint": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "analysis": "str",
+    "plan": "dict"
+  },
+  "triggers": [
+    "switch cisco",
+    "cisco ios",
+    "cisco nexus",
+    "vlan",
+    "spanning tree",
+    "puerto cisco"
+  ],
+  "examples": [
+    "tengo una alarma en el switch cisco core-sw-01",
+    "revisa el switch de acceso porque una vlan no levanta"
+  ]
+}

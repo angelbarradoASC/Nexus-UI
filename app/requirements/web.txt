@@ -1,0 +1,5 @@
+# =============================================================
+# web.txt — dependencias exclusivas del servidor FastAPI
+# Incluye base.txt
+# =============================================================
+-r base.txt

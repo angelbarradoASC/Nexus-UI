@@ -1,0 +1,101 @@
+/* ==============================================================================
+   NEXUS Platform - Layout (Modern Clean)
+   ============================================================================== */
+
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    grid-template-rows: 60px 1fr;
+    grid-template-areas: 
+        "sidebar toolbar"
+        "sidebar main";
+    height: 100vh;
+    transition: grid-template-columns var(--transition-normal);
+}
+
+.app-container.canvas-active {
+    grid-template-columns: 260px 1fr 1fr;
+    grid-template-areas: 
+        "sidebar toolbar toolbar"
+        "sidebar main canvas";
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-primary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* Dark scrollbar para sidebar */
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-dark);
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+    .app-container.canvas-active {
+        grid-template-columns: 260px 1fr;
+        grid-template-areas: 
+            "sidebar toolbar"
+            "sidebar canvas";
+    }
+    
+    .main-content {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-container {
+        grid-template-columns: 1fr;
+        grid-template-areas: 
+            "toolbar"
+            "main";
+    }
+    
+    .sidebar {
+        position: fixed;
+        left: -280px;
+        top: 0;
+        height: 100vh;
+        z-index: 100;
+        transition: left var(--transition-normal);
+        box-shadow: var(--shadow-lg);
+    }
+    
+    .sidebar.show {
+        left: 0;
+    }
+}
+
+.hidden { 
+    display: none; 
+}

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <!-- open-nexus desktop product -->
 <html lang="es">
 <head>
@@ -9,20 +9,21 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
 </head>
 <body>
     <main class="shell">
         <header class="shell-topbar">
             <div class="shell-titlebar">
-                <h1>Open-Nexus</h1>
+                <div class="shell-brand">
+                    <img src="/static/nexus_anchor.png" alt="JAINA" class="shell-brand-mark" onerror="this.style.display='none'">
+                    <div class="shell-brand-copy">
+                        <p class="eyebrow eyebrow-tight">Part Of JAINA</p>
+                        <h1>Open-Nexus</h1>
+                    </div>
+                </div>
             </div>
-            <nav class="top-actions" aria-label="Navegacion principal">
-                <a class="is-active" href="/open-nexus">Shell</a>
-                <a href="/nexus-v1">Operador</a>
-                <a href="/nexus-sales">Sales</a>
-                <a href="/nexus-prompts">Prompting</a>
-                <a href="/open-nexus/models">Modelos</a>
-            </nav>
+            {% include "partials/desktop_nav.html" %}
         </header>
 
         <div class="shell-body">

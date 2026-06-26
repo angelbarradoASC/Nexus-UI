@@ -1,0 +1,16 @@
+<div class="desktop-nav-stack">
+    <div class="desktop-nav-row desktop-nav-row-common">
+        <div class="desktop-nav-label">Desktop</div>
+        <nav class="desktop-nav-links" aria-label="Navegacion principal">
+            <a class="desktop-nav-link {% if active_primary == 'shell' %}is-active{% endif %}" href="/open-nexus">Shell</a>
+            <a class="desktop-nav-link {% if active_primary == 'operator' %}is-active{% endif %}" href="/nexus-v1">Operador</a>
+            <a class="desktop-nav-link {% if active_primary == 'sales' %}is-active{% endif %}" href="/nexus-sales">Sales</a>
+            <a class="desktop-nav-link {% if active_admin == 'settings' %}is-active{% endif %}" href="/nexus/settings">Configuracion</a>
+            <a class="desktop-nav-link {% if active_admin == 'vault' %}is-active{% endif %}" href="/nexus/vault">Vault</a>
+            <a class="desktop-nav-link {% if active_admin == 'campaign' %}is-active{% endif %}" href="/nexus/campaign">Campana</a>
+        </nav>
+        {% if current_user %}
+        <div class="desktop-nav-user">{{ current_user }}</div>
+        {% endif %}
+    </div>
+</div>

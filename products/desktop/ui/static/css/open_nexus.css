@@ -1,3 +1,7 @@
+html {
+    zoom: 0.75;
+}
+
 :root {
     --bg: #141815;
     --panel: #1c221e;
@@ -47,6 +51,28 @@ body {
     font-size: 1.2rem;
     letter-spacing: -0.03em;
     margin: 0;
+}
+
+.shell-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.shell-brand-mark {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 14px;
+    border: 1px solid rgba(161, 197, 176, 0.26);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+    flex-shrink: 0;
+}
+
+.shell-brand-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 h1, h2, p { margin: 0; }

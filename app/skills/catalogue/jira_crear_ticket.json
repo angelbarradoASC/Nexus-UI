@@ -1,0 +1,50 @@
+{
+  "id": "jira.crear_ticket",
+  "name": "Crear ticket en Jira",
+  "description": "Crea un ticket, tarea, bug o historia en Jira Cloud con el resumen y descripción indicados.",
+  "execution": {
+    "where": "cloud",
+    "timeout": 30,
+    "retry": 2
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L0",
+    "preferred_level": "L1",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 400,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "resumen": {"type": "str", "required": true},
+    "descripcion": {"type": "str", "required": false},
+    "tipo_ticket": {"type": "str", "default": "Task", "options": ["Task", "Bug", "Story"]}
+  },
+  "outputs": {
+    "ticket_key": "str",
+    "url": "str"
+  },
+  "triggers": [
+    "crear ticket",
+    "abrir ticket",
+    "nuevo ticket",
+    "crear tarea en jira",
+    "abrir incidencia",
+    "reportar bug",
+    "crear bug",
+    "nueva tarea en jira",
+    "abre un ticket",
+    "crea una tarea",
+    "registrar incidencia",
+    "crear historia",
+    "añadir al backlog"
+  ],
+  "examples": [
+    "crea un ticket en jira: el login no funciona",
+    "abre una incidencia por el bug del dashboard",
+    "nueva tarea: revisar la documentación de la API",
+    "reporta un bug: la app se cuelga al exportar"
+  ]
+}

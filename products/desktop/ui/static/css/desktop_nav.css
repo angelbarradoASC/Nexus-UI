@@ -1,0 +1,98 @@
+.desktop-nav-stack {
+    display: grid;
+    gap: 8px;
+    min-width: min(100%, 760px);
+}
+
+.desktop-nav-stack.is-admin {
+    align-self: flex-start;
+}
+
+.desktop-nav-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--line, rgba(31, 93, 79, 0.16));
+    border-radius: 18px;
+    background: var(--panel-soft, rgba(255, 255, 255, 0.7));
+}
+
+.desktop-nav-row-admin {
+    background: color-mix(in srgb, var(--panel-soft, rgba(255, 255, 255, 0.74)) 84%, var(--accent, #1f5d4f) 16%);
+}
+
+.desktop-nav-label,
+.desktop-nav-user,
+.desktop-nav-hint {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.desktop-nav-label {
+    color: var(--accent, #8fc7b1);
+    white-space: nowrap;
+}
+
+.desktop-nav-user,
+.desktop-nav-hint {
+    color: var(--muted, rgba(244, 241, 234, 0.72));
+    white-space: nowrap;
+}
+
+.desktop-nav-links {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+.desktop-nav-link {
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line, rgba(31, 93, 79, 0.16));
+    background: color-mix(in srgb, var(--panel, rgba(255, 255, 255, 0.86)) 88%, transparent);
+    color: var(--ink, var(--text, #191612));
+    text-decoration: none;
+    font-size: 0.86rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.desktop-nav-link:hover {
+    transform: translateY(-1px);
+}
+
+.desktop-nav-link.is-active {
+    background: var(--accent-strong, var(--forest-2, var(--accent, #1f5d4f)));
+    border-color: color-mix(in srgb, var(--accent, #8fc7b1) 44%, transparent);
+    color: #fffdfa;
+}
+
+@media (max-width: 980px) {
+    .desktop-nav-row {
+        grid-template-columns: 1fr;
+        justify-items: start;
+    }
+
+    .desktop-nav-links {
+        justify-content: flex-start;
+    }
+
+    .desktop-nav-user,
+    .desktop-nav-hint {
+        white-space: normal;
+    }
+}
+html {
+    zoom: 0.75;
+}

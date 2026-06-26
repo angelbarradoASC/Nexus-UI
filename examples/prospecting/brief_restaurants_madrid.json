@@ -1,0 +1,17 @@
+{
+  "vertical": "restaurants",
+  "target_description": "Restaurantes de ticket medio-alto con opcion de grupos, eventos o reservas",
+  "city": "Madrid",
+  "province": "Madrid",
+  "region": "Comunidad de Madrid",
+  "radius_km": 20,
+  "desired_count": 30,
+  "must_have": ["restaurante activo", "email o formulario", "telefono"],
+  "nice_to_have": ["reservas online", "eventos", "grupos", "terraza", "instagram"],
+  "exclude": ["franquicias", "comida rapida", "bares sin web"],
+  "crm_tags": ["restaurante", "madrid", "premium"],
+  "campaign_type": "hospitality-outreach",
+  "minimum_score": 50,
+  "dry_run": true,
+  "async_mode": false
+}

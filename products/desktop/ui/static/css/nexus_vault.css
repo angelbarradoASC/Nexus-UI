@@ -1,0 +1,498 @@
+/* nexus_vault.css — Vault de credenciales */
+
+/* ── Lock screen ──────────────────────────────────────────────────────────── */
+
+.vault-lock-screen {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+}
+
+.vault-lock-card {
+    background: var(--surface-1, #1c1c1c);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 12px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    text-align: center;
+}
+
+.vault-lock-icon {
+    font-size: 40px;
+    line-height: 1;
+    margin-bottom: 4px;
+    filter: grayscale(0.3);
+}
+
+.vault-lock-card h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary, #f0f0f0);
+    margin: 0;
+}
+
+.vault-lock-card p {
+    font-size: 13px;
+    color: var(--text-secondary, #888);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.vault-master-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--surface-0, #141414);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 6px;
+    color: var(--text-primary, #f0f0f0);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.vault-master-input:focus {
+    outline: none;
+    border-color: var(--accent, #4a9eff);
+}
+
+.vault-error {
+    font-size: 12px;
+    color: #e8231a;
+    margin: 4px 0 0;
+}
+
+/* ── Main vault body ──────────────────────────────────────────────────────── */
+
+.vault-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 24px;
+    gap: 20px;
+    overflow: hidden;
+}
+
+/* ── Status bar ────────────────────────────────────────────────────────────── */
+
+.vault-statusbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface-1, #1c1c1c);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 8px;
+}
+
+.vault-status-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.vault-status-badge.unlocked {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.vault-status-badge.locked {
+    background: rgba(232, 35, 26, 0.15);
+    color: #e8231a;
+    border: 1px solid rgba(232, 35, 26, 0.3);
+}
+
+.vault-statusbar-info {
+    font-size: 12px;
+    color: var(--text-secondary, #888);
+    flex: 1;
+}
+
+.vault-statusbar-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ── Section ───────────────────────────────────────────────────────────────── */
+
+.vault-section {
+    background: var(--surface-1, #1c1c1c);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+}
+
+.vault-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border, #2a2a2a);
+    flex-shrink: 0;
+}
+
+.vault-section-head h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary, #f0f0f0);
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.vault-count {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-secondary, #888);
+    background: var(--surface-0, #141414);
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border, #2a2a2a);
+}
+
+/* ── Table ──────────────────────────────────────────────────────────────────── */
+
+.vault-table-wrap {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.vault-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.vault-table th {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #888);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 16px;
+    text-align: left;
+    background: var(--surface-0, #141414);
+    border-bottom: 1px solid var(--border, #2a2a2a);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.vault-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text-primary, #f0f0f0);
+    vertical-align: middle;
+}
+
+.vault-table tbody tr:hover td {
+    background: rgba(255,255,255,0.03);
+}
+
+.vault-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.vault-empty {
+    text-align: center;
+    color: var(--text-secondary, #888);
+    padding: 40px !important;
+    font-size: 13px;
+}
+
+/* ── Badges inline ────────────────────────────────────────────────────────── */
+
+.vault-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    display: inline-block;
+}
+
+.vault-badge-green {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.vault-badge-red {
+    background: rgba(232, 35, 26, 0.12);
+    color: #e8231a;
+    border: 1px solid rgba(232, 35, 26, 0.25);
+}
+
+.vault-badge-gray {
+    background: rgba(255,255,255,0.06);
+    color: var(--text-secondary, #888);
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+/* ── Row actions ───────────────────────────────────────────────────────────── */
+
+.vault-row-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* ── Buttons (local overrides) ─────────────────────────────────────────────── */
+
+.btn {
+    font-family: 'Manrope', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+
+.btn:hover { opacity: 0.85; }
+.btn:active { opacity: 0.7; }
+
+.btn-primary {
+    background: var(--accent, #4a9eff);
+    color: #fff;
+}
+
+.btn-ghost {
+    background: rgba(255,255,255,0.07);
+    color: var(--text-primary, #f0f0f0);
+    border: 1px solid var(--border, #2a2a2a);
+}
+
+.btn-danger {
+    background: rgba(232, 35, 26, 0.15);
+    color: #e8231a;
+    border: 1px solid rgba(232, 35, 26, 0.3);
+}
+
+.btn-sm { padding: 5px 10px; font-size: 11px; }
+
+.btn-icon {
+    background: transparent;
+    color: var(--text-secondary, #888);
+    border: 1px solid var(--border, #2a2a2a);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.btn-icon:hover { color: var(--text-primary, #f0f0f0); background: rgba(255,255,255,0.05); }
+
+/* ── Modal ──────────────────────────────────────────────────────────────────── */
+
+.vault-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+}
+
+.vault-modal {
+    background: var(--surface-1, #1c1c1c);
+    border: 1px solid var(--border, #333);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.vault-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px 14px;
+    border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.vault-modal-head h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary, #f0f0f0);
+    margin: 0;
+}
+
+.vault-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #888);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.vault-modal-close:hover { background: rgba(255,255,255,0.07); color: var(--text-primary, #f0f0f0); }
+
+.vault-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding: 20px 22px;
+}
+
+.vault-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vault-field-full {
+    grid-column: 1 / -1;
+}
+
+.vault-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #888);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.vault-field input,
+.vault-field select,
+.vault-field textarea {
+    background: var(--surface-0, #141414);
+    border: 1px solid var(--border, #2a2a2a);
+    border-radius: 6px;
+    color: var(--text-primary, #f0f0f0);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 8px 12px;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.vault-field textarea {
+    resize: vertical;
+    min-height: 120px;
+}
+
+.vault-field input:focus,
+.vault-field select:focus,
+.vault-field textarea:focus {
+    outline: none;
+    border-color: var(--accent, #4a9eff);
+}
+
+.vault-field select option {
+    background: var(--surface-1, #1c1c1c);
+}
+
+.vault-password-wrap {
+    position: relative;
+    display: flex;
+}
+
+.vault-password-wrap input {
+    flex: 1;
+    padding-right: 40px;
+}
+
+.vault-eye-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    opacity: 0.5;
+    padding: 2px;
+}
+.vault-eye-btn:hover { opacity: 1; }
+
+.vault-ssh-upload {
+    margin-top: 8px;
+}
+
+.vault-upload-label {
+    cursor: pointer;
+    display: inline-block;
+}
+
+.vault-cred-notice {
+    font-size: 11px;
+    color: var(--text-secondary, #666);
+    padding: 0 22px 4px;
+    margin: 0;
+    line-height: 1.5;
+    border-top: 1px solid var(--border, #2a2a2a);
+    padding-top: 12px;
+}
+
+.vault-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 14px 22px 18px;
+    border-top: 1px solid var(--border, #2a2a2a);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────────── */
+
+.vault-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface-1, #1c1c1c);
+    border: 1px solid var(--border, #333);
+    border-radius: 8px;
+    padding: 12px 18px;
+    font-size: 13px;
+    color: var(--text-primary, #f0f0f0);
+    z-index: 2000;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    max-width: 320px;
+    animation: toastIn 0.2s ease;
+}
+
+.vault-toast.toast-ok   { border-left: 3px solid #22c55e; }
+.vault-toast.toast-err  { border-left: 3px solid #e8231a; }
+.vault-toast.toast-info { border-left: 3px solid #4a9eff; }
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Test result inline ────────────────────────────────────────────────────── */
+
+.test-ok  { color: #22c55e; font-size: 11px; }
+.test-err { color: #e8231a; font-size: 11px; }
+html {
+    zoom: 0.75;
+}

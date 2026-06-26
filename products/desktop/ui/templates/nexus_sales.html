@@ -1,0 +1,250 @@
+﻿<!DOCTYPE html>
+<!-- open-nexus desktop product sales -->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Sales</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260625l">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+    <style>
+        html {
+            zoom: 0.9;
+        }
+
+        :root {
+            --ui-zoom: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <main class="workspace workspace-sales">
+        <header class="shell-topbar">
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Sales</h1>
+            </div>
+            {% include "partials/desktop_nav.html" %}
+        </header>
+
+        <div id="apiBudgetBanner" class="api-budget-banner hidden-btn" role="alert"></div>
+
+        <section class="sales-layout">
+
+            <!-- ── IZQUIERDA: controles (angosto, scrollable) ────────────── -->
+            <section class="rail-card sales-main-panel prospecting-panel">
+                <div class="rail-card-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Prospeccion</p>
+                        <h2>ProspectingAgent</h2>
+                    </div>
+                    <span id="prospectingRunBadge" class="collector-overall">idle</span>
+                </div>
+
+                <!-- Entrada IA — siempre visible -->
+                <div class="ai-brief-block">
+                    <label class="field compact-stack">
+                        <span class="ai-brief-label">Describe lo que quieres buscar</span>
+                        <textarea id="aiBriefText" rows="2" placeholder="Ej: busca asesorias fiscales en Toledo, unas 20, para Automato"></textarea>
+                    </label>
+                    <div class="ai-brief-footer">
+                        <button id="interpretBriefBtn" class="btn btn-ai" type="button">Interpretar con IA</button>
+                        <span id="interpretStatus" class="interpret-status"></span>
+                    </div>
+                </div>
+
+                <!-- Resumen de busqueda — visible tras interpretar -->
+                <div id="searchSummary" class="search-summary hidden-btn"></div>
+
+                <!-- Chips — fuera del form, siempre visibles -->
+                <div class="chip-section">
+                    <span class="chip-section-label">Must have</span>
+                    <div id="mustHaveChips" class="chip-options"></div>
+                </div>
+                <div class="chip-section">
+                    <span class="chip-section-label">Nice to have</span>
+                    <div id="niceToHaveChips" class="chip-options"></div>
+                </div>
+                <div class="chip-section">
+                    <span class="chip-section-label">Tags CRM</span>
+                    <div id="crmTagsChips" class="chip-options"></div>
+                </div>
+
+                <!-- Barra de lanzar — siempre visible -->
+                <div class="composer-footer prospecting-launch-bar">
+                    <label class="checkbox-field">
+                        <input id="prospectingDryRun" type="checkbox" checked>
+                        <span>Solo validacion</span>
+                    </label>
+                    <button id="refreshProspectingBtn" class="btn btn-secondary" type="button">Recargar</button>
+                    <button id="runProspectingBtn" class="btn" type="button">Lanzar prospeccion</button>
+                    <span id="launchErrorMsg" class="launch-error-msg hidden-btn">Sin ciudad — interpreta con IA o rellena los parametros</span>
+                </div>
+
+                <!-- Form: parametros ocultos extraidos por IA + excluir -->
+                <form id="prospectingForm" class="outreach-form">
+                    <div id="prospectingParamsBlock" class="hidden-btn">
+                        <div class="prospecting-grid">
+                            <label class="field compact-stack">
+                                <span>Vertical</span>
+                                <select id="prospectingVertical">
+                                    <option value="asesoria">Asesorias / Gestorias</option>
+                                    <option value="salud">Clinicas / Salud</option>
+                                    <option value="inmobiliaria">Inmobiliarias</option>
+                                    <option value="public_administration">Administracion publica</option>
+                                    <option value="restaurants">Restaurantes</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Marca</span>
+                                <select id="prospectingRepresentedBy">
+                                    <option value="assets">Assets Consultores</option>
+                                    <option value="automato">Automato</option>
+                                    <option value="other">Otra</option>
+                                </select>
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Objetivo</span>
+                                <input id="prospectingTargetDescription" type="text" placeholder="Asesorias fiscales con email directo">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Ciudad</span>
+                                <input id="prospectingCity" type="text" placeholder="Toledo">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Provincia</span>
+                                <input id="prospectingProvince" type="text" placeholder="Toledo">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Region</span>
+                                <input id="prospectingRegion" type="text" placeholder="Castilla-La Mancha">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Resultados</span>
+                                <input id="prospectingDesiredCount" type="number" min="1" max="100" value="20">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Score minimo</span>
+                                <input id="prospectingMinimumScore" type="number" min="0" max="100" value="40">
+                            </label>
+                        </div>
+                    </div>
+                    <label class="field compact-stack">
+                        <span>Excluir</span>
+                        <input id="prospectingExclude" type="text" placeholder="franquicias, directorios, comida rapida">
+                    </label>
+                </form>
+
+            </section>
+
+            <!-- ── DERECHA: interpretacion + resultados (ancho, scrollable) -->
+            <aside class="sales-side-panel">
+
+                <!-- Interpretacion IA arriba -->
+                <section class="rail-card ai-interpretation-panel">
+                    <div class="rail-card-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">IA</p>
+                            <h2>Interpretacion</h2>
+                        </div>
+                    </div>
+                    <div id="aiInterpretationOutput" class="ai-interp-output empty-state">
+                        Interpreta una busqueda para ver el desglose.
+                    </div>
+                </section>
+
+                <!-- Panel de resultados -->
+                <section class="rail-card results-panel">
+                    <div class="outreach-kpis">
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Run</span>
+                            <strong id="prospectingLatestRun">sin ejecutar</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Resultados</span>
+                            <strong id="prospectingResultCount">0</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Descartados</span>
+                            <strong id="prospectingDiscardedCount">0</strong>
+                        </article>
+                    </div>
+
+                    <div class="prospecting-run-bar">
+                        <button id="pushValidProspectsBtn" class="btn" type="button">Previsualizar lote CRM</button>
+                        <button id="confirmCrmPushBtn" class="btn btn-secondary" type="button" disabled>Confirmar envio CRM</button>
+                        <button id="loadDiscardedBtn" class="btn btn-secondary" type="button">Recargar descartados</button>
+                        <button id="resumeProspectingBtn" class="btn btn-secondary" type="button">Reanudar</button>
+                        <span id="crmPushFeedback" class="crm-push-feedback"></span>
+                    </div>
+
+                    <div id="prospectingResultMessage" class="empty-state">
+                        Describe lo que buscas, interpreta con IA y lanza la prospeccion.
+                    </div>
+
+                    <div id="crmPreviewPanel" class="crm-preview-panel hidden-btn"></div>
+
+                    <div class="results-main-stack">
+                        <div class="results-table-shell">
+                            <div class="results-table-head">
+                                <div>
+                                    <p class="eyebrow eyebrow-tight">Leads aceptados</p>
+                                    <h3>Resultados revisables antes de CRM</h3>
+                                </div>
+                            </div>
+                            <div class="prospecting-table-wrap">
+                                <table class="prospecting-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Empresa</th>
+                                            <th>Score</th>
+                                            <th>Contacto</th>
+                                            <th>Revision</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prospectingResultsBody">
+                                        <tr>
+                                            <td colspan="5" class="empty-table">Sin resultados todavia.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="discarded-shell">
+                            <div class="results-table-head">
+                                <div>
+                                    <p class="eyebrow eyebrow-tight">Ruido descartado</p>
+                                    <h3>Descartados</h3>
+                                </div>
+                            </div>
+                            <div id="discardedResultsList" class="discarded-list">
+                                <div class="empty-state">Todavia no hay descartados cargados.</div>
+                            </div>
+                        </div>
+
+                        <details id="prospectingLogsPanel" class="run-logs-panel">
+                            <summary class="run-logs-summary">
+                                <span>Logs del run</span>
+                                <span id="prospectingLogsCount" class="pill">—</span>
+                                <button id="refreshLogsBtn" class="btn btn-small btn-secondary" type="button" onclick="event.preventDefault();loadRunLogs()">Actualizar</button>
+                            </summary>
+                            <div id="prospectingLogsList" class="run-logs-list">
+                                <div class="empty-state">Ejecuta una prospeccion para ver el log.</div>
+                            </div>
+                        </details>
+
+                    </div>
+                </section>
+
+            </aside>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_sales.js?v=20260625l"></script>
+</body>
+</html>

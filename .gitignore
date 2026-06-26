@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs and runtime data
+logs/
+*.log
+exports/
+release/
+tempo-data/
+tmp-operator-*.png
+*.zip
+
+# Local service data and generated observability payloads
+mongodb/data/
+redis/data/
+grafana/data/
+
+# Historical and audit dumps
+AUDIT/
+OLD/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Desktop build outputs
+build/
+dist/
+*.spec
+
+# Node / frontend cache if introduced later
+node_modules/
+
+# Local persistence and mutable runtime state
+data/
+runtime/
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

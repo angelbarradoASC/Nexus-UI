@@ -1,0 +1,3 @@
+-r app/requirements/dev.txt
+-r worker/requirements.txt
+-r desktop/requirements.txt

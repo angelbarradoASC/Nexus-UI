@@ -1,0 +1,49 @@
+{
+  "id": "ssh.diagnostico",
+  "name": "Diagnóstico de servidor",
+  "description": "Conecta por SSH a un servidor y ejecuta comandos de diagnóstico: carga del sistema, memoria, disco, procesos y logs. Devuelve un análisis en lenguaje natural.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 60,
+    "retry": 1
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 1500,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "servidor": {"type": "str", "required": true},
+    "problema": {"type": "str", "required": false, "options": ["cpu", "memoria", "disco", "red", "logs"]}
+  },
+  "outputs": {
+    "analisis": "str",
+    "hostname": "str",
+    "metricas": "dict"
+  },
+  "triggers": [
+    "revisar servidor",
+    "diagnosticar servidor",
+    "analizar servidor",
+    "cómo está el servidor",
+    "problemas en el servidor",
+    "la cpu del servidor",
+    "el disco del servidor",
+    "memoria del servidor",
+    "logs del servidor",
+    "conectar al servidor",
+    "ver el servidor",
+    "qué pasa en el servidor"
+  ],
+  "examples": [
+    "revisa el servidor web-prod-01",
+    "cómo está el db-server-02",
+    "la CPU del servidor api-01 está al 100%",
+    "analiza el servidor 192.168.1.50"
+  ]
+}

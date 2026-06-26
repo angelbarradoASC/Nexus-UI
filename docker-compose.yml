@@ -1,0 +1,100 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: nexus-web
+    ports:
+      - "${APP_PORT:-5010}:8000"
+    environment:
+      PYTHONPATH: /app:/app/products
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+    env_file:
+      - .env
+    networks:
+      - nexus-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: nexus-worker
+    environment:
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+    env_file:
+      - .env
+    networks:
+      - nexus-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  mongodb:
+    image: mongo:5.0
+    container_name: nexus-mongodb
+    restart: always
+    command: mongod --quiet
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-nexus}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-nexus_db}
+    volumes:
+      - ./mongodb/data:/data/db
+      - ./mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - nexus-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: always
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$${REDIS_PASSWORD}" ]; then
+          exec redis-server --requirepass "$${REDIS_PASSWORD}";
+        else
+          exec redis-server;
+        fi
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    volumes:
+      - ./redis/data:/data
+    networks:
+      - nexus-network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  promtail:
+    image: grafana/promtail:3.6.0
+    container_name: nexus-promtail
+    volumes:
+      - ./monitoring/promtail:/etc/promtail
+      - ./logs:/var/log/nexus
+    command: -config.file=/etc/promtail/promtail-config.yml
+    networks:
+      - nexus-network
+    restart: always
+
+networks:
+  nexus-network:
+    driver: bridge

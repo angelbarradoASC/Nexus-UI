@@ -1,0 +1,79 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open-Nexus · Modelos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260603a">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+</head>
+<body>
+    <main class="shell">
+        <header class="shell-topbar">
+            <div class="shell-titlebar">
+                <h1>Modelos</h1>
+            </div>
+            {% include "partials/desktop_nav.html" %}
+        </header>
+
+        <section class="layout layout-models">
+            <section class="center">
+                <section class="card composer-card">
+                    <p class="eyebrow eyebrow-tight">Proveedor remoto</p>
+                    <h2>Conexion</h2>
+                    <form id="providerForm" class="composer provider-form">
+                        <label class="field">
+                            <span>Etiqueta</span>
+                            <input id="providerLabel" type="text" placeholder="Servidor Claude, Groq, OpenRouter..." />
+                        </label>
+                        <label class="field">
+                            <span>Tipo</span>
+                            <select id="providerType">
+                                <option value="openai_compatible">OpenAI compatible</option>
+                            </select>
+                        </label>
+                        <label class="field field-wide">
+                            <span>Base URL</span>
+                            <input id="providerBaseUrl" type="url" placeholder="https://tu-servidor/v1" />
+                        </label>
+                        <label class="field field-wide">
+                            <span>Modelo</span>
+                            <input id="providerModel" type="text" placeholder="claude-sonnet-4, gpt-4o-mini, custom-model..." />
+                        </label>
+                        <label class="field field-wide">
+                            <span>API key</span>
+                            <input id="providerApiKey" type="password" placeholder="Se guarda localmente en Open-Nexus" />
+                        </label>
+                        <label class="toggle-row">
+                            <input id="providerEnabled" type="checkbox" />
+                            <span>Activar proveedor remoto</span>
+                        </label>
+                        <div class="form-actions">
+                            <button type="submit">Guardar y aplicar</button>
+                            <span id="providerStatus" class="status-inline">Cargando configuracion...</span>
+                        </div>
+                    </form>
+                </section>
+            </section>
+
+            <aside class="rail">
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Estado</p>
+                    <h2>Activo</h2>
+                    <div id="providerSummary" class="stack"></div>
+                </section>
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Persistencia</p>
+                    <h2>Rutas</h2>
+                    <div id="providerPaths" class="stack"></div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <script src="/static/js/open_nexus_models.js?v=20260529a"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "vertical": "restaurants",
+  "target_description": "Restaurantes con senales de experiencia premium o eventos en Salamanca",
+  "city": "Salamanca",
+  "province": "Salamanca",
+  "region": "Castilla y Leon",
+  "radius_km": 12,
+  "desired_count": 30,
+  "must_have": ["restaurante activo", "telefono", "contacto usable"],
+  "nice_to_have": ["cenas empresa", "reservas", "carta visible", "eventos", "tripadvisor"],
+  "exclude": ["franquicias", "comida rapida", "bares sin presencia digital"],
+  "crm_tags": ["restaurante", "salamanca", "prospeccion-nexus"],
+  "campaign_type": "hospitality-outreach",
+  "minimum_score": 50,
+  "dry_run": true,
+  "async_mode": false
+}

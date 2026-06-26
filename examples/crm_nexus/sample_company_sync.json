@@ -1,0 +1,27 @@
+{
+  "name": "CBL Logística Madrid",
+  "domain": "cbl-logistica.com",
+  "status": "prospect",
+  "pipeline_stage": "contacted",
+  "organization_type": "private",
+  "contact_name": "Karim Mribti",
+  "contact_role": "Operation & IT Manager",
+  "contact_email": "karim.mribti@cbl-logistica.com",
+  "contact_phone": "",
+  "province": "Toledo",
+  "distance_km": 42,
+  "lead_source": "cold",
+  "estimated_value": 12000,
+  "notes": "Prospecto creado desde Nexus para outreach B2B.",
+  "last_contact": "2026-06-03",
+  "next_followup": "2026-06-10",
+  "notes_payload": [
+    {
+      "note_type": "email",
+      "note_date": "2026-06-03",
+      "next_followup": "2026-06-10",
+      "is_done": false,
+      "content": "Primer contacto comercial preparado desde Nexus."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# =============================================================
+# Nexus-UI Desktop — dependencias adicionales al app/requirements.txt
+# =============================================================
+
+# Ventana nativa (WebView2 de Windows, no bundlea Chromium)
+pywebview==5.3.2
+
+# System tray
+pystray==0.19.5
+
+# Procesamiento de imagenes (icono del tray)
+Pillow==10.3.0
+
+# Metricas del sistema local (CPU, RAM, disco, red, procesos)
+psutil==5.9.8
+
+# Windows API (COM objects: Outlook, Excel, Teams; Registry; Win32)
+# Solo Windows — se instala solo si sys_platform == win32
+pywin32==306
+
+# WMI — hardware info avanzado (modelo CPU, GPU, BIOS, etc.)
+# Solo Windows
+wmi==1.5.1
+
+# Portapapeles
+pyperclip==1.8.2
+
+# Shell de consola enriquecida
+rich==13.7.1
+
+# Automatizacion GUI (nivel 1+ permisos)
+# pyautogui==0.9.54   # descomentar cuando se implemente
+
+# Monitoreo de teclado/raton (nivel 1+ permisos)
+# pynput==1.7.6       # descomentar cuando se implemente
+
+# Empaquetado desarrollo/test
+pyinstaller==6.3.0
+
+# Credenciales seguras del proveedor desktop (Windows Credential Manager via keyring)
+keyring==25.2.1
+
+# Empaquetado produccion (obfuscacion)
+# nuitka==2.1.0       # instalar aparte, requiere compilador C

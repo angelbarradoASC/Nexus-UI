@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus-UI · JAINA</title>
+
+    <!-- Prevent dark mode flash -->
+    <script>
+        (function() {
+            const theme = localStorage.getItem('nexus-theme');
+            if (theme === 'dark') {
+                document.documentElement.classList.add('theme-dark');
+            }
+        })();
+    </script>
+
+    <!-- External fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- Prism for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+
+    <!-- Modular CSS -->
+    <link rel="stylesheet" href="/static/css/variables.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    <link rel="stylesheet" href="/static/css/sidebar.css">
+    <link rel="stylesheet" href="/static/css/chat.css">
+    <link rel="stylesheet" href="/static/css/canvas.css">
+    <link rel="stylesheet" href="/static/css/alerts.css">
+    <link rel="stylesheet" href="/static/css/animations.css">
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- Sidebar - History -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-section">
+                    <img src="/static/jaina.jpg" alt="JAINA" class="logo-img" onerror="this.style.display='none'">
+                    <div>
+                        <div class="logo-text">NEXUS</div>
+                        <div class="logo-subtitle">Part Of JAINA</div>
+                    </div>
+                </div>
+                <button class="new-chat-btn ripple" onclick="newChat()">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+
+            <!-- Search -->
+            <div class="history-search">
+                <input type="text" class="history-search-input" placeholder="Buscar conversaciones...">
+            </div>
+
+            <!-- Controls -->
+            <div class="history-controls">
+                <select class="history-sort">
+                    <option value="recent">Recientes</option>
+                    <option value="alphabetical">A-Z</option>
+                    <option value="favorites">Favoritos</option>
+                </select>
+                <div class="view-toggle">
+                    <button class="view-btn active" data-view="list" title="Vista lista">
+                        <i class="fas fa-list"></i>
+                    </button>
+                    <button class="view-btn" data-view="grid" title="Vista grid">
+                        <i class="fas fa-th"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Folders -->
+            <div class="history-folders">
+                <div class="folder-tag active" data-folder="all">
+                    <i class="fas fa-list"></i> Todos
+                </div>
+                <div class="folder-tag" data-folder="work">
+                    <i class="fas fa-briefcase"></i> Trabajo
+                </div>
+                <div class="folder-tag" data-folder="personal">
+                    <i class="fas fa-user"></i> Personal
+                </div>
+                <div class="folder-tag" data-folder="archived">
+                    <i class="fas fa-archive"></i> Archivados
+                </div>
+            </div>
+
+            <!-- History container -->
+            <div class="history-container" id="historyContainer"></div>
+
+            <!-- Footer -->
+            <div class="sidebar-footer">
+                <div class="user-section">
+                    <div class="user-avatar">{{ username[0].upper() }}</div>
+                    <div>
+                        <div id="username">{{ username }}</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">Conectado</div>
+                    </div>
+                </div>
+                <button class="logout-btn ripple" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> Cerrar Sesion
+                </button>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <button class="mobile-menu-btn" onclick="toggleSidebar()" style="display: none;">
+                <i class="fas fa-bars"></i>
+            </button>
+
+            <div class="toolbar-section">
+                <label style="font-size: 0.9rem; color: var(--text-secondary);">Agente:</label>
+                <select class="toolbar-select" id="agentSelect">
+                    <option value="general">Asistente General</option>
+                    <option value="ssh">Infraestructura / SSH</option>
+                    <option value="jira">Jira / Tickets</option>
+                    <option value="web">Búsqueda Web</option>
+                </select>
+            </div>
+
+            <div class="toolbar-section">
+                <label style="font-size: 0.9rem; color: var(--text-secondary);">Herramientas:</label>
+                <button class="toolbar-toggle active ripple" id="webToggle" onclick="toggleTool('web')">
+                    <i class="fas fa-search"></i> Web
+                </button>
+                <button class="toolbar-toggle ripple" id="canvasToggle" onclick="toggleTool('canvas')">
+                    <i class="fas fa-paint-brush"></i> Canvas
+                </button>
+                <button class="toolbar-toggle ripple" id="filesToggle" onclick="toggleTool('files')">
+                    <i class="fas fa-file"></i> Archivos
+                </button>
+            </div>
+
+            <div class="toolbar-section">
+                <!-- Theme toggle -->
+                <button class="toolbar-btn ripple" id="themeToggle" title="Toggle Dark Mode">
+                    <i class="fas fa-sun"></i>
+                </button>
+                
+                <!-- Alerts toggle -->
+                <button class="toolbar-btn ripple" id="alertsToggle" title="Ver Alertas">
+                    <i class="fas fa-bell"></i>
+                    <span class="alerts-badge" id="alertsBadge" style="display: none;">0</span>
+                </button>
+            </div>
+
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span>Conectado</span>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="messages-container" id="messagesContainer">
+                <div class="welcome-screen fade-in" id="welcomeScreen">
+                    <h2 class="welcome-title">Bienvenido a Nexus-UI</h2>
+                    <p class="welcome-subtitle">Part Of JAINA · listo para trabajar</p>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <form class="input-container" id="chatForm">
+                    <div class="input-wrapper">
+                        <textarea
+                            class="message-input"
+                            id="messageInput"
+                            placeholder="Escribe tu mensaje... (Ctrl+Enter para enviar)"
+                            rows="1"
+                        ></textarea>
+                        <div class="input-hint">Ctrl+Enter para enviar</div>
+                    </div>
+                    <button type="submit" class="send-btn ripple" id="sendBtn">
+                        <i class="fas fa-paper-plane"></i>
+                        <span>Enviar</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Canvas Panel -->
+        <div class="canvas-panel" id="canvasPanel">
+            <div class="canvas-header">
+                <div class="canvas-title">
+                    <i class="fas fa-paint-brush"></i>
+                    Canvas
+                    <span class="canvas-badge" id="canvasType">Codigo</span>
+                </div>
+                <div class="canvas-actions">
+                    <button class="canvas-btn ripple" onclick="copyCanvasContent()">
+                        <i class="fas fa-copy"></i> Copiar
+                    </button>
+                    <button class="canvas-btn ripple" onclick="downloadCanvasContent()">
+                        <i class="fas fa-download"></i> Descargar
+                    </button>
+                    <button class="canvas-btn save ripple" onclick="saveCanvasEdits()">
+                        <i class="fas fa-save"></i> Guardar Cambios
+                    </button>
+                </div>
+            </div>
+
+            <div class="canvas-tabs">
+                <div class="canvas-tab active" data-tab="original" onclick="switchCanvasTab('original')">
+                    <i class="fas fa-file-alt"></i> Original
+                </div>
+                <div class="canvas-tab" data-tab="edited" onclick="switchCanvasTab('edited')">
+                    <i class="fas fa-edit"></i> Editado
+                </div>
+                <div class="canvas-tab" data-tab="preview" onclick="switchCanvasTab('preview')">
+                    <i class="fas fa-eye"></i> Vista Previa
+                </div>
+            </div>
+
+            <div class="canvas-content">
+                <textarea class="canvas-editor" id="canvasEditor" placeholder="El contenido aparecera aqui..."></textarea>
+                <div class="canvas-preview hidden" id="canvasPreview"></div>
+            </div>
+        </div>
+
+        <!-- Alerts Panel -->
+        <div class="alerts-panel" id="alertsPanel">
+            <div class="alerts-header">
+                <div class="alerts-title">
+                    <i class="fas fa-bell"></i>
+                    Alertas Prometheus
+                </div>
+                <div class="alerts-actions">
+                    <button class="alerts-refresh-btn ripple" title="Refrescar">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="alerts-close-btn ripple" title="Cerrar">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="alerts-filters">
+                <div class="filter-row">
+                    <button class="filter-btn active" data-filter="all">Todas</button>
+                    <button class="filter-btn" data-filter="firing">Activas</button>
+                    <button class="filter-btn" data-filter="resolved">Resueltas</button>
+                </div>
+                <select class="severity-filter" id="alertSeverityFilter">
+                    <option value="all">Todas las severidades</option>
+                    <option value="critical">Criticas</option>
+                    <option value="warning">Advertencias</option>
+                    <option value="info">Informativas</option>
+                </select>
+            </div>
+
+            <div class="alerts-list" id="alertsList">
+                <!-- Alerts will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- Modular Application (ES6 Module) -->
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

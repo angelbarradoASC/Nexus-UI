@@ -1,0 +1,36 @@
+{
+  "id": "windows.prediagnostico",
+  "name": "Pre diagnostico Windows",
+  "description": "Prepara una linea de investigacion para incidencias sobre servidores Windows y servicios Microsoft.",
+  "execution": {
+    "where": "assistant",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "inputs": {
+    "target": {"type": "str", "required": false},
+    "alert_hint": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "analysis": "str",
+    "plan": "dict"
+  },
+  "triggers": [
+    "alarma windows",
+    "windows server",
+    "winrm",
+    "powershell",
+    "iis",
+    "event viewer"
+  ],
+  "examples": [
+    "tengo una alarma en el windows app-win-02",
+    "revisa el iis del windows server pagos-01"
+  ]
+}

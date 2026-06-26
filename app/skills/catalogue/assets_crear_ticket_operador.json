@@ -1,0 +1,48 @@
+{
+  "id": "assets.crear_ticket_operador",
+  "name": "Crear ticket de operador en Assets",
+  "description": "Procesa lo que dice el operador, extrae la incidencia, la enriquece y crea un ticket real en Assets Consultores.",
+  "execution": {
+    "where": "server",
+    "timeout": 30,
+    "retry": 1
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L0",
+    "preferred_level": "L1",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 700,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "message": {"type": "str", "required": true},
+    "source": {"type": "str", "required": false, "default": "codex"},
+    "context": {"type": "dict", "required": false}
+  },
+  "outputs": {
+    "task_id": "int",
+    "title": "str",
+    "priority": "str",
+    "ticket_type": "str"
+  },
+  "triggers": [
+    "crear ticket operador",
+    "abre ticket de operador",
+    "registra incidencia operativa",
+    "abre una incidencia en assets",
+    "crea ticket por alarma",
+    "escalalo a ticket",
+    "abre ticket por grafana",
+    "abre ticket por prometheus",
+    "abre ticket por alertmanager",
+    "crea ticket con esto"
+  ],
+  "examples": [
+    "abre un ticket porque grafana lleva caido diez minutos y afecta a operador",
+    "crea una incidencia en assets: no responde el servidor de ia 192.168.1.150",
+    "escalalo a ticket, alertmanager esta disparando una alarma critica de disco"
+  ]
+}

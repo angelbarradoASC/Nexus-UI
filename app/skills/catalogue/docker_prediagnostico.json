@@ -1,0 +1,47 @@
+{
+  "id": "docker.prediagnostico",
+  "name": "Pre diagnostico de Docker",
+  "description": "Inspecciona contenedores Docker en local, recoge estado, reinicios, healthcheck, logs recientes y estadisticas basicas para devolver un pre diagnostico.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 45,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "cost": {
+    "tokens_estimate": 1800,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "container": {"type": "str", "required": false},
+    "alert_hint": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "analysis": "str",
+    "container_state": "dict",
+    "evidence": "dict"
+  },
+  "triggers": [
+    "alarma docker",
+    "alerta docker",
+    "contenedor caido",
+    "docker falla",
+    "revisa docker",
+    "diagnostica docker",
+    "analiza el contenedor",
+    "mira el contenedor",
+    "problema en docker",
+    "problema en el contenedor"
+  ],
+  "examples": [
+    "tengo una alarma de docker en api-worker",
+    "revisa el contenedor redis-prod",
+    "diagnostica docker porque nginx se ha caido",
+    "hay una alerta docker en el contenedor payment-api"
+  ]
+}

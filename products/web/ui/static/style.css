@@ -1,0 +1,406 @@
+/* Estilos globales y layout principal */
+body {
+    font-family: 'Inter', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column; /* Header, Content, Input apilados verticalmente */
+    height: 100vh;
+    overflow: hidden; /* Evita el scroll global del body */
+    background-color: #f0f2f5; /* Fondo claro para la app */
+    color: #333;
+    box-sizing: border-box;
+}
+
+/* Cabecera Principal */
+.main-header {
+    background-color: #4A90E2;
+    color: white;
+    padding: 15px 20px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    position: relative;
+    flex-shrink: 0; /* No se encoge */
+    z-index: 100; /* Asegura que estÃ© por encima de otros elementos */
+}
+
+.main-header .main-title {
+    margin: 0;
+    font-size: 2.2em;
+    font-weight: 700;
+}
+
+.main-header .sub-title {
+    margin: 0;
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #ADD8E6;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.options-bar {
+    width: 100%;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    font-size: 0.9em;
+}
+
+.option-button {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-size: 0.85em;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+.option-button:hover { background-color: rgba(255, 255, 255, 0.3); }
+.logout-button { background-color: #e74c3c; }
+.logout-button:hover { background-color: #c0392b; }
+
+.jaina-logo {
+    position: absolute;
+    width: 80px; 
+    height: 80px; 
+    object-fit: contain;
+    z-index: 10;
+    border-radius: 8px;
+    padding: 5px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+.jaina-logo.top-left { top: 4.5px; left: 10px; }
+.jaina-logo.top-right { top: 4.5px; right: 10px; }
+
+/* Contenedor principal del chat y historial (ocupa el espacio restante) */
+.content-area {
+    flex: 1; /* Ocupa todo el espacio vertical disponible */
+    display: grid; /* CAMBIO: Usar grid para el layout de dos columnas */
+    grid-template-columns: 250px 1fr; /* CAMBIO: Sidebar fijo de 250px, chat ocupa el resto */
+    overflow: hidden; /* Importante para que las columnas internas gestionen su propio scroll */
+    position: relative; /* Para el indicador de carga */
+    box-sizing: border-box;
+}
+
+/* Columna Izquierda: Historial de Chat (siempre visible) */
+.left-column {
+    background-color: #e9eff6;
+    border-right: 1px solid #e0e0e0;
+    width: 250px; /* Ancho fijo */
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto; /* Permitir scroll en el historial si hay muchos elementos */
+}
+
+.history-header {
+    background-color: #3A7BCD;
+    color: white;
+    padding: 15px;
+    text-align: center;
+    font-size: 1.1em;
+    font-weight: 600;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-bottom: 10px;
+    flex-shrink: 0;
+}
+
+.new-chat-button {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-size: 0.85em;
+    font-weight: 600;
+    margin-top: 10px;
+    width: calc(100% - 30px);
+}
+.new-chat-button:hover { background-color: #218838; }
+
+.chat-history {
+    flex-grow: 1;
+    padding: 15px;
+    overflow-y: auto;
+}
+
+.history-item {
+    background-color: #f6f8fa;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.history-item:hover { background-color: #e0e6ed; }
+.history-item.active {
+    background-color: #dbe9f6; /* Color para el elemento activo */
+    border: 1px solid #4A90E2;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+
+.history-date {
+    font-size: 0.8em;
+    color: #666;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.history-query {
+    font-size: 0.9em;
+    margin: 0;
+    color: #444;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.history-empty, .history-error {
+    text-align: center;
+    color: #777;
+    font-style: italic;
+    padding: 20px;
+}
+.history-error { color: #e74c3c; }
+
+/* Columna Derecha: Ãrea de Mensajes y Envio de Chat */
+.right-column {
+    flex: 1; /* Ocupa el espacio restante horizontalmente */
+    display: flex;
+    flex-direction: column; /* Apila mensajes y input verticalmente */
+    height: 100%; /* Ocupa el 100% de la altura de content-area */
+    position: relative; /* Para el indicador de carga */
+    box-sizing: border-box;
+    overflow-y: auto; /* Permitir scroll en el historial si hay muchos elementos */
+    padding: 0; /* Sin padding para que ocupe todo el espacio */
+
+}
+
+/* Contenedor de mensajes con scroll */
+#response-container { 
+    flex: 1; /* Ocupa el espacio disponible */
+    overflow-y: auto; /* Habilita el scroll vertical */
+    padding: 10px; /* Padding para los mensajes */
+    box-sizing: border-box;
+    min-height: 0; /* Permite que flexbox lo encoja si es necesario */
+    display: flex; /* Para que los mensajes se apilen */
+    flex-direction: column;
+    gap: 15px; /* Espacio entre mensajes */
+    /* CAMBIO CLAVE: AÃ±adir padding-bottom para dejar espacio al loading indicator */
+    padding-bottom: 70px; /* Suficiente espacio para el indicador de carga */
+}
+
+#response { 
+    white-space: pre-wrap; 
+    word-wrap: break-word; 
+}
+
+.message {
+    max-width: 85%;
+    padding: 12px 18px;
+    border-radius: 20px;
+    line-height: 1.5;
+    word-wrap: break-word;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    box-sizing: border-box;
+}
+
+.user-message {
+    align-self: flex-end;
+    background-color: #DCF8C6;
+    border-bottom-right-radius: 5px;
+}
+
+.bot-message {
+    align-self: flex-start;
+    background-color: #E6E6EA;
+    border-bottom-left-radius: 5px;
+}
+
+.message pre {
+    background-color: #eee;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px;
+    overflow-x: auto; /* Scroll horizontal para bloques de codigo */
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    word-break: break-all;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.message strong { font-weight: 700; color: #222; }
+.message em { font-style: italic; }
+
+/* Estilos para el bloque de "pensamiento" expandible. */
+.thinking-details {
+    margin-top: 10px;
+    border-top: 1px solid #dcdcdc;
+    padding-top: 8px;
+}
+.thinking-summary {
+    cursor: pointer;
+    font-size: 0.8em;
+    color: #555;
+    font-style: italic;
+    outline: none;
+}
+.thinking-content {
+    margin-top: 5px;
+    font-size: 0.85em;
+    background-color: #f7f7f7;
+    border-radius: 6px;
+    padding: 5px 10px;
+}
+.thinking-content pre {
+    margin: 0;
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* Contenedor de entrada de texto */
+#input-container { 
+    display: flex;
+    padding: 15px 20px;
+    border-top: 1px solid #e0e0e0;
+    background-color: #f9f9f9;
+    align-items: flex-end; 
+    box-sizing: border-box;
+    flex-shrink: 0; 
+    flex-grow: 0;
+}
+
+#question { /* Selector corregido de input[type="text"] a textarea */
+    flex-grow: 1;
+    padding: 12px 15px;
+    border: 1px solid #ccc;
+    border-radius: 25px;
+    font-size: 1em;
+    outline: none;
+    transition: border-color 0.3s ease;
+    margin-right: 10px;
+    resize: none; 
+    min-height: 24px;
+    max-height: 120px; 
+    overflow-y: auto; 
+}
+#question:focus { border-color: #4A90E2; }
+
+#input-container button { /* Selector mÃ¡s especÃ­fico para el botÃ³n de enviar */
+    background-color: #4A90E2;
+    color: white;
+    border: none;
+    padding: 12px 25px;
+    border-radius: 25px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-weight: 600;
+    align-self: flex-end; 
+    margin-bottom: 2px; 
+}
+#input-container button:hover { background-color: #3A7BCD; }
+
+.send-tip {
+    font-size: 0.8em;
+    color: #777;
+    margin-left: 10px;
+    align-self: flex-end;
+    padding-bottom: 5px;
+}
+
+.loading-indicator {
+    /* CAMBIO CLAVE: Posicionamiento relativo y margen */
+    position: relative; /* Cambiado de absolute a relative */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    background-color: rgba(255, 255, 255, 0.8); /* Fondo semi-transparente */
+    border-top: 1px solid #e0e0e0;
+    /* Eliminadas las propiedades bottom, left, right */
+}
+
+.loading-indicator span {
+    width: 8px;
+    height: 8px;
+    margin: 0 4px;
+    background-color: #4A90E2;
+    border-radius: 50%;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+.loading-indicator span:nth-child(1) { animation-delay: -0.32s; }
+.loading-indicator span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+.hidden { display: none; }
+
+/* Media Queries para responsividad */
+@media (max-width: 768px) {
+    .app-container {
+        grid-template-rows: auto 1fr auto; 
+    }
+    .content-area {
+        grid-template-columns: 1fr; /* En mÃ³vil, la barra lateral ocupa todo el ancho */
+    }
+    .left-column {
+        position: relative; /* Vuelve a ser parte del flujo normal */
+        width: 100%;
+        height: 200px; /* Altura fija para el historial en mÃ³vil */
+        left: 0; /* Siempre visible */
+        border-right: none;
+        border-bottom: 1px solid #e0e0e0;
+        overflow-y: auto; /* Ensure scroll on mobile history */
+    }
+    .right-column {
+        flex: 1; /* Ocupa el resto del espacio */
+    }
+    #input-container {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    #question { /* Selector corregido */
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
+    #input-container button { /* Selector corregido */
+        width: calc(50% - 5px);
+        margin-bottom: 0;
+    }
+    .send-tip {
+        width: calc(50% - 5px);
+        text-align: center;
+        margin-left: 0;
+        padding-bottom: 0;
+    }
+}

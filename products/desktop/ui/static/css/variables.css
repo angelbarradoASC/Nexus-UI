@@ -1,0 +1,51 @@
+/* ==============================================================================
+   NEXUS Platform - Variables CSS (Modern Design)
+   Inspirado en ChatGPT/Claude con mejor contraste
+   ============================================================================== */
+
+:root {
+    /* Backgrounds - Más claros y contrastados */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f7f7f8;
+    --bg-tertiary: #ececf1;
+    --bg-hover: #e8e8ed;
+    
+    /* Sidebar específico */
+    --sidebar-bg: #202123;
+    --sidebar-hover: #2a2b32;
+    --sidebar-active: #343541;
+    
+    /* Borders */
+    --border-primary: #d9d9e3;
+    --border-secondary: #ececf1;
+    --border-dark: #4d4d4f;
+    
+    /* Text */
+    --text-primary: #2e2e2e;
+    --text-secondary: #6e6e80;
+    --text-muted: #8e8ea0;
+    --text-on-dark: #ececec;
+    --text-on-dark-secondary: #b4b4b4;
+    
+    /* Accents - Más vibrantes */
+    --accent-blue: #10a37f;
+    --accent-blue-hover: #0e8c6f;
+    --accent-green: #19c37d;
+    --accent-orange: #ff9500;
+    --accent-red: #ef4444;
+    --accent-purple: #8b5cf6;
+    
+    /* Transitions */
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.25s ease;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+    
+    /* Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+}

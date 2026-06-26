@@ -1,0 +1,46 @@
+{
+  "id": "fichaje.entrada",
+  "name": "Fichar entrada",
+  "description": "Registra la llegada al trabajo en el sistema de fichajes de la empresa. Se activa cuando el usuario indica que ha llegado, que empieza la jornada o similares.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 30,
+    "retry": 2
+  },
+  "llm": {
+    "required": false,
+    "min_level": "L0",
+    "preferred_level": "L0",
+    "speed_level": "L0"
+  },
+  "cost": {
+    "tokens_estimate": 80,
+    "cache_ttl": 0
+  },
+  "inputs": {},
+  "outputs": {
+    "timestamp": "str",
+    "confirmacion": "str"
+  },
+  "triggers": [
+    "ya he llegado",
+    "ya llegué",
+    "he llegado al trabajo",
+    "buenos días empiezo",
+    "entro al trabajo",
+    "fichar entrada",
+    "ficho entrada",
+    "marcar entrada",
+    "inicio jornada",
+    "empiezo a trabajar",
+    "acabo de llegar",
+    "estoy en la oficina",
+    "ya estoy aquí"
+  ],
+  "examples": [
+    "ya he llegado",
+    "buenos días, empiezo la jornada",
+    "acabo de llegar a la oficina",
+    "ficha mi entrada por favor"
+  ]
+}

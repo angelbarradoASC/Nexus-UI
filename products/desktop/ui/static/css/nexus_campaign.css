@@ -1,0 +1,283 @@
+/* nexus_campaign.css — campaña diaria de prospección */
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.campaign-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    gap: 1.25rem;
+    padding: 1.25rem;
+    align-items: start;
+}
+
+@media (max-width: 900px) {
+    .campaign-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── Cabecera de panel ────────────────────────────────────────────────────── */
+.camp-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.camp-header h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+/* ── Badge de estado ─────────────────────────────────────────────────────── */
+.camp-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.camp-badge--running  { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.camp-badge--stopped  { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
+.camp-badge--unknown  { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25); }
+.camp-badge--enabled  { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.camp-badge--disabled { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+
+/* ── Meta grid ───────────────────────────────────────────────────────────── */
+.camp-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.camp-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+}
+
+.camp-meta-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted, #64748b);
+}
+
+.camp-meta-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text, #f1f5f9);
+}
+
+/* ── Informe del último ciclo ─────────────────────────────────────────────── */
+.camp-report {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    min-height: 80px;
+    color: var(--text, #f1f5f9);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-bottom: 1.25rem;
+}
+
+.camp-report--empty {
+    color: var(--muted, #64748b);
+    font-style: italic;
+}
+
+.camp-report--ok     { border-color: rgba(74, 222, 128, 0.25); }
+.camp-report--error  { border-color: rgba(248, 113, 113, 0.3); }
+
+/* ── Botón trigger ───────────────────────────────────────────────────────── */
+.camp-trigger-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.camp-trigger-status {
+    font-size: 0.78rem;
+    color: var(--muted, #64748b);
+}
+
+/* ── Botones ─────────────────────────────────────────────────────────────── */
+.camp-btn {
+    padding: 0.5rem 1.1rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.camp-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.camp-btn--primary {
+    background: var(--accent, #6366f1);
+    color: #fff;
+}
+
+.camp-btn--primary:not(:disabled):hover {
+    opacity: 0.85;
+}
+
+/* ── Toggle ──────────────────────────────────────────────────────────────── */
+.camp-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.camp-toggle input[type="checkbox"] {
+    display: none;
+}
+
+.camp-toggle-track {
+    position: relative;
+    width: 34px;
+    height: 18px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 9px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.camp-toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.camp-toggle input:checked + .camp-toggle-track {
+    background: var(--accent, #6366f1);
+}
+
+.camp-toggle input:checked + .camp-toggle-track::after {
+    transform: translateX(16px);
+}
+
+.camp-toggle-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 56px;
+}
+
+/* ── Formulario ──────────────────────────────────────────────────────────── */
+.camp-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.camp-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.camp-form-row--half {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    flex-direction: unset;
+}
+
+.camp-form-row label {
+    font-size: 0.7rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted, #64748b);
+}
+
+.camp-form-row input[type="text"],
+.camp-form-row input[type="number"],
+.camp-form-row textarea {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: var(--text, #f1f5f9);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    padding: 0.5rem 0.75rem;
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.camp-form-row input:focus,
+.camp-form-row textarea:focus {
+    outline: none;
+    border-color: var(--accent, #6366f1);
+}
+
+.camp-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.25rem;
+}
+
+.camp-save-status {
+    font-size: 0.78rem;
+    color: var(--muted, #64748b);
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+.camp-toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: rgba(30,40,60,0.97);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 0.65rem 1.1rem;
+    font-size: 0.8rem;
+    color: var(--text, #f1f5f9);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 999;
+    max-width: 360px;
+}
+
+.camp-toast.camp-toast--visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+html {
+    zoom: 0.75;
+}

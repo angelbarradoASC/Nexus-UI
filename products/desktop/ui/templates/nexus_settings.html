@@ -1,0 +1,268 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Configuracion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
+    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260615a">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+</head>
+<body>
+    <main class="shell">
+        <header class="shell-topbar">
+            <div class="shell-titlebar">
+                <h1>Configuracion</h1>
+            </div>
+            {% include "partials/desktop_nav.html" %}
+        </header>
+
+        <section class="settings-layout">
+            <aside class="card settings-sidebar">
+                <div>
+                    <p class="eyebrow eyebrow-tight">Desktop</p>
+                    <h2>Ajustes</h2>
+                </div>
+                <div class="settings-nav" id="settingsNav">
+                    <button type="button" class="settings-nav-btn active" data-section="general">General</button>
+                    <button type="button" class="settings-nav-btn" data-section="prompting">Prompting</button>
+                    <button type="button" class="settings-nav-btn" data-section="modelos">Modelos</button>
+                    <button type="button" class="settings-nav-btn" data-section="operator">Operator</button>
+                </div>
+                <div class="settings-sidebar-note">
+                    <p>Todo lo de Nexus Desktop se gobierna desde aqui. `Sales` queda fuera para no mezclar prospeccion con operacion.</p>
+                </div>
+            </aside>
+
+            <section class="settings-content">
+                <section class="card settings-panel is-active" data-panel="general">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Base local</p>
+                            <h2>General</h2>
+                        </div>
+                        <span id="generalContextBadge" class="info-badge">desktop</span>
+                    </div>
+                    <div id="generalPathGrid" class="settings-grid">
+                        <div class="status-skeleton">Cargando estructura local...</div>
+                    </div>
+                    <div class="settings-note-block">
+                        <strong>Regla vigente</strong>
+                        <p>Nexus significa desktop. Este panel es la superficie canonica para runtime local, prompts, modelos remotos e integraciones de Operator.</p>
+                    </div>
+                </section>
+
+                <section class="card settings-panel" data-panel="prompting">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Edicion viva</p>
+                            <h2>Prompting</h2>
+                        </div>
+                        <span id="promptSaveStatus" class="info-badge info-badge-muted">Sin cambios</span>
+                    </div>
+                    <div class="settings-note-block settings-note-inline">
+                        <strong>Sales ya usa estos prompts</strong>
+                        <p>La prospeccion autonoma de `Sales` se gobierna desde aqui: brief guardian, brief refiner, source strategist, query architect, search auditor, candidate qualifier y crm packager, ademas de interpretacion y clasificacion.</p>
+                    </div>
+                    <div class="prompt-settings-layout">
+                        <aside class="prompt-settings-sidebar">
+                            <div id="promptGroupList" class="prompt-group-list">
+                                <div class="empty-state-sm">Cargando prompts...</div>
+                            </div>
+                        </aside>
+                        <section class="prompt-settings-editor">
+                            <div class="prompt-editor-head">
+                                <div>
+                                    <p id="promptGroupLabel" class="eyebrow eyebrow-tight">Grupo</p>
+                                    <h3 id="promptTitle">Selecciona un prompt</h3>
+                                </div>
+                                <div class="editor-meta">
+                                    <span id="promptOverrideBadge" class="mini-pill">default</span>
+                                    <code id="promptKeyLabel">prompt.key</code>
+                                </div>
+                            </div>
+                            <div class="prompt-panels">
+                                <section class="prompt-editor-panel">
+                                    <div class="prompt-panel-head">
+                                        <h4>Actual</h4>
+                                        <span class="panel-tip">Se aplica al instante.</span>
+                                    </div>
+                                    <textarea id="promptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                                </section>
+                                <section class="prompt-editor-panel prompt-editor-panel-muted">
+                                    <div class="prompt-panel-head">
+                                        <h4>Base</h4>
+                                        <span class="panel-tip">Referencia para comparar o resetear.</span>
+                                    </div>
+                                    <pre id="promptDefault" class="prompt-preview"></pre>
+                                </section>
+                            </div>
+                            <div class="form-actions">
+                                <button id="savePromptBtn" type="button">Guardar prompt</button>
+                                <button id="resetPromptBtn" type="button">Resetear a default</button>
+                            </div>
+                        </section>
+                    </div>
+                </section>
+
+                <section class="card settings-panel" data-panel="modelos">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Proveedor remoto</p>
+                            <h2>Modelos</h2>
+                        </div>
+                        <span id="providerStatus" class="info-badge info-badge-muted">Cargando configuracion...</span>
+                    </div>
+                    <div class="settings-two-column">
+                        <form id="providerForm" class="provider-form">
+                            <label class="field">
+                                <span>Etiqueta</span>
+                                <input id="providerLabel" type="text" placeholder="Servidor Claude, OpenRouter, NVIDIA..." />
+                            </label>
+                            <label class="field">
+                                <span>Tipo</span>
+                                <select id="providerType">
+                                    <option value="openai_compatible">OpenAI compatible</option>
+                                </select>
+                            </label>
+                            <label class="field field-wide">
+                                <span>Base URL</span>
+                                <input id="providerBaseUrl" type="url" placeholder="http://192.168.1.150:1234/v1" />
+                            </label>
+                            <label class="field field-wide">
+                                <span>Modelo</span>
+                                <input id="providerModel" type="text" placeholder="meta/llama, claude-sonnet, openrouter/free..." />
+                            </label>
+                            <label class="field field-wide">
+                                <span>API key</span>
+                                <input id="providerApiKey" type="password" placeholder="Se guarda localmente para el desktop" />
+                            </label>
+                            <label class="toggle-row">
+                                <input id="providerEnabled" type="checkbox" />
+                                <span>Activar proveedor remoto como runtime principal</span>
+                            </label>
+                            <div class="form-actions">
+                                <button type="submit">Guardar y aplicar</button>
+                            </div>
+                        </form>
+                        <aside class="settings-side-stack">
+                            <section class="settings-side-card">
+                                <p class="eyebrow eyebrow-tight">Estado</p>
+                                <h3>Activo</h3>
+                                <div id="providerSummary" class="stack"></div>
+                            </section>
+                            <section class="settings-side-card">
+                                <p class="eyebrow eyebrow-tight">Persistencia</p>
+                                <h3>Rutas</h3>
+                                <div id="providerPaths" class="stack"></div>
+                            </section>
+                        </aside>
+                    </div>
+                </section>
+
+                <section class="card settings-panel" data-panel="operator">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Observabilidad</p>
+                            <h2>Operator</h2>
+                        </div>
+                        <span id="operatorStatus" class="info-badge info-badge-muted">Integraciones desktop</span>
+                    </div>
+                    <div class="settings-two-column">
+                        <section class="operator-list-shell">
+                            <div class="operator-toolbar">
+                                <div>
+                                    <p class="eyebrow eyebrow-tight">Integraciones</p>
+                                    <h3>Fuentes activas</h3>
+                                </div>
+                                <button id="newIntegrationBtn" type="button">Nueva integracion</button>
+                            </div>
+                            <div id="integrationGroups" class="integration-groups">
+                                <div class="empty-state-sm">Cargando integraciones...</div>
+                            </div>
+                        </section>
+
+                        <form id="integrationForm" class="operator-form">
+                            <input id="integrationId" type="hidden" />
+                            <div class="operator-form-head">
+                                <div>
+                                    <p class="eyebrow eyebrow-tight">Edicion</p>
+                                    <h3 id="integrationFormTitle">Nueva integracion</h3>
+                                </div>
+                            </div>
+                            <div class="provider-form">
+                                <label class="field">
+                                    <span>Tipo</span>
+                                    <select id="integrationKind">
+                                        <option value="prometheus">Prometheus</option>
+                                        <option value="grafana">Grafana</option>
+                                        <option value="alertmanager">Alertmanager</option>
+                                    </select>
+                                </label>
+                                <label class="field">
+                                    <span>Nombre</span>
+                                    <input id="integrationName" type="text" placeholder="Prometheus principal" />
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Base URL</span>
+                                    <input id="integrationBaseUrl" type="url" placeholder="http://192.168.1.150:9090" />
+                                </label>
+                                <label class="field">
+                                    <span>Auth</span>
+                                    <select id="integrationAuthType">
+                                        <option value="none">Sin autenticacion</option>
+                                        <option value="basic">Basic</option>
+                                        <option value="bearer">Bearer</option>
+                                        <option value="header">Header custom</option>
+                                    </select>
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="integrationUsername" type="text" placeholder="solo si aplica" />
+                                </label>
+                                <label class="field">
+                                    <span>Secret ref</span>
+                                    <input id="integrationSecretRef" type="text" placeholder="referencia al vault o token externo" />
+                                </label>
+                                <label class="field">
+                                    <span>Header</span>
+                                    <input id="integrationHeaderName" type="text" placeholder="Authorization, X-Scope-OrgID..." />
+                                </label>
+                                <label class="field">
+                                    <span>Timeout</span>
+                                    <input id="integrationTimeout" type="number" min="1" max="120" placeholder="10" />
+                                </label>
+                                <label class="toggle-row">
+                                    <input id="integrationEnabled" type="checkbox" checked />
+                                    <span>Integracion habilitada</span>
+                                </label>
+                                <label class="toggle-row">
+                                    <input id="integrationDefault" type="checkbox" />
+                                    <span>Usar como default para este tipo</span>
+                                </label>
+                                <label class="toggle-row">
+                                    <input id="integrationVerifyTls" type="checkbox" checked />
+                                    <span>Verificar TLS</span>
+                                </label>
+                            </div>
+                            <div class="form-actions">
+                                <button id="saveIntegrationBtn" type="submit">Guardar integracion</button>
+                                <button id="testIntegrationBtn" type="button">Probar conexion</button>
+                                <button id="deleteIntegrationBtn" type="button">Eliminar</button>
+                            </div>
+                            <div id="integrationTestResult" class="settings-note-block settings-note-inline">
+                                <p>Prometheus, Grafana y Alertmanager se pueden editar y eliminar desde aqui. Usa el borrado para sustituir fuentes sin dejar duplicados.</p>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+            </section>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_settings.js?v=20260615a"></script>
+</body>
+</html>

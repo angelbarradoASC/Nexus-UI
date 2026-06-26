@@ -1,0 +1,261 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Operador</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260620d">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+</head>
+<body>
+    <main class="workspace workspace-operator">
+        <header class="shell-topbar shell-topbar-operator">
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Operador</h1>
+            </div>
+
+            <div class="operator-topbar-stack">
+                {% include "partials/desktop_nav.html" %}
+                <div class="operator-toolbar">
+                    <div class="operator-access-bar" aria-label="Accesos operativos">
+                        <span class="toolbar-label">Acceso rapido</span>
+                        <div class="operator-access-row">
+                            <input id="operatorHostInput" type="text" placeholder="IP del servidor o host" inputmode="decimal" autocomplete="off" />
+                            <button id="operatorSshBtn" class="btn btn-secondary" type="button">SSH</button>
+                            <button id="operatorRdpBtn" class="btn btn-secondary" type="button">RDP</button>
+                        </div>
+                    </div>
+                    <div class="topbar-collectors">
+                        <div class="topbar-collectors-head">
+                            <span class="toolbar-label">Recoleccion</span>
+                            <span id="collectorOverall" class="collector-overall">pendiente</span>
+                        </div>
+                        <div id="collectorStatusList" class="status-bullets topbar-bullets">
+                            <div class="status-bullet loading">Cargando</div>
+                        </div>
+                    </div>
+                    <div class="status-box">
+                        <span class="toolbar-label">Estado</span>
+                        <strong id="healthBadge">Estado desconocido</strong>
+                    </div>
+                    <div class="status-box">
+                        <span class="toolbar-label">Ultimo refresco</span>
+                        <strong id="lastSyncLabel">pendiente</strong>
+                    </div>
+                    <label class="toolbar-field">
+                        <span>Auto refresh</span>
+                        <select id="autoRefreshSelect">
+                            <option value="off">Off</option>
+                            <option value="30000">30s</option>
+                            <option value="60000" selected>1m</option>
+                            <option value="300000">5m</option>
+                            <option value="900000">15m</option>
+                        </select>
+                    </label>
+                    <button id="manualRefreshBtn" class="icon-btn" type="button" title="Actualizar ahora">↻</button>
+                </div>
+            </div>
+        </header>
+
+        <section class="assistant-layout">
+            <section class="assistant-primary-column">
+                <section class="chat-shell">
+                <div class="chat-shell-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Centro de mando</p>
+                        <h2>Chat</h2>
+                    </div>
+                    <div class="inline-badges">
+                        <span class="badge">Nexus coordinator</span>
+                        <span id="activeAgentBadge" class="badge badge-muted">Supervisor listo</span>
+                    </div>
+                </div>
+
+                <div id="chatTimeline" class="chat-timeline">
+                    <article class="message-card message-system">
+                        <p class="message-role">Sistema</p>
+                        <p class="message-body">Nexus esta listo para investigar, proponer y registrar cada movimiento.</p>
+                    </article>
+                </div>
+
+                <div class="quick-prompt-strip">
+                    <button class="prompt-chip" type="button" data-prompt="Revisa las ultimas alarmas y dime que es lo mas urgente">Priorizar alarmas</button>
+                    <button class="prompt-chip" type="button" data-prompt="Explicame el ultimo incidente procesado con lenguaje claro">Explicar incidente</button>
+                    <button class="prompt-chip" type="button" data-prompt="Dime que fuentes de recoleccion estan degradadas">Estado de fuentes</button>
+                    <button class="prompt-chip" type="button" data-prompt="Hazme un resumen breve de la actividad operativa abierta y los siguientes pasos">Resumen operativo</button>
+                </div>
+
+                <form id="chatForm" class="chat-composer">
+                    <label class="field composer-field">
+                        <span>Mensaje</span>
+                        <textarea id="chatMessage" rows="3" placeholder="Pidele a Nexus contexto, diagnostico o una linea de investigacion"></textarea>
+                    </label>
+                    <div class="composer-footer">
+                        <label class="field compact-field">
+                            <span>Modo</span>
+                            <select id="chatMode">
+                                <option value="general">general</option>
+                                <option value="monitoring">monitoring</option>
+                                <option value="incident">incident</option>
+                            </select>
+                        </label>
+                        <button class="btn" type="submit">Enviar</button>
+                    </div>
+                </form>
+                </section>
+                <section class="agent-stage-shell" aria-label="Bus agentico del supervisor">
+                    <div class="agent-stage-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Bus agentico</p>
+                            <h2>Orquestacion paralela</h2>
+                        </div>
+                        <div class="inline-badges">
+                            <span id="agentBusLabel" class="badge badge-muted">Supervisor en espera</span>
+                        </div>
+                    </div>
+
+                    <div id="agentBusBoard" class="agent-bus-board" data-phase="idle">
+                        <div id="entryPipeline" class="entry-pipeline entry-pipeline-bus">
+                            <span class="entry-pipeline-label">Entrada</span>
+                            <div class="entry-pipeline-line">
+                                <span class="entry-pipeline-bead"></span>
+                            </div>
+                            <span id="entryPipelineState" class="entry-pipeline-state">Escuchando</span>
+                        </div>
+
+                        <div class="agent-bus-rail rail-outbound">
+                            <span class="bus-stream stream-outbound"></span>
+                        </div>
+                        <div class="agent-bus-rail rail-return">
+                            <span class="bus-stream stream-return"></span>
+                        </div>
+
+                        <div class="agent-bus-node node-supervisor is-active" data-agent="supervisor" title="Supervisor"></div>
+                        <div class="agent-bus-node node-operator" data-agent="operator" title="Operator"></div>
+                        <div class="agent-bus-node node-shell" data-agent="shell" title="Shell"></div>
+                        <div class="agent-bus-node node-sales" data-agent="sales" title="Sales"></div>
+                        <div class="agent-bus-node node-memory" data-agent="memory" title="Memory"></div>
+                        <div class="agent-bus-node node-guard" data-agent="guard" title="Guard"></div>
+                        <div class="agent-bus-node node-housekeeper" data-agent="housekeeper" title="Housekeeper"></div>
+                        <div class="agent-bus-node node-spare" data-agent="spare" title="Expansion"></div>
+                    </div>
+                </section>
+            </section>
+            <aside class="operator-growth-space">
+                <section class="assets-ops-shell" aria-label="Mini ticketing de Assets">
+                    <div class="assets-ops-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Assets ticketing</p>
+                            <h2>Operaciones privadas</h2>
+                        </div>
+                        <div class="inline-badges">
+                            <span id="assetsOpsStatusBadge" class="badge badge-muted">Sin conectar</span>
+                            <button id="assetsOpsRefreshBtn" class="icon-btn" type="button" title="Recargar tickets">↻</button>
+                        </div>
+                    </div>
+
+                    <div class="assets-ops-meta">
+                        <div class="assets-ops-meta-card">
+                            <span class="toolbar-label">Base</span>
+                            <strong id="assetsOpsBaseUrl">pendiente</strong>
+                        </div>
+                        <div class="assets-ops-meta-card">
+                            <span class="toolbar-label">Usuario</span>
+                            <strong id="assetsOpsUsername">pendiente</strong>
+                        </div>
+                        <div class="assets-ops-meta-card">
+                            <span class="toolbar-label">Tickets</span>
+                            <strong id="assetsOpsTicketCount">0</strong>
+                        </div>
+                    </div>
+
+                    <form id="assetsOpsTicketForm" class="assets-ticket-form">
+                        <label class="field">
+                            <span>Titulo</span>
+                            <input id="assetsTicketTitle" type="text" maxlength="180" placeholder="Resumen corto del ticket" required />
+                        </label>
+
+                        <div class="assets-ticket-grid">
+                            <label class="field compact-field">
+                                <span>Tipo</span>
+                                <select id="assetsTicketType">
+                                    <option value="task">task</option>
+                                    <option value="incident">incident</option>
+                                    <option value="request">request</option>
+                                    <option value="bug">bug</option>
+                                </select>
+                            </label>
+                            <label class="field compact-field">
+                                <span>Prioridad</span>
+                                <select id="assetsTicketPriority">
+                                    <option value="high">high</option>
+                                    <option value="medium" selected>medium</option>
+                                    <option value="low">low</option>
+                                </select>
+                            </label>
+                            <label class="field compact-field">
+                                <span>Fuente</span>
+                                <select id="assetsTicketSource">
+                                    <option value="manual" selected>manual</option>
+                                    <option value="codex">codex</option>
+                                    <option value="claude">claude</option>
+                                    <option value="cliente">cliente</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="assets-ticket-grid">
+                            <label class="field compact-field">
+                                <span>Empresa</span>
+                                <select id="assetsTicketCompany">
+                                    <option value="">Sin empresa</option>
+                                </select>
+                            </label>
+                            <label class="field compact-field">
+                                <span>Proyecto</span>
+                                <select id="assetsTicketProject">
+                                    <option value="">Sin proyecto</option>
+                                </select>
+                            </label>
+                            <label class="field compact-field">
+                                <span>Asignado</span>
+                                <select id="assetsTicketAssignee" disabled>
+                                    <option value="">No disponible</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <label class="field">
+                            <span>Descripcion</span>
+                            <textarea id="assetsTicketDescription" rows="3" placeholder="Detalle opcional para el operador o para la IA"></textarea>
+                        </label>
+
+                        <div class="assets-ticket-actions">
+                            <span id="assetsOpsFormNote" class="assets-form-note">El operador puede crear tickets manuales; la IA podra usar este mismo endpoint.</span>
+                            <div class="assets-ticket-actions-right">
+                                <button id="assetsTicketFromChatBtn" class="btn btn-secondary" type="button">IA desde chat</button>
+                                <button id="assetsTicketSubmitBtn" class="btn" type="submit">Crear ticket</button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <div class="assets-ops-list-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Ultimos tickets</p>
+                            <h3>Actividad reciente</h3>
+                        </div>
+                    </div>
+                    <div id="assetsOpsTicketList" class="assets-ops-ticket-list">
+                        <div class="empty-state">Cargando ticketing privado...</div>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_v1.js?v=20260620a"></script>
+</body>
+</html>

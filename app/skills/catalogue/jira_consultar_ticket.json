@@ -1,0 +1,47 @@
+{
+  "id": "jira.consultar_ticket",
+  "name": "Consultar ticket de Jira",
+  "description": "Consulta el estado, asignado y detalles de un ticket existente en Jira dado su clave (ej: NEXUS-42).",
+  "execution": {
+    "where": "cloud",
+    "timeout": 20,
+    "retry": 2
+  },
+  "llm": {
+    "required": false,
+    "min_level": "L0",
+    "preferred_level": "L0",
+    "speed_level": "L1"
+  },
+  "cost": {
+    "tokens_estimate": 200,
+    "cache_ttl": 120
+  },
+  "inputs": {
+    "ticket_id": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "key": "str",
+    "summary": "str",
+    "status": "str",
+    "assignee": "str",
+    "priority": "str",
+    "url": "str"
+  },
+  "triggers": [
+    "cómo está el ticket",
+    "estado del ticket",
+    "consultar ticket",
+    "ver ticket",
+    "qué hay del ticket",
+    "cómo va el ticket",
+    "estado de la incidencia",
+    "info del ticket"
+  ],
+  "examples": [
+    "cómo está el ticket NEXUS-42",
+    "estado del PROJ-15",
+    "qué hay del ticket ABC-7",
+    "dime el estado de la incidencia NEXUS-100"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "campaign_name": "Q3 Diagnóstico gestionado",
+  "mailbox": "vicentearaizeta@sls.assetsconsultores.es",
+  "mode": "dry_run",
+  "daily_limit": 20,
+  "audience": "IT manager pyme, CIO, responsable operaciones",
+  "cta": "Si te encaja, propongo una llamada de 15 minutos.",
+  "prospects": [
+    {
+      "first_name": "Karim",
+      "company": "CBL Logística Madrid",
+      "job_title": "Operation & IT Manager",
+      "email": "karim.mribti@cbl-logistica.com",
+      "company_domain": "cbl-logistica.com",
+      "notes": "Operador logístico con foco en trazabilidad y operaciones."
+    },
+    {
+      "first_name": "María",
+      "company": "Ejemplo Telecom",
+      "job_title": "CIO",
+      "email": "maria@example-telecom.com",
+      "company_domain": "example-telecom.com",
+      "notes": "Prospecto de prueba para validar secuencia y registro CRM."
+    }
+  ],
+  "expected_crm_effect": {
+    "create_or_update_company": true,
+    "create_note_per_send": true,
+    "set_pipeline_stage": "contacted",
+    "set_next_followup_days_after_send": 4
+  }
+}

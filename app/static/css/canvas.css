@@ -1,0 +1,149 @@
+/* ==============================================================================
+   NEXUS Platform - Canvas (Modern Clean)
+   ============================================================================== */
+
+.canvas-panel {
+    grid-area: canvas;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border-primary);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.canvas-panel.active {
+    display: flex;
+}
+
+/* Header */
+.canvas-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-secondary);
+}
+
+.canvas-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.canvas-badge {
+    background: var(--accent-purple);
+    color: white;
+    padding: 0.25rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.canvas-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.canvas-btn {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.875rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+}
+
+.canvas-btn:hover {
+    background: var(--accent-blue);
+    color: white;
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+}
+
+.canvas-btn.save {
+    background: var(--accent-green);
+    color: white;
+    border-color: var(--accent-green);
+}
+
+.canvas-btn.save:hover {
+    background: #16a869;
+}
+
+/* Tabs */
+.canvas-tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 1.5rem;
+    border-bottom: 1px solid var(--border-primary);
+    background: var(--bg-secondary);
+}
+
+.canvas-tab {
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    transition: all var(--transition-fast);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.canvas-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.canvas-tab.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+}
+
+/* Content area */
+.canvas-content {
+    flex: 1;
+    overflow: auto;
+    padding: 1.5rem;
+    background: var(--bg-secondary);
+}
+
+.canvas-editor {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    color: var(--text-primary);
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    resize: none;
+    overflow: auto;
+}
+
+.canvas-editor:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+}
+
+.canvas-preview {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 1.25rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+}

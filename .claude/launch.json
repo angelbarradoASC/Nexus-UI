@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nexus-web",
+      "runtimeExecutable": "curl",
+      "runtimeArgs": ["-s", "http://localhost:5010/nexus-sales"],
+      "port": 5010
+    }
+  ]
+}

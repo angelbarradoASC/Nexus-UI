@@ -1,0 +1,5 @@
+# =============================================================
+# worker.txt — dependencias del worker Redis
+# Incluye base.txt (sin jinja2/multipart, pero los heredamos igualmente)
+# =============================================================
+-r base.txt

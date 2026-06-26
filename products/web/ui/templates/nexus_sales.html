@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Sales</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260604b">
+</head>
+<body>
+    <main class="workspace workspace-sales">
+        <header class="shell-topbar">
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Sales</h1>
+            </div>
+
+            <div class="topbar-status">
+                <nav class="topbar-nav" aria-label="Navegacion principal">
+                    <a class="topbar-link" href="/open-nexus">Shell</a>
+                    <a class="topbar-link" href="/nexus-v1">Operador</a>
+                    <a class="topbar-link is-active" href="/nexus-sales">Sales</a>
+                    <a class="topbar-link" href="/nexus-prompts">Prompting</a>
+                    <a class="topbar-link" href="/open-nexus/models">Modelos</a>
+                </nav>
+            </div>
+        </header>
+
+        <section class="sales-layout">
+            <section class="rail-card sales-main-panel prospecting-panel">
+                <div class="rail-card-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Prospeccion</p>
+                        <h2>ProspectingAgent</h2>
+                    </div>
+                    <span id="prospectingRunBadge" class="collector-overall">idle</span>
+                </div>
+
+                <form id="prospectingForm" class="outreach-form">
+                    <div class="prospecting-grid">
+                        <label class="field compact-stack">
+                            <span>Vertical</span>
+                            <select id="prospectingVertical">
+                                <option value="public_administration">Administracion publica</option>
+                                <option value="restaurants">Restaurantes</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Objetivo</span>
+                            <input id="prospectingTargetDescription" type="text" placeholder="Ayuntamientos con contacto TIC o restaurantes premium">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Ciudad</span>
+                            <input id="prospectingCity" type="text" placeholder="Zaragoza">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Provincia</span>
+                            <input id="prospectingProvince" type="text" placeholder="Zaragoza">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Region</span>
+                            <input id="prospectingRegion" type="text" placeholder="Aragon">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Radio (km)</span>
+                            <input id="prospectingRadius" type="number" min="1" max="250" value="35">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Resultados</span>
+                            <input id="prospectingDesiredCount" type="number" min="1" max="100" value="20">
+                        </label>
+                        <label class="field compact-stack">
+                            <span>Score minimo</span>
+                            <input id="prospectingMinimumScore" type="number" min="0" max="100" value="50">
+                        </label>
+                    </div>
+
+                    <label class="field compact-stack">
+                        <span>Must have</span>
+                        <input id="prospectingMustHave" type="text" placeholder="web oficial, contacto usable, telefono / email">
+                    </label>
+
+                    <label class="field compact-stack">
+                        <span>Nice to have</span>
+                        <input id="prospectingNiceToHave" type="text" placeholder="concejalia TIC, reservas online, grupos, terraza">
+                    </label>
+
+                    <label class="field compact-stack">
+                        <span>Excluir</span>
+                        <input id="prospectingExclude" type="text" placeholder="directorios no oficiales, franquicias, comida rapida">
+                    </label>
+
+                    <label class="field compact-stack">
+                        <span>Tags CRM</span>
+                        <input id="prospectingCrmTags" type="text" placeholder="zaragoza, premium, prospeccion-nexus">
+                    </label>
+
+                    <div class="composer-footer">
+                        <label class="checkbox-field">
+                            <input id="prospectingDryRun" type="checkbox" checked>
+                            <span>Solo validacion</span>
+                        </label>
+                        <label class="checkbox-field">
+                            <input id="prospectingAsyncMode" type="checkbox">
+                            <span>Ejecucion larga</span>
+                        </label>
+                        <div class="composer-footer prospecting-actions">
+                            <button id="refreshProspectingBtn" class="btn btn-secondary" type="button">Recargar</button>
+                            <button id="runProspectingBtn" class="btn" type="submit">Lanzar prospeccion</button>
+                        </div>
+                    </div>
+                </form>
+
+                <div class="outreach-kpis">
+                    <article class="mini-stat">
+                        <span class="toolbar-label">Run</span>
+                        <strong id="prospectingLatestRun">sin ejecutar</strong>
+                    </article>
+                    <article class="mini-stat">
+                        <span class="toolbar-label">Resultados</span>
+                        <strong id="prospectingResultCount">0</strong>
+                    </article>
+                    <article class="mini-stat">
+                        <span class="toolbar-label">Descartados</span>
+                        <strong id="prospectingDiscardedCount">0</strong>
+                    </article>
+                </div>
+
+                <div class="composer-footer prospecting-actions">
+                    <button id="pushValidProspectsBtn" class="btn" type="button">Enviar validos al CRM</button>
+                    <button id="loadDiscardedBtn" class="btn btn-secondary" type="button">Ver descartados</button>
+                    <button id="resumeProspectingBtn" class="btn btn-secondary" type="button">Reanudar run</button>
+                </div>
+
+                <div id="prospectingResultMessage" class="empty-state">
+                    Lanza una prospeccion y Nexus usara Brave, el modelo local y el CRM para descubrir, validar y dejar leads listos.
+                </div>
+
+                <div class="prospecting-table-wrap">
+                    <table class="prospecting-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Vertical</th>
+                                <th>Ciudad</th>
+                                <th>Web</th>
+                                <th>Email</th>
+                                <th>Telefono</th>
+                                <th>Score</th>
+                                <th>Prioridad</th>
+                                <th>CRM</th>
+                                <th>Motivo</th>
+                                <th>Fuente</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prospectingResultsBody">
+                            <tr>
+                                <td colspan="12" class="empty-table">Sin resultados todavia.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <aside class="sales-side-panel">
+                <section class="rail-card crm-panel">
+                    <div class="rail-card-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">CRM</p>
+                            <h2>CRM interno</h2>
+                        </div>
+                        <span id="crmStatusBadge" class="collector-overall">pendiente</span>
+                    </div>
+
+                    <div class="outreach-kpis">
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Origen</span>
+                            <strong id="crmSourceLabel">assets-web-api</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Pendientes</span>
+                            <strong id="crmPendingProspects">0</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Campanas</span>
+                            <strong id="crmCampaignCount">0</strong>
+                        </article>
+                    </div>
+
+                    <div id="crmSyncResult" class="empty-state">
+                        El CRM es la fuente de verdad: aqui deduplicamos y absorbemos solo los prospectos validos.
+                    </div>
+                </section>
+
+                <section class="rail-card outreach-panel">
+                    <div class="rail-card-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Secundario</p>
+                            <h2>Email outreach</h2>
+                        </div>
+                        <span id="outreachModeBadge" class="collector-overall">dry-run</span>
+                    </div>
+
+                    <div class="outreach-kpis">
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Cuenta</span>
+                            <strong id="outreachAccountLabel">pendiente</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Enviados hoy</span>
+                            <strong id="outreachSentToday">0</strong>
+                        </article>
+                        <article class="mini-stat">
+                            <span class="toolbar-label">Campanas</span>
+                            <strong id="outreachCampaignCount">0</strong>
+                        </article>
+                    </div>
+
+                    <details class="sales-secondary-details">
+                        <summary>Preparar campana desde CSV</summary>
+                        <form id="outreachForm" class="outreach-form">
+                            <label class="field compact-stack">
+                                <span>Campana</span>
+                                <input id="outreachCampaignName" type="text" placeholder="Q3 Diagnostico gestionado">
+                            </label>
+                            <label class="field compact-stack">
+                                <span>Propuesta</span>
+                                <textarea id="outreachProposition" rows="2" placeholder="Problema concreto que resolvemos"></textarea>
+                            </label>
+                            <label class="field compact-stack">
+                                <span>CTA</span>
+                                <input id="outreachCta" type="text" placeholder="Te propongo una llamada breve de 15 minutos.">
+                            </label>
+                            <div class="outreach-grid">
+                                <label class="field compact-stack">
+                                    <span>Audiencia</span>
+                                    <input id="outreachAudience" type="text" placeholder="CIO, secretario, responsable IT...">
+                                </label>
+                                <label class="field compact-stack">
+                                    <span>Max/dia</span>
+                                    <input id="outreachDailyCap" type="number" min="1" max="50" value="20">
+                                </label>
+                            </div>
+                            <label class="field compact-stack">
+                                <span>Prospectos CSV</span>
+                                <textarea id="outreachCsv" rows="5" placeholder="email,first_name,company,job_title,company_domain,notes"></textarea>
+                            </label>
+                            <div class="composer-footer">
+                                <label class="checkbox-field">
+                                    <input id="outreachDryRun" type="checkbox" checked>
+                                    <span>Solo simulacion</span>
+                                </label>
+                                <button id="launchOutreachBtn" class="btn" type="submit">Lanzar secuencia</button>
+                            </div>
+                        </form>
+                    </details>
+
+                    <div id="outreachLaunchResult" class="empty-state">
+                        La prospeccion local pasa a ser el flujo principal. El CSV queda como apoyo.
+                    </div>
+                </section>
+
+                <section class="rail-card activity-panel">
+                    <div class="rail-card-head">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Actividad</p>
+                            <h2>Sales</h2>
+                        </div>
+                    </div>
+
+                    <div class="panel-tabs">
+                        <button class="tab-chip active" type="button" data-feed-tab="prospecting">Prospecting</button>
+                        <button class="tab-chip" type="button" data-feed-tab="outreach">Outreach</button>
+                        <button class="tab-chip" type="button" data-feed-tab="activity">Actividad</button>
+                    </div>
+
+                    <div id="prospectingFeed" class="feed-list"></div>
+                    <div id="outreachFeed" class="feed-list hidden-feed"></div>
+                    <div id="activityFeed" class="feed-list hidden-feed"></div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_sales.js?v=20260604b"></script>
+</body>
+</html>

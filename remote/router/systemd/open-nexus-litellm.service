@@ -1,0 +1,16 @@
+[Unit]
+Description=Open-Nexus LiteLLM Router
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=angel
+WorkingDirectory=/opt/open-nexus-router
+EnvironmentFile=/opt/open-nexus-router/router/.env
+ExecStart=/opt/open-nexus-router/.venv/bin/litellm --config /opt/open-nexus-router/router/litellm_config.yaml --host 0.0.0.0 --port 4000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

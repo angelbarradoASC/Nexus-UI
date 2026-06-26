@@ -1,0 +1,26 @@
+{
+  "mailbox": "vicentearaizeta@sls.assetsconsultores.es",
+  "message_id": "<example-20260603-001@cbl-logistica.com>",
+  "thread_id": "thread-cbl-001",
+  "from": {
+    "name": "Karim Mribti",
+    "email": "karim.mribti@cbl-logistica.com"
+  },
+  "to": [
+    "vicentearaizeta@sls.assetsconsultores.es"
+  ],
+  "cc": [
+    "angel.barrado@assetsconsultores.es"
+  ],
+  "subject": "Re: Una idea para CBL Logística",
+  "received_at": "2026-06-03T10:24:00+02:00",
+  "body_text": "Hola Vicente, gracias por escribir. Puede tener sentido hablarlo. La semana que viene podría ver un hueco.",
+  "clean_body_text": "Hola Vicente, gracias por escribir. Puede tener sentido hablarlo. La semana que viene podría ver un hueco.",
+  "classification_hint": "positive_reply",
+  "expected_crm_action": {
+    "match_by_domain": "cbl-logistica.com",
+    "pipeline_stage": "meeting",
+    "create_note_type": "email",
+    "set_next_followup": "2026-06-05"
+  }
+}

@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<!-- nexus-campaign — gestión de la campaña diaria de prospección -->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaña — Open-Nexus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260611">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+</head>
+<body>
+    <main class="shell">
+        <header class="shell-topbar">
+            <div class="shell-titlebar">
+                <h1>Open-Nexus</h1>
+            </div>
+            {% include "partials/desktop_nav.html" %}
+        </header>
+
+        <div class="shell-body campaign-layout">
+
+            <!-- ── Panel izquierdo: estado del scheduler ─────────────────── -->
+            <section class="card campaign-status-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Prospección automática</p>
+                        <h2>Estado</h2>
+                    </div>
+                    <span id="schedulerBadge" class="camp-badge camp-badge--unknown">—</span>
+                </div>
+
+                <div class="camp-meta-grid">
+                    <div class="camp-meta-item">
+                        <span class="camp-meta-label">Próxima ejecución</span>
+                        <span id="nextRunAt" class="camp-meta-value">cargando…</span>
+                    </div>
+                    <div class="camp-meta-item">
+                        <span class="camp-meta-label">Última ejecución</span>
+                        <span id="lastRunAt" class="camp-meta-value">—</span>
+                    </div>
+                </div>
+
+                <div id="lastRunReport" class="camp-report camp-report--empty">
+                    Sin ejecuciones previas en esta sesión
+                </div>
+
+                <div class="camp-trigger-row">
+                    <button id="triggerBtn" class="camp-btn camp-btn--primary" onclick="triggerCampaign()">
+                        Ejecutar ahora
+                    </button>
+                    <span id="triggerStatus" class="camp-trigger-status"></span>
+                </div>
+            </section>
+
+            <!-- ── Panel derecho: configuración ──────────────────────────── -->
+            <section class="card campaign-config-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Parámetros</p>
+                        <h2>Configuración</h2>
+                    </div>
+                    <label class="camp-toggle" title="Activar o pausar la campaña diaria">
+                        <input type="checkbox" id="enabledToggle" onchange="toggleEnabled(this)">
+                        <span class="camp-toggle-track"></span>
+                        <span class="camp-toggle-label" id="enabledLabel">cargando</span>
+                    </label>
+                </div>
+
+                <form id="configForm" class="camp-form" onsubmit="saveConfig(event)">
+
+                    <div class="camp-form-row">
+                        <label for="cfgVertical">Vertical</label>
+                        <input type="text" id="cfgVertical" name="vertical" placeholder="inmobiliaria">
+                    </div>
+
+                    <div class="camp-form-row">
+                        <label for="cfgTargetDesc">Descripción del objetivo</label>
+                        <input type="text" id="cfgTargetDesc" name="target_description"
+                               placeholder="agencias inmobiliarias, portales y gestoras">
+                    </div>
+
+                    <div class="camp-form-row">
+                        <label for="cfgGeography">Geografía (opcional)</label>
+                        <input type="text" id="cfgGeography" name="geography"
+                               placeholder="Madrid, España…">
+                    </div>
+
+                    <div class="camp-form-row camp-form-row--half">
+                        <div>
+                            <label for="cfgDesiredCount">Buscar</label>
+                            <input type="number" id="cfgDesiredCount" name="desired_count"
+                                   min="5" max="100" placeholder="30">
+                        </div>
+                        <div>
+                            <label for="cfgDailyCap">Enviar máx.</label>
+                            <input type="number" id="cfgDailyCap" name="daily_send_cap"
+                                   min="1" max="50" placeholder="20">
+                        </div>
+                    </div>
+
+                    <div class="camp-form-row">
+                        <label for="cfgFollowups">Follow-ups (días, separados por coma)</label>
+                        <input type="text" id="cfgFollowups" name="followup_delays_days"
+                               placeholder="14, 14">
+                    </div>
+
+                    <div class="camp-form-row">
+                        <label for="cfgProposition">Propuesta de valor</label>
+                        <textarea id="cfgProposition" name="proposition" rows="3"
+                                  placeholder="¿Qué les ofrecemos?"></textarea>
+                    </div>
+
+                    <div class="camp-form-row">
+                        <label for="cfgCta">CTA</label>
+                        <textarea id="cfgCta" name="cta" rows="2"
+                                  placeholder="¿Te encajaría una llamada de 15 minutos…?"></textarea>
+                    </div>
+
+                    <div class="camp-form-actions">
+                        <button type="submit" class="camp-btn camp-btn--primary">Guardar</button>
+                        <span id="saveStatus" class="camp-save-status"></span>
+                    </div>
+                </form>
+            </section>
+
+        </div>
+    </main>
+
+    <div id="toast" class="camp-toast" aria-live="polite"></div>
+
+    <script src="/static/js/nexus_campaign.js?v=20260611"></script>
+</body>
+</html>

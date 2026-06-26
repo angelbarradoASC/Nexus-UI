@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc -l)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:docs.openwebui.com)",
+      "Bash(git clone:*)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(find \"C:\\\\DEV\" -maxdepth 1 -type d -name \"GitHub\\\\|code\\\\|open\\\\|backup\")",
+      "Bash(while read:*)",
+      "Bash(do echo:*)",
+      "Read(//c/DEV/NexusD/**)",
+      "Bash(done)",
+      "Bash(cmd.exe /c \"dir C:\\\\Users\\\\angel\\\\Desktop\"\")",
+      "Bash(cmd.exe /c dir \"C:\\\\Users\\\\angel\\\\Desktop\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\angel\\\\Desktop''\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\angel'' -Directory | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\angel\\\\Documents'' -Directory | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\angel\\\\OneDrive'' -Directory -ErrorAction SilentlyContinue | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem ''C:\\\\Users\\\\angel\\\\OneDrive\\\\Desktop'' -Directory | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Remove-Item ''C:\\\\DEV\\\\NexusD\\\\PROMPT_ESTANDARES_GLOBALES.md''\")",
+      "Bash(powershell.exe -Command \"Rename-Item -Path ''C:\\\\DEV\\\\NexusD'' -NewName ''Nexus-UI''\")"
+    ]
+  }
+}

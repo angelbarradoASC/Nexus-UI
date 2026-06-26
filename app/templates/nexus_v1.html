@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Operador</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260603b">
+</head>
+<body>
+    <main class="workspace">
+        <header class="shell-topbar">
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Operador</h1>
+            </div>
+
+            <div class="topbar-status">
+                <nav class="topbar-nav" aria-label="Navegacion principal">
+                    <a class="topbar-link" href="/open-nexus">Shell</a>
+                    <a class="topbar-link is-active" href="/nexus-v1">Operador</a>
+                    <a class="topbar-link" href="/nexus-sales">Sales</a>
+                    <a class="topbar-link" href="/nexus-prompts">Prompting</a>
+                    <a class="topbar-link" href="/open-nexus/models">Modelos</a>
+                </nav>
+                <div class="topbar-collectors">
+                    <div class="topbar-collectors-head">
+                        <span class="toolbar-label">Recoleccion</span>
+                        <span id="collectorOverall" class="collector-overall">pendiente</span>
+                    </div>
+                    <div id="collectorStatusList" class="status-bullets topbar-bullets">
+                        <div class="status-bullet loading">Cargando</div>
+                    </div>
+                </div>
+                <div class="status-box">
+                    <span class="toolbar-label">Estado</span>
+                    <strong id="healthBadge">Estado desconocido</strong>
+                </div>
+                <div class="status-box">
+                    <span class="toolbar-label">Ultimo refresco</span>
+                    <strong id="lastSyncLabel">pendiente</strong>
+                </div>
+                <label class="toolbar-field">
+                    <span>Auto refresh</span>
+                    <select id="autoRefreshSelect">
+                        <option value="off">Off</option>
+                        <option value="30000">30s</option>
+                        <option value="60000" selected>1m</option>
+                        <option value="300000">5m</option>
+                        <option value="900000">15m</option>
+                    </select>
+                </label>
+                <button id="manualRefreshBtn" class="icon-btn" type="button" title="Actualizar ahora">↻</button>
+            </div>
+        </header>
+
+        <section class="assistant-layout">
+            <section class="chat-shell">
+                <div class="chat-shell-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Centro de mando</p>
+                        <h2>Chat</h2>
+                    </div>
+                    <div class="inline-badges">
+                        <span class="badge">Nexus coordinator</span>
+                        <span class="badge badge-muted">Asistente general</span>
+                    </div>
+                </div>
+
+                <div id="chatTimeline" class="chat-timeline">
+                    <article class="message-card message-system">
+                        <p class="message-role">Sistema</p>
+                        <p class="message-body">Nexus esta listo para investigar, proponer y registrar cada movimiento.</p>
+                    </article>
+                </div>
+
+                <div class="quick-prompt-strip">
+                    <button class="prompt-chip" type="button" data-prompt="Revisa las ultimas alarmas y dime que es lo mas urgente">Priorizar alarmas</button>
+                    <button class="prompt-chip" type="button" data-prompt="Explicame el ultimo incidente procesado con lenguaje claro">Explicar incidente</button>
+                    <button class="prompt-chip" type="button" data-prompt="Dime que fuentes de recoleccion estan degradadas">Estado de fuentes</button>
+                    <button class="prompt-chip" type="button" data-prompt="Resume la actividad reciente y dime si hay que escalar algo">Resumen operativo</button>
+                </div>
+
+                <form id="chatForm" class="chat-composer">
+                    <label class="field composer-field">
+                        <span>Mensaje</span>
+                        <textarea id="chatMessage" rows="3" placeholder="Pidele a Nexus contexto, diagnostico o una linea de investigacion"></textarea>
+                    </label>
+                    <div class="composer-footer">
+                        <label class="field compact-field">
+                            <span>Modo</span>
+                            <select id="chatMode">
+                                <option value="general">general</option>
+                                <option value="monitoring">monitoring</option>
+                                <option value="incident">incident</option>
+                            </select>
+                        </label>
+                        <button class="btn" type="submit">Enviar</button>
+                    </div>
+                </form>
+            </section>
+            <aside class="operator-growth-space" aria-hidden="true"></aside>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_v1.js?v=20260603a"></script>
+</body>
+</html>

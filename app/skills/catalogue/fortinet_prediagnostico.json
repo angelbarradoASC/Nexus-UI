@@ -1,0 +1,35 @@
+{
+  "id": "fortinet.prediagnostico",
+  "name": "Pre diagnostico Fortinet",
+  "description": "Prepara una linea de investigacion para incidencias sobre firewalls Fortinet o FortiGate.",
+  "execution": {
+    "where": "assistant",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "inputs": {
+    "target": {"type": "str", "required": false},
+    "alert_hint": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "analysis": "str",
+    "plan": "dict"
+  },
+  "triggers": [
+    "fortinet",
+    "fortigate",
+    "firewall fortinet",
+    "fortios",
+    "policy fortinet"
+  ],
+  "examples": [
+    "tengo una alarma del fortigate core",
+    "revisa el firewall fortinet porque hay cortes"
+  ]
+}

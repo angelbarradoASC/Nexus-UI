@@ -1,0 +1,42 @@
+{
+  "id": "general.respuesta",
+  "name": "Respuesta general",
+  "description": "Responde preguntas generales, conversación, explicaciones, definiciones o cualquier consulta que el LLM puede responder con su conocimiento sin necesidad de herramientas externas.",
+  "execution": {
+    "where": "cloud",
+    "timeout": 60,
+    "retry": 2
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L3"
+  },
+  "cost": {
+    "tokens_estimate": 800,
+    "cache_ttl": 3600
+  },
+  "inputs": {
+    "query": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "respuesta": "str"
+  },
+  "triggers": [
+    "qué es",
+    "explícame",
+    "cómo funciona",
+    "cuéntame",
+    "hola",
+    "ayuda",
+    "puedes",
+    "sabes"
+  ],
+  "examples": [
+    "qué es kubernetes",
+    "explícame cómo funciona un load balancer",
+    "hola, buenos días",
+    "ayúdame a entender los microservicios"
+  ]
+}

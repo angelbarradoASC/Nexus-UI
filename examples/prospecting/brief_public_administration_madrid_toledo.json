@@ -1,0 +1,17 @@
+{
+  "vertical": "public_administration",
+  "target_description": "Ayuntamientos y organismos publicos con señales de modernizacion",
+  "city": "Torrejon de la Calzada",
+  "province": "Madrid",
+  "region": "Madrid Sur / Toledo Norte",
+  "radius_km": 35,
+  "desired_count": 20,
+  "must_have": ["web oficial", "contacto usable", "telefono"],
+  "nice_to_have": ["concejalia de nuevas tecnologias", "secretaria", "administracion electronica"],
+  "exclude": ["directorios no oficiales", "sedes sin contacto", "agregadores"],
+  "crm_tags": ["ayuntamiento", "madrid-sur", "toledo-norte"],
+  "campaign_type": "public-sector-outreach",
+  "minimum_score": 55,
+  "dry_run": true,
+  "async_mode": false
+}

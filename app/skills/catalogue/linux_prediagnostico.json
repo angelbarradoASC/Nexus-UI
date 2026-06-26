@@ -1,0 +1,36 @@
+{
+  "id": "linux.prediagnostico",
+  "name": "Pre diagnostico Linux",
+  "description": "Prepara una linea de investigacion para incidencias sobre servidores Linux y sistemas Unix-like.",
+  "execution": {
+    "where": "assistant",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "inputs": {
+    "target": {"type": "str", "required": false},
+    "alert_hint": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "analysis": "str",
+    "plan": "dict"
+  },
+  "triggers": [
+    "alarma linux",
+    "servidor linux",
+    "ubuntu",
+    "debian",
+    "rhel",
+    "host linux"
+  ],
+  "examples": [
+    "tengo una alerta en el linux web-prod-01",
+    "revisa el servidor ubuntu api-01"
+  ]
+}

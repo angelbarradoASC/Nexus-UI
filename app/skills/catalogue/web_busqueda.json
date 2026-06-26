@@ -1,0 +1,47 @@
+{
+  "id": "web.busqueda",
+  "name": "Búsqueda web",
+  "description": "Busca información en internet usando DuckDuckGo, lee las páginas más relevantes y sintetiza una respuesta. Usar cuando el usuario necesita información reciente, precios, noticias o datos que el LLM no puede conocer con certeza.",
+  "execution": {
+    "where": "cloud",
+    "timeout": 45,
+    "retry": 1
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 2000,
+    "cache_ttl": 300
+  },
+  "inputs": {
+    "search_query": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "respuesta": "str",
+    "fuentes": "list"
+  },
+  "triggers": [
+    "busca en internet",
+    "busca en google",
+    "busca en la web",
+    "qué noticias hay",
+    "noticias de",
+    "precio actual",
+    "cuánto cuesta",
+    "qué dice internet sobre",
+    "busca información sobre",
+    "últimas noticias",
+    "estado de",
+    "documentación de"
+  ],
+  "examples": [
+    "busca el precio actual del bitcoin",
+    "qué noticias hay sobre Python 3.14",
+    "cómo instalar docker en ubuntu",
+    "últimas noticias de tecnología"
+  ]
+}

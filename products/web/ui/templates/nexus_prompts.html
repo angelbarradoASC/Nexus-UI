@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus · Prompting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_prompts.css?v=20260603a">
+</head>
+<body>
+    <main class="prompt-workspace">
+        <header class="prompt-topbar">
+            <div class="prompt-titlebar">
+                <h1>Prompting</h1>
+            </div>
+            <nav class="prompt-topbar-actions" aria-label="Navegacion principal">
+                <a class="ghost-link" href="/open-nexus">Shell</a>
+                <a class="ghost-link" href="/nexus-v1">Operador</a>
+                <a class="ghost-link" href="/nexus-sales">Sales</a>
+                <a class="ghost-link is-active" href="/nexus-prompts">Prompting</a>
+                <a class="ghost-link" href="/open-nexus/models">Modelos</a>
+                <span id="promptSaveStatus" class="save-status">Sin cambios</span>
+            </nav>
+        </header>
+
+        <section class="prompt-layout">
+            <aside class="prompt-sidebar">
+                <div class="sidebar-head">
+                    <p class="eyebrow eyebrow-tight">Catalogo</p>
+                    <h2>Prompts</h2>
+                </div>
+                <div id="promptGroupList" class="prompt-group-list">
+                    <div class="empty-state">Cargando prompts...</div>
+                </div>
+            </aside>
+
+            <section class="prompt-editor-shell">
+                <div class="editor-head">
+                    <div>
+                        <p id="promptGroupLabel" class="eyebrow eyebrow-tight">Grupo</p>
+                        <h2 id="promptTitle">Selecciona un prompt</h2>
+                    </div>
+                    <div class="editor-meta">
+                        <span id="promptOverrideBadge" class="meta-badge">default</span>
+                        <code id="promptKeyLabel">prompt.key</code>
+                    </div>
+                </div>
+
+                <div class="editor-panels">
+                    <section class="editor-panel">
+                        <div class="panel-head">
+                            <h3>Actual</h3>
+                            <span class="panel-tip">Se aplica al instante.</span>
+                        </div>
+                        <textarea id="promptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                    </section>
+
+                    <section class="editor-panel editor-panel-muted">
+                        <div class="panel-head">
+                            <h3>Base</h3>
+                            <span class="panel-tip">Referencia para comparar o resetear.</span>
+                        </div>
+                        <pre id="promptDefault" class="prompt-preview"></pre>
+                    </section>
+                </div>
+
+                <div class="editor-actions">
+                    <button id="savePromptBtn" class="btn" type="button">Guardar prompt</button>
+                    <button id="resetPromptBtn" class="btn btn-secondary" type="button">Resetear a default</button>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="/static/js/nexus_prompts.js?v=20260528a"></script>
+</body>
+</html>

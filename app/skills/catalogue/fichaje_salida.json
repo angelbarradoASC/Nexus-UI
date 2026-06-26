@@ -1,0 +1,48 @@
+{
+  "id": "fichaje.salida",
+  "name": "Fichar salida",
+  "description": "Registra la salida del trabajo en el sistema de fichajes. Se activa cuando el usuario indica que se va, termina la jornada o similares.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 30,
+    "retry": 2
+  },
+  "llm": {
+    "required": false,
+    "min_level": "L0",
+    "preferred_level": "L0",
+    "speed_level": "L0"
+  },
+  "cost": {
+    "tokens_estimate": 80,
+    "cache_ttl": 0
+  },
+  "inputs": {},
+  "outputs": {
+    "timestamp": "str",
+    "horas_trabajadas": "str",
+    "confirmacion": "str"
+  },
+  "triggers": [
+    "me voy",
+    "me voy a casa",
+    "termino por hoy",
+    "fichar salida",
+    "ficho salida",
+    "marcar salida",
+    "fin de jornada",
+    "hasta mañana",
+    "salgo del trabajo",
+    "cierro el día",
+    "me piro",
+    "me largo",
+    "ya he terminado",
+    "fin del día"
+  ],
+  "examples": [
+    "me voy a casa",
+    "ficha mi salida",
+    "termino la jornada por hoy",
+    "hasta mañana, me voy"
+  ]
+}

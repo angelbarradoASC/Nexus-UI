@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open-Nexus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260603a">
+</head>
+<body>
+    <main class="shell">
+        <header class="shell-topbar">
+            <div class="shell-titlebar">
+                <h1>Open-Nexus</h1>
+            </div>
+            <nav class="top-actions" aria-label="Navegacion principal">
+                <a class="is-active" href="/open-nexus">Shell</a>
+                <a href="/nexus-v1">Operador</a>
+                <a href="/nexus-sales">Sales</a>
+                <a href="/nexus-prompts">Prompting</a>
+                <a href="/open-nexus/models">Modelos</a>
+            </nav>
+        </header>
+
+        <section class="layout">
+            <aside class="rail">
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Runtime</p>
+                    <h2>Estado</h2>
+                    <div id="runtimeSummary" class="stack"></div>
+                </section>
+            </aside>
+
+            <section class="center">
+                <section class="card composer-card">
+                    <p class="eyebrow eyebrow-tight">Shell</p>
+                    <h2>Entrada</h2>
+                    <form id="shellForm" class="composer">
+                        <textarea id="shellInput" rows="5" placeholder="Diagnostica el servidor web-prod-01 o prepara una accion comercial"></textarea>
+                        <button type="submit">Ejecutar</button>
+                    </form>
+                </section>
+
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Respuesta</p>
+                    <h2>Salida</h2>
+                    <div id="responsePane" class="response-pane">Esperando orden.</div>
+                </section>
+            </section>
+
+            <aside class="rail">
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Routing</p>
+                    <h2>Skill</h2>
+                    <div id="resolutionPane" class="stack"></div>
+                </section>
+                <section class="card">
+                    <p class="eyebrow eyebrow-tight">Permisos</p>
+                    <h2>Capacidades</h2>
+                    <div id="capabilitiesPane" class="stack"></div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <script src="/static/js/open_nexus.js?v=20260603a"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "vertical": "restaurants",
+  "target_description": "Restaurantes de categoria en Zaragoza para futura campana comercial",
+  "city": "Zaragoza",
+  "province": "Zaragoza",
+  "region": "Aragon",
+  "radius_km": 15,
+  "desired_count": 30,
+  "must_have": ["restaurante activo", "telefono", "email o formulario"],
+  "nice_to_have": ["reservas online", "eventos empresa", "grupos", "terraza", "menu degustacion"],
+  "exclude": ["franquicias", "comida rapida", "directorios sin web oficial"],
+  "crm_tags": ["restaurante", "zaragoza", "prospeccion-nexus"],
+  "campaign_type": "hospitality-outreach",
+  "minimum_score": 50,
+  "dry_run": true,
+  "async_mode": false
+}

@@ -1,0 +1,23 @@
+services:
+  web:
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./app:/app
+      - ./data:/app/data
+      - ./products:/app/products
+      - ./desktop:/app/desktop
+    environment:
+      APP_ENVIRONMENT: development
+
+  worker:
+    command: python /app/worker.py
+    volumes:
+      - ./worker:/app
+      - ./app/agents:/app/agents
+      - ./app/db:/app/db
+      - ./app/utils:/app/utils
+      - ./app/config.py:/app/config.py
+      - ./app/skills:/app/skills
+      - ./data:/app/data
+    environment:
+      APP_ENVIRONMENT: development

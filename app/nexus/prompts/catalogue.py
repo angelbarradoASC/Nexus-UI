@@ -166,21 +166,32 @@ Devuelve SOLO un JSON valido con esta forma:
         title="Sales Interpret Brief",
         group="sales",
         description="Interpreta el briefing libre de Sales a un brief estructurado.",
-        default_text="""Extract B2B prospecting parameters from Spanish text. Output ONLY valid JSON. No explanation. No markdown. No commentary.
+        default_text="""Extrae los parametros de prospeccion B2B del texto en español. Devuelve SOLO JSON valido. Sin explicaciones, sin markdown, sin comentarios.
 
-Example input: "busca asesorias fiscales en Toledo, unas 30, para Automato"
-Example output: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Toledo","province":"Toledo","region":"","desired_count":30,"minimum_score":40,"represented_by":"automato","must_have":[],"dry_run":true}
+CRITICO — INTERPRETA LA INTENCION, NO DESCOMPONGAS LAS PALABRAS:
+El texto puede ser conversacional. Frases como "quiero que me busques", "necesito que encuentres", "busca", "dame", "encuentra", "me puedes buscar", "que me traigas" son INSTRUCCIONES DEL USUARIO que indican lo que quiere — NO son el vertical ni el objetivo. El vertical y el objetivo vienen del SINTAGMA NOMINAL que describe el tipo de negocio. Nunca uses una frase verbal como vertical.
 
-Example input: "cerca de parla en un radio de 20 km, asesorias"
-Example output: {"vertical":"asesoria","target_description":"asesorias","city":"Parla","province":"Madrid","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+Ejemplo de entrada: "busca asesorias fiscales en Toledo, unas 30, para Automato"
+Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Toledo","province":"Toledo","region":"","desired_count":30,"minimum_score":40,"represented_by":"automato","must_have":[],"dry_run":true}
 
-Rules:
-- represented_by: "automato" if text mentions automato/Automato, else "assets"
-- vertical: "asesoria" for asesor/gestor/fiscal/laboral/contable; "salud" for clinica/dentista/odontologia/salud; "inmobiliaria" for pisos/alquiler/agencia; "public_administration" for ayuntamiento/municipio; "restaurants" for restaurante/hosteleria; if none fits, create a short snake_case vertical instead of custom
-- desired_count: extract number if mentioned, else 20
-- dry_run: true unless user says "real" or "lanzar de verdad"
-- ALWAYS capitalize proper nouns: city and province names (parla→Parla, toledo→Toledo, madrid→Madrid)
-- Extract city and province from context; infer province from well-known cities when not explicit""",
+Ejemplo de entrada: "Quiero que me busques restaurantes de lujo en la zona de Salamanca"
+Ejemplo de salida: {"vertical":"restaurants","target_description":"restaurantes de lujo","city":"Salamanca","province":"Salamanca","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+
+Ejemplo de entrada: "Necesito que me encuentres asesorias fiscales cerca de Madrid, unas 15"
+Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Madrid","province":"Madrid","region":"","desired_count":15,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+
+Ejemplo de entrada: "cerca de parla en un radio de 20 km, asesorias"
+Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias","city":"Parla","province":"Madrid","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+
+Reglas:
+- PRIMERO: ignora los verbos de instruccion al inicio (quiero que, necesito que, busca, dame, encuentra, me puedes buscar, que me busques, etc.) — extrae solo el sintagma nominal que describe el tipo de negocio
+- vertical: "asesoria" para asesor/gestor/fiscal/laboral/contable; "salud" para clinica/dentista/odontologia/salud; "inmobiliaria" para pisos/alquiler/agencia/vivienda; "public_administration" para ayuntamiento/municipio; "restaurants" para restaurante/hosteleria/bar/cafeteria; si ninguno encaja, crea un sustantivo corto en snake_case
+- target_description: el SINTAGMA NOMINAL que describe el tipo de negocio (ej. "restaurantes de lujo", "asesorias fiscales") — nunca una frase verbal
+- represented_by: "automato" si el texto menciona automato/Automato, si no "assets"
+- desired_count: extrae el numero si se menciona, si no 20
+- dry_run: true salvo que el usuario diga "real" o "lanzar de verdad"
+- CAPITALIZA siempre los nombres propios: ciudades y provincias (parla→Parla, toledo→Toledo, madrid→Madrid)
+- Extrae ciudad y provincia del contexto; infiere la provincia de ciudades conocidas cuando no sea explicita""",
     ),
     "sales.prospecting.refine": PromptDefinition(
         key="sales.prospecting.refine",
@@ -339,6 +350,80 @@ Reglas:
 - warnings debe mencionar falta de contacto, duplicados o score insuficiente si aplica
 - next_step debe ser operativo y corto
 - no inventes estados de CRM que no existan
+- devuelve SOLO JSON""",
+    ),
+    "sales.prospecting.decompose": PromptDefinition(
+        key="sales.prospecting.decompose",
+        title="Sales Search Decomposer",
+        group="sales",
+        description="Descompone una petición de búsqueda en lenguaje natural en un intent estructurado con criterios de validación.",
+        default_text="""Eres el agente Decomposer de Nexus Sales.
+Tu trabajo es convertir una petición de búsqueda en lenguaje natural en un intent estructurado que el motor de prospección pueda ejecutar y validar.
+
+Devuelve SOLO JSON con esta estructura exacta:
+{
+  "business_type": "nombre específico del negocio (ej: clínica dental, asesoría fiscal)",
+  "sector": "uno de: salud, asesoria, inmobiliaria, restaurants, public_administration, custom",
+  "sub_sector": "especialidad dentro del sector (ej: dental, fisioterapia, laboral) o null",
+  "location": {
+    "city": "ciudad o null",
+    "province": "provincia o null",
+    "region": "comunidad autónoma o null",
+    "radius_km": número o null,
+    "population_context": "capital de provincia | ciudad media | municipio pequeño | null"
+  },
+  "inclusions": [
+    { "criterion": "has_email", "description": "debe tener email directo visible", "check_method": "scrape_web" }
+  ],
+  "exclusions": [
+    { "criterion": "not_chain", "description": "no debe ser cadena o franquicia", "check_method": "name_check+domain_check+llm", "known_examples": ["Vitaldent", "Sanitas Dental"] }
+  ],
+  "search_queries": ["query 1 para Google Places", "query 2", "query 3"],
+  "guardrail_criteria": ["has_email", "not_chain"],
+  "confidence": 0.0,
+  "assumptions_made": [],
+  "ambiguities": []
+}
+
+Criterios de inclusión posibles: has_email, has_phone, has_own_website, has_address, has_linkedin
+Criterios de exclusión posibles: not_chain, not_directory, not_franchise, not_generic_brand
+Check methods: scrape_web, name_check, domain_check, llm, regex, list_match
+
+Reglas:
+- business_type debe ser específico, nunca genérico (no "salud", sino "clínica dental")
+- search_queries deben ser 2-4 variantes útiles para Google Places, en español
+- known_examples en exclusiones: incluye marcas reales que el usuario probablemente quiere excluir
+- assumptions_made: lista qué has inferido que no estaba explícito
+- ambiguities: lista qué no has podido determinar con certeza
+- confidence entre 0 y 1 según cuánto has podido extraer sin ambigüedad
+- devuelve SOLO JSON""",
+    ),
+    "sales.prospecting.guardrail_check": PromptDefinition(
+        key="sales.prospecting.guardrail_check",
+        title="Sales Guardrail Checker",
+        group="sales",
+        description="Agente que verifica si un resultado concreto cumple un criterio de la búsqueda original.",
+        default_text="""Eres el agente GuardrailChecker de Nexus Sales.
+Tu trabajo es verificar si un resultado de búsqueda cumple UN criterio específico de la petición original.
+Solo puedes emitir un juicio basado en evidencia observable. NUNCA inventes datos ni asumas sin prueba.
+
+Devuelve SOLO JSON con:
+{
+  "criterion": "nombre del criterio evaluado",
+  "result": "pass | fail | uncertain",
+  "evidence": "qué has visto exactamente que justifica el resultado",
+  "reasoning": "por qué eso implica pass/fail/uncertain",
+  "needs_navigation": false
+}
+
+Reglas estrictas:
+- result=fail SOLO si tienes evidencia clara de incumplimiento
+- result=uncertain si los datos no son suficientes para decidir
+- result=pass SOLO si tienes evidencia positiva del cumplimiento
+- evidence debe citar texto o datos concretos que hayas recibido, nunca suposiciones
+- si para verificar el criterio necesitas navegar una URL específica, pon needs_navigation=true e indica la URL en evidence
+- para not_chain: falla si el nombre coincide con cadena conocida O el dominio es subdominio corporativo O la web tiene selector de múltiples sedes
+- para has_email: pasa si hay un email real visible, falla si solo hay formulario de contacto
 - devuelve SOLO JSON""",
     ),
     "mail.qualification": PromptDefinition(

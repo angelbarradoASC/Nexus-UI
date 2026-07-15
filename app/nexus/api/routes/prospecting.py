@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel
 
 from agents.llm_router import get_router
@@ -25,24 +27,9 @@ from nexus.prospecting.models import normalize_vertical
 
 router = APIRouter()
 
-_INTERPRET_SYSTEM = """Extract B2B prospecting parameters from Spanish text. Output ONLY valid JSON. No explanation. No markdown. No commentary.
-
-Example input: "busca asesorias fiscales en Toledo, unas 30, para Automato"
-Example output: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Toledo","province":"Toledo","region":"","desired_count":30,"minimum_score":40,"represented_by":"automato","must_have":[],"dry_run":true}
-
-Example input: "cerca de parla en un radio de 20 km, asesorias"
-Example output: {"vertical":"asesoria","target_description":"asesorias","city":"Parla","province":"Madrid","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
-
-Example input: "clinicas dentales en la zona de madrid sur cerca de parla"
-Example output: {"vertical":"salud","target_description":"clinicas dentales","city":"Parla","province":"Madrid","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
-
-Rules:
-- represented_by: "automato" if text mentions automato/Automato, else "assets"
-- vertical: "asesoria" for asesor/gestor/fiscal/laboral/contable; "salud" for clinica/dentista/odontologia/salud; "inmobiliaria" for pisos/alquiler/agencia; "public_administration" for ayuntamiento/municipio; "restaurants" for restaurante/hosteleria; if none fits, create a short snake_case vertical instead de custom
-- desired_count: extract number if mentioned, else 20
-- dry_run: true unless user says "real" or "lanzar de verdad"
-- ALWAYS capitalize proper nouns: city and province names (parla→Parla, toledo→Toledo, madrid→Madrid)
-- Extract city and province from context; infer province from well-known cities when not explicit"""
+# NOTE: this constant is not used — the live call uses resolve_prompt_sync("sales.prospecting.interpret")
+# Kept here only as a reference; canonical version lives in nexus/prompts/catalogue.py
+_INTERPRET_SYSTEM = "see nexus/prompts/catalogue.py: sales.prospecting.interpret"
 
 
 class InterpretRequest(BaseModel):
@@ -121,13 +108,6 @@ def _fallback_parse(text: str) -> dict:
     }
 
 
-def _sanitize_vertical_from_text(brief: dict, text: str) -> dict:
-    # La interpretación ya no debe inferir vertical: la UI la decide si hace falta.
-    brief["vertical"] = "custom"
-    brief["vertical_created"] = False
-    return brief
-
-
 @router.post("/prospecting/interpret")
 async def interpret_brief(
     payload: InterpretRequest,
@@ -138,19 +118,27 @@ async def interpret_brief(
         raise HTTPException(status_code=400, detail="text is required")
 
     llm = get_router()
-    response = await llm.call(
-        messages=[
-            {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret")},
-            {"role": "user", "content": payload.text.strip()},
-        ],
-        preferred_level=1,   # L1 con few-shot; fallback por reglas si falla
-        temperature=0.1,
-        max_tokens=600,
-    )
+    response = None
+    try:
+        response = await asyncio.wait_for(
+            llm.call(
+                messages=[
+                    {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret")},
+                    {"role": "user", "content": payload.text.strip()},
+                ],
+                preferred_level=1,   # L1 con few-shot; fallback por reglas si falla
+                temperature=0.1,
+                max_tokens=600,
+                timeout=6.0,         # per-level timeout — escala rápido si un nivel es lento
+            ),
+            timeout=10.0,            # cap global — fallback heurístico si todos los niveles son lentos
+        )
+    except asyncio.TimeoutError:
+        logger.warning("interpret | llm.call timeout global (10s) — usando fallback heurístico")
 
     brief = None
 
-    if not response.error:
+    if response is not None and not response.error:
         raw = (response.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
         raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
@@ -166,15 +154,30 @@ async def interpret_brief(
     if brief is None:
         brief = _fallback_parse(payload.text)
 
-    brief = _sanitize_vertical_from_text(brief, payload.text)
-    brief["vertical"] = "custom"
+    from nexus.prospecting.models import normalize_vertical
+    brief["vertical"] = normalize_vertical(brief.get("vertical", ""), fallback_text=payload.text)
     brief["vertical_created"] = False
+    # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
+    if "location" in brief and not brief.get("city"):
+        brief["city"] = brief.pop("location")
+    if "quantity" in brief and not brief.get("desired_count"):
+        brief["desired_count"] = brief.pop("quantity")
     brief.setdefault("desired_count", 20)
     brief.setdefault("minimum_score", 40)
     brief.setdefault("represented_by", "assets")
     brief.setdefault("dry_run", True)
     brief.setdefault("must_have", [])
-    orchestrated = await prospecting.orchestrate_brief(brief, original_text=payload.text.strip())
+    try:
+        orchestrated = await asyncio.wait_for(
+            prospecting.orchestrate_brief(brief, original_text=payload.text.strip()),
+            timeout=4.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("interpret | orchestrate_brief timeout (4s) — devolviendo brief base")
+        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
+    except Exception as exc:
+        logger.error("interpret | orchestrate_brief error — {}", exc)
+        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": str(exc)[:100], "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
     return {
         "status": "ok",
         "brief": orchestrated["brief"],
@@ -338,3 +341,27 @@ async def push_valid_municipal_results_to_crm_alias(
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> ProspectingPushResponse:
     return await push_valid_results_to_crm(payload, prospecting)
+
+
+# ── Search Decomposer (Fase 1 del pipeline agéntico) ─────────────────────────
+
+class DecomposeRequest(BaseModel):
+    text: str
+    requested_by: str = "anonymous"
+
+
+@router.post("/prospecting/decompose")
+async def decompose_search(payload: DecomposeRequest) -> dict:
+    """Descompone una petición en lenguaje natural en un search intent estructurado.
+
+    Nuevo endpoint standalone — no toca el pipeline existente.
+    Fase 1 del pipeline agéntico de búsqueda.
+    """
+    from agents.search_decomposer_agent import SearchDecomposerAgent
+
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+
+    agent = SearchDecomposerAgent()
+    result = await agent.decompose(payload.text, requested_by=payload.requested_by)
+    return {"status": "ok", **result}

@@ -64,6 +64,7 @@ class LLMResponse(BaseModel):
     latency_ms: int = 0
     error: str | None = None
     retries_used: int = 0
+    retry_after: float | None = None   # segundos sugeridos por el proveedor en 429
 
 
 # ── Configuración de reintentos ───────────────────────────────────────────────
@@ -121,6 +122,7 @@ class LLMRouter:
         self._levels: dict[int, LLMLevel] = {}
         self._client: httpx.AsyncClient | None = None
         self.metrics = _RouterMetrics()
+        self._watchdog: Any | None = None   # LevelWatchdog — import lazy para evitar circular
         self._cargar_niveles()
 
         logger.info(
@@ -140,28 +142,28 @@ class LLMRouter:
                 cost_per_1k_tokens=0.0, timeout=120,
             )
 
-        # L1 — Cloud barato (Groq)
+        # L1 — OpenRouter/Venice (llama-3.3-70b)
         if cfg.l1_url and cfg.l1_key:
             self._levels[1] = LLMLevel(
-                level=1, name="L1-Groq",
+                level=1, name="L1-OpenRouter-Venice",
                 url=cfg.l1_url, api_key=cfg.l1_key, model=cfg.l1_model,
-                cost_per_1k_tokens=0.0001, timeout=30,
+                cost_per_1k_tokens=0.0, timeout=30,
             )
 
-        # L2 — Cloud medio
+        # L2 — OpenRouter/Nvidia (nemotron-nano-9b)
         if cfg.llm_l2_url and cfg.llm_l2_key:
             self._levels[2] = LLMLevel(
-                level=2, name="L2-GPT-Mini",
+                level=2, name="L2-OpenRouter-Nvidia",
                 url=cfg.llm_l2_url, api_key=cfg.llm_l2_key, model=cfg.llm_l2_model,
-                cost_per_1k_tokens=0.00015, timeout=30,
+                cost_per_1k_tokens=0.0, timeout=30,
             )
 
-        # L3 — Cloud premium
+        # L3 — OpenRouter/Darkbloom (gpt-oss-20b)
         if cfg.llm_l3_url and cfg.llm_l3_key:
             self._levels[3] = LLMLevel(
-                level=3, name="L3-Premium",
+                level=3, name="L3-OpenRouter-Darkbloom",
                 url=cfg.llm_l3_url, api_key=cfg.llm_l3_key, model=cfg.llm_l3_model,
-                cost_per_1k_tokens=0.005, timeout=30,
+                cost_per_1k_tokens=0.0, timeout=30,
             )
 
         if not self._levels:
@@ -185,8 +187,16 @@ class LLMRouter:
             )
         return self._client
 
+    async def start_watchdog(self) -> None:
+        """Arranca el watchdog de salud. Llamar tras crear el router en el lifespan."""
+        from agents.llm_watchdog import LevelWatchdog
+        self._watchdog = LevelWatchdog(self._levels)
+        await self._watchdog.start()
+
     async def close(self) -> None:
-        """Cerrar el cliente HTTP. Llamar en el lifespan de FastAPI."""
+        """Cerrar watchdog y cliente HTTP. Llamar en el lifespan de FastAPI."""
+        if self._watchdog is not None:
+            await self._watchdog.stop()
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             logger.debug("LLMRouter AsyncClient cerrado")
@@ -365,8 +375,19 @@ class LLMRouter:
 
     def _candidatos(self, desde: int) -> list[int]:
         sorted_levels = sorted(self._levels.keys())
-        candidatos = [lv for lv in sorted_levels if lv >= desde]
-        return candidatos if candidatos else sorted_levels
+        desde_start = [lv for lv in sorted_levels if lv >= desde]
+        fallback = desde_start or sorted_levels
+
+        if self._watchdog is None:
+            return fallback
+
+        vivos = [lv for lv in fallback if self._watchdog.is_healthy(lv)]
+        if vivos:
+            return vivos
+
+        # Todos los niveles conocidos como caídos: intenta igualmente (modo degradado)
+        logger.warning("LLMRouter | todos los niveles caídos — modo degradado")
+        return fallback
 
     # ── Llamada a un nivel con reintentos ─────────────────────────────────────
 
@@ -386,10 +407,11 @@ class LLMRouter:
 
         for intento in range(_MAX_RETRIES + 1):
             if intento > 0:
+                # Solo llega aquí en errores 5xx o timeout — backoff exponencial
                 espera = _BACKOFF_BASE * (2 ** (intento - 1))
                 logger.debug(
                     "LLMRouter reintento | nivel={} | intento={} | espera={}s",
-                    nivel.name, intento, espera,
+                    nivel.name, intento, round(espera, 1),
                 )
                 await asyncio.sleep(espera)
 
@@ -400,15 +422,24 @@ class LLMRouter:
                 return result
 
             ultimo_error = result.error
-            # No reintentar en errores 4xx que no sean 429
-            if "http_4" in ultimo_error and "http_429" not in ultimo_error:
+            # 429: escalar inmediatamente al siguiente nivel — no reintentar el mismo
+            if "http_429" in ultimo_error:
+                break
+            # Timeout: escalar — no tiene sentido reintentar si el nivel está lento
+            if "timeout" in ultimo_error:
+                break
+            # Otros 4xx: sin reintentos
+            if "http_4" in ultimo_error:
                 break
 
         self.metrics.record_failure(nivel.name)
+        # Enfriar el nivel en cooldown si fue rate-limit
+        if self._watchdog is not None and "http_429" in ultimo_error:
+            self._watchdog.mark_cooldown(nivel.level)
         return LLMResponse(
             content="", level_used=nivel.level, model_used=nivel.model,
             nivel_name=nivel.name, error=ultimo_error,
-            retries_used=_MAX_RETRIES,
+            retries_used=intento,
         )
 
     async def _llamar_nivel(
@@ -481,10 +512,16 @@ class LLMRouter:
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
             error = f"http_{status} | nivel={nivel.name}"
-            logger.warning("LLMRouter HTTP {} | nivel={}", status, nivel.name)
+            retry_after: float | None = None
+            if status == 429:
+                try:
+                    retry_after = float(e.response.headers.get("Retry-After", 0) or 0)
+                except (ValueError, TypeError):
+                    retry_after = None
+            logger.warning("LLMRouter HTTP {} | nivel={} | retry_after={}s", status, nivel.name, retry_after)
             return LLMResponse(
                 content="", level_used=nivel.level, model_used=nivel.model,
-                nivel_name=nivel.name, error=error,
+                nivel_name=nivel.name, error=error, retry_after=retry_after,
             )
 
         except Exception as e:
@@ -502,6 +539,12 @@ class LLMRouter:
 
     def metrics_snapshot(self) -> dict[str, Any]:
         return self.metrics.snapshot()
+
+    def watchdog_snapshot(self) -> dict[str, Any]:
+        """Estado de salud de los niveles según el watchdog."""
+        if self._watchdog is None:
+            return {"enabled": False}
+        return {"enabled": True, **self._watchdog.status_snapshot()}
 
 
 # ── Singleton global ──────────────────────────────────────────────────────────

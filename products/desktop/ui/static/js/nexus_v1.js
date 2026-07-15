@@ -9,6 +9,8 @@ function escapeHtml(value) {
 
 let autoRefreshTimer = null;
 let assetsOpsBootstrapCache = null;
+let assetsOpsAllTasks = [];
+let _ticketSearchTimer = null;
 
 const COLLECTOR_LINK_KINDS = ['prometheus', 'alertmanager', 'grafana'];
 
@@ -238,59 +240,88 @@ function renderAssetsOpsMeta(payload) {
     }
 }
 
-function renderAssetsOpsTickets(payload) {
+function _buildTicketCard(task) {
+    const taskId = Number(task.id || 0);
+    const status = String(task.status || 'pending');
+    const priority = String(task.priority || 'medium');
+    const ticketType = String(task.ticket_type || 'task');
+    const source = String(task.source || 'manual');
+    const metaParts = [
+        task.company_name || task.company?.name || '',
+        task.project_name || task.project?.name || '',
+        source,
+    ].filter(Boolean);
+    return `
+        <article class="assets-ticket-card${status === 'done' ? ' assets-ticket-done' : ''}" data-task-id="${taskId}" data-status="${escapeHtml(status)}">
+            <div class="assets-ticket-card-head">
+                <div>
+                    <h4>${escapeHtml(task.title || `Ticket ${taskId}`)}</h4>
+                    <p>${escapeHtml(metaParts.join(' · ') || `#${taskId}`)}</p>
+                </div>
+                <div class="assets-ticket-badges">
+                    <span class="pill">${escapeHtml(ticketType)}</span>
+                    <span class="pill">${escapeHtml(priority)}</span>
+                </div>
+            </div>
+            <p class="assets-ticket-description">${escapeHtml(task.description || 'Sin descripcion adicional.')}</p>
+            <div class="assets-ticket-footer">
+                <label class="field compact-field">
+                    <span>Estado</span>
+                    <select class="assets-ticket-status" data-task-id="${taskId}">
+                        <option value="pending" ${status === 'pending' ? 'selected' : ''}>pending</option>
+                        <option value="in_progress" ${status === 'in_progress' ? 'selected' : ''}>in_progress</option>
+                        <option value="done" ${status === 'done' ? 'selected' : ''}>done</option>
+                    </select>
+                </label>
+                <button class="btn btn-secondary assets-ticket-save" type="button" data-task-id="${taskId}">Guardar estado</button>
+            </div>
+        </article>
+    `;
+}
+
+function _renderFilteredTickets() {
     const listNode = document.getElementById('assetsOpsTicketList');
-    const countNode = document.getElementById('assetsOpsTicketCount');
     if (!listNode) return;
 
-    const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
-    if (countNode) {
-        countNode.textContent = String(payload?.total ?? tasks.length ?? 0);
-    }
+    const showDone = document.getElementById('assetsOpsShowDone')?.checked ?? false;
+    const rawQuery = (document.getElementById('assetsTicketSearch')?.value ?? '').trim().toLowerCase();
+    const numQuery = rawQuery.replace(/^#/, '');
+    const isNumSearch = numQuery !== '' && /^\d+$/.test(numQuery);
 
-    if (!tasks.length) {
-        listNode.innerHTML = '<div class="empty-state">No hay tickets recientes en Assets.</div>';
+    const filtered = assetsOpsAllTasks.filter((task) => {
+        if (!showDone && String(task.status || '') === 'done') return false;
+        if (!rawQuery) return true;
+        if (isNumSearch) return String(task.id || '') === numQuery;
+        const haystack = [
+            task.title || '',
+            task.description || '',
+            task.company_name || task.company?.name || '',
+            task.project_name || task.project?.name || '',
+        ].join(' ').toLowerCase();
+        return haystack.includes(rawQuery);
+    });
+
+    if (!filtered.length) {
+        const hasDone = assetsOpsAllTasks.some((t) => String(t.status || '') === 'done');
+        const msg = rawQuery
+            ? `Sin resultados para <em>${escapeHtml(rawQuery)}</em>.`
+            : (hasDone && !showDone)
+                ? 'No hay tickets activos. Activa <strong>Completados</strong> para verlos.'
+                : 'No hay tickets recientes en Assets.';
+        listNode.innerHTML = `<div class="empty-state">${msg}</div>`;
         return;
     }
 
-    listNode.innerHTML = tasks.map((task) => {
-        const taskId = Number(task.id || 0);
-        const status = String(task.status || 'pending');
-        const priority = String(task.priority || 'medium');
-        const ticketType = String(task.ticket_type || 'task');
-        const source = String(task.source || 'manual');
-        const metaParts = [
-            task.company_name || task.company?.name || '',
-            task.project_name || task.project?.name || '',
-            source,
-        ].filter(Boolean);
-        return `
-            <article class="assets-ticket-card" data-task-id="${taskId}">
-                <div class="assets-ticket-card-head">
-                    <div>
-                        <h4>${escapeHtml(task.title || `Ticket ${taskId}`)}</h4>
-                        <p>${escapeHtml(metaParts.join(' · ') || `#${taskId}`)}</p>
-                    </div>
-                    <div class="assets-ticket-badges">
-                        <span class="pill">${escapeHtml(ticketType)}</span>
-                        <span class="pill">${escapeHtml(priority)}</span>
-                    </div>
-                </div>
-                <p class="assets-ticket-description">${escapeHtml(task.description || 'Sin descripcion adicional.')}</p>
-                <div class="assets-ticket-footer">
-                    <label class="field compact-field">
-                        <span>Estado</span>
-                        <select class="assets-ticket-status" data-task-id="${taskId}">
-                            <option value="pending" ${status === 'pending' ? 'selected' : ''}>pending</option>
-                            <option value="in_progress" ${status === 'in_progress' ? 'selected' : ''}>in_progress</option>
-                            <option value="done" ${status === 'done' ? 'selected' : ''}>done</option>
-                        </select>
-                    </label>
-                    <button class="btn btn-secondary assets-ticket-save" type="button" data-task-id="${taskId}">Guardar estado</button>
-                </div>
-            </article>
-        `;
-    }).join('');
+    listNode.innerHTML = filtered.map(_buildTicketCard).join('');
+}
+
+function renderAssetsOpsTickets(payload) {
+    const countNode = document.getElementById('assetsOpsTicketCount');
+    assetsOpsAllTasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+    if (countNode) {
+        countNode.textContent = String(payload?.total ?? assetsOpsAllTasks.length ?? 0);
+    }
+    _renderFilteredTickets();
 }
 
 async function loadAssetsOpsBootstrap(force = false) {
@@ -320,7 +351,7 @@ async function loadAssetsOpsBootstrap(force = false) {
 }
 
 async function loadAssetsOpsTickets() {
-    const payload = await requestJson('/api/nexus/assets-ops/tickets?limit=10');
+    const payload = await requestJson('/api/nexus/assets-ops/tickets?limit=50');
     renderAssetsOpsTickets(payload);
     return payload;
 }
@@ -810,6 +841,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('assetsOpsRefreshBtn')?.addEventListener('click', () => refreshAssetsOpsPanel(true));
     document.getElementById('assetsOpsTicketForm')?.addEventListener('submit', submitAssetsTicket);
     document.getElementById('assetsTicketFromChatBtn')?.addEventListener('click', createAssetsTicketFromChat);
+    document.getElementById('assetsOpsShowDone')?.addEventListener('change', _renderFilteredTickets);
+    document.getElementById('assetsTicketSearch')?.addEventListener('input', () => {
+        window.clearTimeout(_ticketSearchTimer);
+        _ticketSearchTimer = window.setTimeout(_renderFilteredTickets, 200);
+    });
     document.getElementById('operatorHostInput')?.addEventListener('input', syncOperatorAccessState);
     document.getElementById('operatorRdpBtn')?.addEventListener('click', launchRdpSession);
     document.getElementById('assetsOpsTicketList')?.addEventListener('click', (event) => {

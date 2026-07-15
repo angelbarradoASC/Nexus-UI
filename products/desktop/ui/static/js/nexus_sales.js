@@ -142,12 +142,21 @@ function renderInterpretation(brief, orchestration = null) {
         public_administration: "Adm. pública", restaurants: "Restaurantes", custom: "Custom",
     };
     const brandLabels = { assets: "Assets Consultores", automato: "Automato", other: "Otra" };
+    const joinOrDash = (value) => {
+        if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+        if (typeof value === "string") return value.trim() || "—";
+        return value ? String(value) : "—";
+    };
     const rows = [
         ["Vertical",   humanizeVertical(brief.vertical) || "—"],
         ["Ciudad",     brief.city || "⚠ NO DETECTADA"],
         ["Provincia",  brief.province || "—"],
         ["Región",     brief.region || "—"],
         ["Objetivo",   brief.target_description || "—"],
+        ["Must have",  joinOrDash(brief.must_have)],
+        ["Nice to have", joinOrDash(brief.nice_to_have)],
+        ["Excluir",    joinOrDash(brief.exclude)],
+        ["CRM tags",   joinOrDash(brief.crm_tags)],
         ["Resultados", String(brief.desired_count ?? 20)],
         ["Score mín.", String(brief.minimum_score ?? 40)],
         ["Marca",      brandLabels[brief.represented_by] || brief.represented_by || "—"],
@@ -351,6 +360,7 @@ function renderCrmPreview(preview, title = "Preview CRM") {
 
     const accepted = preview.results.filter((item) => item.status === "accepted");
     const blocked = preview.results.filter((item) => item.status !== "accepted");
+    const compactItems = preview.results.slice(0, 3);
     panel.innerHTML = `
         <div class="crm-preview-head">
             <div>
@@ -360,16 +370,17 @@ function renderCrmPreview(preview, title = "Preview CRM") {
             <div class="crm-preview-meta">
                 <span class="pill">${escapeHtml(`${accepted.length} listos`)}</span>
                 <span class="pill">${escapeHtml(`${blocked.length} bloqueados`)}</span>
+                <span class="pill">${escapeHtml(`${preview.results.length} total`)}</span>
             </div>
         </div>
         <div class="crm-preview-list">
-            ${preview.results.map((item) => `
+            ${compactItems.map((item) => `
                 <article class="crm-preview-item">
                     <strong>${escapeHtml(item.company_name || item.company_payload?.name || item.result_id || "Lead")}</strong>
-                    <span>${escapeHtml(item.message || (item.status === "accepted" ? "Preview generada" : "Requiere revision"))}</span>
-                    <span>${escapeHtml(item.company_payload?.domain || item.pipeline_payload?.contact_email || "")}</span>
+                    <span>${escapeHtml((item.status === "accepted" ? "Listo" : "Revision") + (item.company_payload?.domain || item.pipeline_payload?.contact_email ? " · " + (item.company_payload?.domain || item.pipeline_payload?.contact_email) : ""))}</span>
                 </article>
             `).join("")}
+            ${preview.results.length > compactItems.length ? `<div class="empty-state crm-preview-more">+${preview.results.length - compactItems.length} más</div>` : ""}
         </div>
     `;
     panel.classList.remove("hidden-btn");

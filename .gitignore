@@ -19,11 +19,11 @@ env/
 !.env.example
 
 # Logs and runtime data
-logs/
+/logs/
 *.log
-exports/
-release/
-tempo-data/
+/exports/
+/release/
+/tempo-data/
 tmp-operator-*.png
 *.zip
 
@@ -31,10 +31,11 @@ tmp-operator-*.png
 mongodb/data/
 redis/data/
 grafana/data/
+app/data/
 
 # Historical and audit dumps
-AUDIT/
-OLD/
+/AUDIT/
+/OLD/
 
 # OS / editors
 .DS_Store
@@ -51,9 +52,9 @@ dist/
 node_modules/
 
 # Local persistence and mutable runtime state
-data/
-runtime/
-backups/
+/data/
+/runtime/
+/backups/
 *.sqlite
 *.sqlite3
 *.db

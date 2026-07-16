@@ -14,6 +14,7 @@ from nexus.security.desktop_secret_store import (
 from desktop.config import DesktopSettings
 from desktop.storage.atomic_io import atomic_write_text
 from desktop.storage.provider_config import DesktopLLMProviderConfig
+from desktop.storage.router_config import DesktopLLMRouterConfig
 
 if TYPE_CHECKING:
     from desktop.opennexus.models import OpenNexusResult
@@ -34,6 +35,7 @@ class DesktopLocalState:
         self.history_dir = settings.history_dir
         self.shell_history_path = settings.shell_history_path
         self.llm_provider_config_path = settings.llm_provider_config_path
+        self.llm_router_config_path = settings.llm_router_config_path
         self._provider_secret_store = provider_secret_store
 
     def ensure_layout(self) -> None:
@@ -70,6 +72,26 @@ class DesktopLocalState:
         lines = [json.dumps(item.to_dict(), ensure_ascii=False) for item in items]
         content = ("\n".join(lines) + "\n") if lines else ""
         atomic_write_text(self.shell_history_path, content, encoding="utf-8")
+
+    def load_llm_router_config(self) -> DesktopLLMRouterConfig | None:
+        self.ensure_layout()
+        if not self.llm_router_config_path.exists():
+            return None
+        try:
+            payload = json.loads(self.llm_router_config_path.read_text(encoding="utf-8"))
+            return DesktopLLMRouterConfig.from_dict(payload)
+        except Exception:
+            return None
+
+    def save_llm_router_config(self, config: DesktopLLMRouterConfig) -> DesktopLLMRouterConfig:
+        self.ensure_layout()
+        config = config.touched()
+        atomic_write_text(
+            self.llm_router_config_path,
+            json.dumps(config.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return config
 
     def load_llm_provider_config(self) -> DesktopLLMProviderConfig:
         self.ensure_layout()
@@ -149,6 +171,46 @@ class DesktopLocalState:
             self.llm_provider_config_path.read_text(encoding="utf-8"),
             encoding="utf-8",
         )
+
+    def load_sales_config(self) -> dict | None:
+        self.ensure_layout()
+        path = self.settings.sales_config_path
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def save_sales_config(self, data: dict) -> dict:
+        self.ensure_layout()
+        data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        atomic_write_text(
+            self.settings.sales_config_path,
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return data
+
+    def load_campaign_config(self) -> dict | None:
+        self.ensure_layout()
+        path = self.settings.campaign_config_path
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def save_campaign_config(self, data: dict) -> dict:
+        self.ensure_layout()
+        data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        atomic_write_text(
+            self.settings.campaign_config_path,
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return data
 
     @staticmethod
     def _default_provider_credential_ref(provider_config: DesktopLLMProviderConfig) -> str:

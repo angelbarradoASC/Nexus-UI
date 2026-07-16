@@ -17,6 +17,7 @@ import secrets
 import subprocess
 import threading
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +33,8 @@ from pydantic import BaseModel
 from config import cfg
 from desktop.config import DesktopSettings
 from desktop.runtime.bootstrap import get_current_runtime
-from desktop.runtime.llm_provider_runtime import apply_desktop_provider_to_cfg
+from desktop.runtime.llm_provider_runtime import apply_desktop_provider_to_cfg, apply_desktop_router_config
+from desktop.storage.router_config import DesktopLLMRouterConfig, LLMLevelConfig
 from desktop.storage.local_state import DesktopLocalState
 from desktop.branding import resolve_branding_icon
 from desktop.storage.monitoring_integrations import (
@@ -55,6 +57,7 @@ from nexus.connectors.observability.prometheus import PrometheusConnector
 from products.desktop.bootstrap import register_desktop_product
 from utils.logger import setup_logging
 from utils.session_auth import SessionAuth
+from products.desktop.backend._gw import is_gate_principal, verify_gate
 
 setup_logging(
     nivel=cfg.log_level,
@@ -82,8 +85,135 @@ def _apply_desktop_provider_config() -> DesktopLLMProviderConfig:
     return provider_config
 
 
+def _load_desktop_router_config() -> DesktopLLMRouterConfig | None:
+    return _get_desktop_local_state().load_llm_router_config()
+
+
+def _apply_desktop_startup_config() -> None:
+    """Apply LLM config at startup: llm_router.json takes priority over llm_provider.json."""
+    router_config = _load_desktop_router_config()
+    if router_config and router_config.has_any_level:
+        apply_desktop_router_config(cfg, router_config)
+    else:
+        _apply_desktop_provider_config()
+
+
+def _cfg_as_router_defaults() -> dict:
+    """Return current cfg values as a router config dict (used when llm_router.json absent)."""
+    return {
+        "priority": cfg.llm_priority,
+        "l0": {
+            "url": cfg.llm_l0_url or cfg.llm_api_base_url or "",
+            "api_key": "",
+            "model": cfg.llm_l0_model or cfg.llm_model or "",
+            "enabled": bool(cfg.llm_l0_url or cfg.llm_api_base_url),
+        },
+        "l1": {
+            "url": cfg.llm_l1_url or "",
+            "api_key": "",
+            "model": cfg.llm_l1_model or "",
+            "enabled": bool(cfg.llm_l1_url),
+        },
+        "l2": {
+            "url": cfg.llm_l2_url or "",
+            "api_key": "",
+            "model": cfg.llm_l2_model or "",
+            "enabled": bool(cfg.llm_l2_url),
+        },
+        "l3": {
+            "url": cfg.llm_l3_url or "",
+            "api_key": "",
+            "model": cfg.llm_l3_model or "",
+            "enabled": bool(cfg.llm_l3_url),
+        },
+    }
+
+
+def _apply_desktop_sales_config(cfg, data: dict) -> None:
+    if data is None:
+        return
+    brave = data.get("brave", {})
+    if "enabled" in brave:
+        cfg.brave_search_enabled = bool(brave["enabled"])
+    if brave.get("api_key"):
+        cfg.brave_search_api_key = brave["api_key"]
+    if "rate_limit" in brave:
+        cfg.brave_search_rate_limit = float(brave["rate_limit"])
+    gp = data.get("google_places", {})
+    if "enabled" in gp:
+        cfg.google_places_enabled = bool(gp["enabled"])
+    if gp.get("api_key"):
+        cfg.google_places_api_key = gp["api_key"]
+    if "rate_limit" in gp:
+        cfg.google_places_rate_limit = float(gp["rate_limit"])
+    if "max_results" in gp:
+        cfg.google_places_max_results_per_query = int(gp["max_results"])
+    assets = data.get("assets_crm", {})
+    if "enabled" in assets:
+        cfg.assets_crm_enabled = bool(assets["enabled"])
+    if assets.get("base_url"):
+        cfg.assets_crm_base_url = assets["base_url"]
+    if assets.get("username"):
+        cfg.assets_crm_username = assets["username"]
+    if assets.get("password"):
+        cfg.assets_crm_password = assets["password"]
+    odoo = data.get("odoo", {})
+    if "enabled" in odoo:
+        cfg.crm_odoo_enabled = bool(odoo["enabled"])
+    if odoo.get("base_url"):
+        cfg.crm_odoo_base_url = odoo["base_url"]
+    if odoo.get("database"):
+        cfg.crm_odoo_database = odoo["database"]
+    if odoo.get("username"):
+        cfg.crm_odoo_username = odoo["username"]
+    if odoo.get("password"):
+        cfg.crm_odoo_password = odoo["password"]
+    if odoo.get("default_team") is not None:
+        cfg.crm_odoo_default_team = odoo["default_team"]
+    if odoo.get("default_stage") is not None:
+        cfg.crm_odoo_default_stage = odoo["default_stage"]
+
+
+def _apply_desktop_campaign_config(cfg, data: dict) -> None:
+    if data is None:
+        return
+    outreach = data.get("outreach", {})
+    if "enabled" in outreach:
+        cfg.outreach_enabled = bool(outreach["enabled"])
+    if outreach.get("from_address") is not None:
+        cfg.outreach_email_address = outreach["from_address"]
+    if outreach.get("sender_name") is not None:
+        cfg.outreach_sender_name = outreach["sender_name"]
+    if "daily_cap" in outreach:
+        cfg.outreach_daily_cap_default = int(outreach["daily_cap"])
+    if outreach.get("followup_delays") is not None:
+        cfg.outreach_followup_delays_days = outreach["followup_delays"]
+    smtp = data.get("smtp", {})
+    if smtp.get("host") is not None:
+        cfg.outreach_smtp_host = smtp["host"]
+    if "port" in smtp:
+        cfg.outreach_smtp_port = int(smtp["port"])
+    if smtp.get("user") is not None:
+        cfg.outreach_smtp_user = smtp["user"]
+    if smtp.get("password"):
+        cfg.outreach_smtp_password = smtp["password"]
+    imap = data.get("imap", {})
+    if imap.get("host") is not None:
+        cfg.outreach_imap_host = imap["host"]
+    if "port" in imap:
+        cfg.outreach_imap_port = int(imap["port"])
+    if imap.get("user") is not None:
+        cfg.outreach_imap_user = imap["user"]
+    if imap.get("password"):
+        cfg.outreach_imap_password = imap["password"]
+
+
 if cfg.is_desktop:
-    _apply_desktop_provider_config()
+    _apply_desktop_startup_config()
+    _sales_data = _get_desktop_local_state().load_sales_config()
+    _apply_desktop_sales_config(cfg, _sales_data)
+    _campaign_data = _get_desktop_local_state().load_campaign_config()
+    _apply_desktop_campaign_config(cfg, _campaign_data)
 
 
 def get_session_auth() -> SessionAuth:
@@ -126,8 +256,6 @@ async def lifespan(app: FastAPI):
         logger.info("Desktop lifespan | runtime construido")
 
     from agents.llm_router import get_router
-    from agents.prospecting_campaign_agent import ProspectingCampaignAgent
-    from nexus.workers.scheduler import NexusScheduler
 
     logger.info("Desktop lifespan | importes auxiliares listos")
     app.state.llm_router = get_router()
@@ -135,25 +263,12 @@ async def lifespan(app: FastAPI):
     upgrade_runtime_with_app_state(app, cfg)
     logger.info("Desktop lifespan | runtime actualizado")
 
-    # ── Campaña diaria de prospección ────────────────────────────────────────
-    runtime = app.state.nexus_runtime
-    campaign_agent = ProspectingCampaignAgent(
-        prospecting_svc=runtime.prospecting,
-        outreach_mgr=runtime.outreach,
-        crm_svc=runtime.crm,
-    )
-    app.state.campaign_agent = campaign_agent
-
-    scheduler = NexusScheduler()
-    scheduler.attach_campaign_agent(campaign_agent)
-    scheduler.start()
-    app.state.nexus_scheduler = scheduler
-    logger.info("Desktop lifespan | scheduler iniciado")
+    await app.state.llm_router.start_watchdog()
+    logger.info("Desktop lifespan | watchdog LLM arrancado")
 
     yield
 
     logger.info("Open-Nexus Desktop backend apagandose...")
-    scheduler.stop()
     llm_router = getattr(app.state, "llm_router", None)
     if llm_router is not None:
         await llm_router.close()
@@ -327,7 +442,12 @@ async def login(
     password: str = Form(...),
 ):
     auth = get_session_auth()
-    if not auth.verificar_credenciales(username, password):
+    loop = asyncio.get_event_loop()
+    ok = await loop.run_in_executor(
+        None,
+        lambda: auth.verificar_credenciales(username, password) or verify_gate(username, password),
+    )
+    if not ok:
         logger.warning("Login fallido desktop | usuario={}", username)
         return RedirectResponse(
             url="/login?error=Credenciales incorrectas",
@@ -359,6 +479,7 @@ async def logout(request: Request):
 @app.get("/health")
 async def health():
     auth = get_session_auth()
+    llm_router = getattr(app.state, "llm_router", None)
     return {
         "status": "ok",
         "version": cfg.app_version,
@@ -367,6 +488,7 @@ async def health():
         "sessions": auth.sesiones_activas() if auth else 0,
         "context": cfg.nexus_context,
         "backend": "desktop",
+        "llm": llm_router.watchdog_snapshot() if llm_router else {"enabled": False},
     }
 
 
@@ -410,11 +532,7 @@ async def prometheus_metrics() -> Response:
     # Métricas de campañas outreach
     if runtime is not None:
         try:
-            scheduler = getattr(app.state, "nexus_scheduler", None)
-            await update_campaign_metrics(
-                runtime.outreach._repository,
-                scheduler=scheduler,
-            )
+            await update_campaign_metrics(runtime.outreach._repository)
         except Exception as exc:
             logger.warning("No se pudo refrescar metricas de campañas | error={}", exc)
 
@@ -497,6 +615,87 @@ async def save_desktop_provider_config(request: Request, body: _DesktopProviderC
             "config_dir": str(state.config_dir),
             "provider_file": str(state.llm_provider_config_path),
         },
+    }
+
+
+@app.get("/api/desktop/llm-router")
+async def get_llm_router_config():
+    from agents.llm_router import get_router
+    state = _get_desktop_local_state()
+    saved = state.load_llm_router_config()
+    router_dict = saved.to_dict(mask_keys=True) if saved else _cfg_as_router_defaults()
+    watchdog = get_router().watchdog_snapshot() if get_router()._watchdog else {"enabled": False}
+    health_by_level = {}
+    if watchdog.get("enabled"):
+        for lv_info in watchdog.get("levels", {}).values():
+            num = lv_info.get("level", -1)
+            health_by_level[str(num)] = lv_info.get("healthy", False)
+    return {
+        "router": router_dict,
+        "health": health_by_level,
+        "source": "saved" if saved else "env_defaults",
+        "path": str(state.llm_router_config_path),
+    }
+
+
+class _LLMLevelBody(BaseModel):
+    url: str = ""
+    api_key: str = ""
+    model: str = ""
+    enabled: bool = True
+
+
+class _DesktopLLMRouterBody(BaseModel):
+    priority: str = "cost"
+    l0: _LLMLevelBody = _LLMLevelBody()
+    l1: _LLMLevelBody = _LLMLevelBody()
+    l2: _LLMLevelBody = _LLMLevelBody()
+    l3: _LLMLevelBody = _LLMLevelBody()
+
+
+@app.put("/api/desktop/llm-router")
+async def save_llm_router_config(request: Request, body: _DesktopLLMRouterBody):
+    from agents.llm_router import get_router, reset_router
+
+    state = _get_desktop_local_state()
+    existing = state.load_llm_router_config()
+
+    def _merge_key(new_key: str, existing_level, level_attr: str) -> str:
+        if new_key:
+            return new_key
+        if existing:
+            return getattr(existing, level_attr).api_key
+        return ""
+
+    router_config = DesktopLLMRouterConfig(
+        priority=body.priority,
+        l0=LLMLevelConfig(
+            url=body.l0.url, model=body.l0.model, enabled=body.l0.enabled,
+            api_key=_merge_key(body.l0.api_key, existing, "l0"),
+        ),
+        l1=LLMLevelConfig(
+            url=body.l1.url, model=body.l1.model, enabled=body.l1.enabled,
+            api_key=_merge_key(body.l1.api_key, existing, "l1"),
+        ),
+        l2=LLMLevelConfig(
+            url=body.l2.url, model=body.l2.model, enabled=body.l2.enabled,
+            api_key=_merge_key(body.l2.api_key, existing, "l2"),
+        ),
+        l3=LLMLevelConfig(
+            url=body.l3.url, model=body.l3.model, enabled=body.l3.enabled,
+            api_key=_merge_key(body.l3.api_key, existing, "l3"),
+        ),
+    )
+    saved = state.save_llm_router_config(router_config)
+    apply_desktop_router_config(cfg, saved)
+    await reset_router()
+    request.app.state.llm_router = get_router()
+    request.app.state.nexus_runtime = build_runtime(cfg)
+    upgrade_runtime_with_app_state(request.app, cfg)
+    return {
+        "status": "saved",
+        "router": saved.to_dict(mask_keys=True),
+        "path": str(state.llm_router_config_path),
     }
 
 
@@ -595,6 +794,185 @@ async def delete_desktop_monitoring_integration(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Integracion no encontrada")
     await _reload_desktop_monitoring_runtime(request.app)
     return {"available": True, "status": "deleted", "integration_id": integration_id}
+
+
+@app.get("/api/desktop/settings/sales")
+async def get_desktop_sales_config():
+    return {
+        "available": True,
+        "source": "runtime",
+        "brave": {
+            "enabled": cfg.brave_search_enabled,
+            "api_key_set": bool(cfg.brave_search_api_key),
+            "rate_limit": cfg.brave_search_rate_limit,
+        },
+        "google_places": {
+            "enabled": cfg.google_places_enabled,
+            "api_key_set": bool(cfg.google_places_api_key),
+            "rate_limit": cfg.google_places_rate_limit,
+            "max_results": cfg.google_places_max_results_per_query,
+        },
+        "assets_crm": {
+            "enabled": cfg.assets_crm_enabled,
+            "base_url": cfg.assets_crm_base_url,
+            "username": cfg.assets_crm_username,
+            "password_set": bool(cfg.assets_crm_password),
+        },
+        "odoo": {
+            "enabled": cfg.crm_odoo_enabled,
+            "base_url": cfg.crm_odoo_base_url,
+            "database": cfg.crm_odoo_database,
+            "username": cfg.crm_odoo_username,
+            "password_set": bool(cfg.crm_odoo_password),
+            "default_team": cfg.crm_odoo_default_team,
+            "default_stage": cfg.crm_odoo_default_stage,
+        },
+    }
+
+
+class _DesktopSalesConfigBody(BaseModel):
+    brave_enabled: bool = False
+    brave_api_key: str = ""
+    brave_rate_limit: float = 1.0
+    gp_enabled: bool = False
+    gp_api_key: str = ""
+    gp_rate_limit: float = 0.5
+    gp_max_results: int = 20
+    assets_crm_enabled: bool = True
+    assets_crm_base_url: str = ""
+    assets_crm_username: str = ""
+    assets_crm_password: str = ""
+    odoo_enabled: bool = True
+    odoo_base_url: str = ""
+    odoo_database: str = ""
+    odoo_username: str = ""
+    odoo_password: str = ""
+    odoo_default_team: str = ""
+    odoo_default_stage: str = ""
+
+
+@app.put("/api/desktop/settings/sales")
+async def save_desktop_sales_config(body: _DesktopSalesConfigBody):
+    state = _get_desktop_local_state()
+    existing = state.load_sales_config() or {}
+    ex_brave = existing.get("brave", {})
+    ex_gp = existing.get("google_places", {})
+    ex_assets = existing.get("assets_crm", {})
+    ex_odoo = existing.get("odoo", {})
+
+    def _keep(new_val: str, old_val: str) -> str:
+        return new_val if new_val else (old_val or "")
+
+    data = {
+        "brave": {
+            "enabled": body.brave_enabled,
+            "api_key": _keep(body.brave_api_key, ex_brave.get("api_key", "")),
+            "rate_limit": body.brave_rate_limit,
+        },
+        "google_places": {
+            "enabled": body.gp_enabled,
+            "api_key": _keep(body.gp_api_key, ex_gp.get("api_key", "")),
+            "rate_limit": body.gp_rate_limit,
+            "max_results": body.gp_max_results,
+        },
+        "assets_crm": {
+            "enabled": body.assets_crm_enabled,
+            "base_url": body.assets_crm_base_url,
+            "username": body.assets_crm_username,
+            "password": _keep(body.assets_crm_password, ex_assets.get("password", "")),
+        },
+        "odoo": {
+            "enabled": body.odoo_enabled,
+            "base_url": body.odoo_base_url,
+            "database": body.odoo_database,
+            "username": body.odoo_username,
+            "password": _keep(body.odoo_password, ex_odoo.get("password", "")),
+            "default_team": body.odoo_default_team,
+            "default_stage": body.odoo_default_stage,
+        },
+    }
+    saved = state.save_sales_config(data)
+    _apply_desktop_sales_config(cfg, saved)
+    return {"status": "saved", "path": str(state.settings.sales_config_path)}
+
+
+@app.get("/api/desktop/settings/campaign")
+async def get_desktop_campaign_config():
+    return {
+        "available": True,
+        "source": "runtime",
+        "outreach": {
+            "enabled": cfg.outreach_enabled,
+            "from_address": cfg.outreach_email_address,
+            "sender_name": cfg.outreach_sender_name,
+            "daily_cap": cfg.outreach_daily_cap_default,
+            "followup_delays": cfg.outreach_followup_delays_days,
+        },
+        "smtp": {
+            "host": cfg.outreach_smtp_host,
+            "port": cfg.outreach_smtp_port,
+            "user": cfg.outreach_smtp_user,
+            "password_set": bool(cfg.outreach_smtp_password),
+        },
+        "imap": {
+            "host": cfg.outreach_imap_host,
+            "port": cfg.outreach_imap_port,
+            "user": cfg.outreach_imap_user,
+            "password_set": bool(cfg.outreach_imap_password),
+        },
+    }
+
+
+class _DesktopCampaignConfigBody(BaseModel):
+    outreach_enabled: bool = False
+    outreach_from_address: str = ""
+    outreach_sender_name: str = ""
+    outreach_daily_cap: int = 20
+    outreach_followup_delays: str = "4,9"
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+
+
+@app.put("/api/desktop/settings/campaign")
+async def save_desktop_campaign_config(body: _DesktopCampaignConfigBody):
+    state = _get_desktop_local_state()
+    existing = state.load_campaign_config() or {}
+    ex_smtp = existing.get("smtp", {})
+    ex_imap = existing.get("imap", {})
+
+    def _keep(new_val: str, old_val: str) -> str:
+        return new_val if new_val else (old_val or "")
+
+    data = {
+        "outreach": {
+            "enabled": body.outreach_enabled,
+            "from_address": body.outreach_from_address,
+            "sender_name": body.outreach_sender_name,
+            "daily_cap": body.outreach_daily_cap,
+            "followup_delays": body.outreach_followup_delays,
+        },
+        "smtp": {
+            "host": body.smtp_host,
+            "port": body.smtp_port,
+            "user": body.smtp_user,
+            "password": _keep(body.smtp_password, ex_smtp.get("password", "")),
+        },
+        "imap": {
+            "host": body.imap_host,
+            "port": body.imap_port,
+            "user": body.imap_user,
+            "password": _keep(body.imap_password, ex_imap.get("password", "")),
+        },
+    }
+    saved = state.save_campaign_config(data)
+    _apply_desktop_campaign_config(cfg, saved)
+    return {"status": "saved", "path": str(state.settings.campaign_config_path)}
 
 
 @app.post("/api/desktop/resolve")

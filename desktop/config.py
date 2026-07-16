@@ -61,6 +61,18 @@ class DesktopSettings:
     def monitoring_config_db_path(self) -> Path:
         return self.config_dir / "monitoring_integrations.db"
 
+    @property
+    def llm_router_config_path(self) -> Path:
+        return self.config_dir / "llm_router.json"
+
+    @property
+    def sales_config_path(self) -> Path:
+        return self.config_dir / "sales_config.json"
+
+    @property
+    def campaign_config_path(self) -> Path:
+        return self.config_dir / "campaign_config.json"
+
     @classmethod
     def from_env(cls) -> "DesktopSettings":
         """Build desktop settings from environment variables."""

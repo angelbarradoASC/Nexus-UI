@@ -61,6 +61,8 @@ html {
 
 .settings-panel.is-active {
     display: flex;
+    flex: 1;
+    min-height: 0;
 }
 
 .panel-hero,
@@ -258,6 +260,115 @@ html {
     align-content: start;
 }
 
+.router-config-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.router-priority-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.router-priority-row .field {
+    max-width: 420px;
+    flex: 1;
+}
+
+.router-levels {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.level-card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.level-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.level-badge {
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(143, 199, 177, 0.15);
+    color: var(--accent, #8fc7b1);
+    border: 1px solid rgba(143, 199, 177, 0.3);
+    flex-shrink: 0;
+}
+
+.level-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    flex: 1;
+}
+
+.level-health {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.level-health-ok {
+    background: rgba(80, 180, 120, 0.15);
+    color: #50b478;
+    border: 1px solid rgba(80, 180, 120, 0.3);
+}
+
+.level-health-fail {
+    background: rgba(220, 80, 80, 0.12);
+    color: #dc6060;
+    border: 1px solid rgba(220, 80, 80, 0.25);
+}
+
+.level-health-off {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--muted);
+    border: 1px solid var(--line);
+}
+
+.level-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.level-card-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+.router-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-top: 4px;
+}
+
 .operator-form {
     display: flex;
     flex-direction: column;
@@ -399,6 +510,83 @@ html {
     font-size: 12px;
 }
 
+.operator-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+}
+
+.operator-layout > .settings-two-column {
+    flex: 0 1 auto;
+    max-height: 50%;
+    overflow: auto;
+}
+
+.module-form-shell {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.module-form-body {
+    flex: 0 1 auto;
+    max-height: 50%;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.module-prompt-block {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.module-prompt-block .prompt-settings-layout {
+    flex: 1;
+    min-height: 0;
+}
+
+.module-prompt-block .prompt-settings-sidebar,
+.module-prompt-block .prompt-settings-editor {
+    min-height: 0;
+    overflow: auto;
+}
+
+.module-section {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.module-section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.module-section-head h3 {
+    margin: 0;
+}
+
+/* Compensate CSS zoom so shell fills the full physical window */
+.shell {
+    height: calc(100vh / 0.75);
+}
+
 @media (max-width: 1180px) {
     .settings-layout,
     .settings-two-column,
@@ -407,8 +595,13 @@ html {
         grid-template-columns: 1fr;
     }
 
-    .settings-grid {
+    .settings-grid,
+    .settings-grid-4 {
         grid-template-columns: 1fr;
+    }
+
+    .settings-grid-item-wide {
+        grid-column: auto;
     }
 
     .integration-groups {

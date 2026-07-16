@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
@@ -25,6 +25,19 @@ def _resolve_session_user(request: Request) -> tuple[str | None, bool]:
         return None, False
     admin_username = "admin" if auth.existe_usuario("admin") else auth.primer_usuario()
     return username, username == admin_username
+
+
+def _auth_guard(request: Request) -> RedirectResponse | None:
+    """Returns a redirect to /login if no valid session, else None."""
+    auth = getattr(request.app.state, "session_auth", None)
+    if auth is None:
+        return RedirectResponse(url="/login", status_code=302)
+    token = request.cookies.get("session_token")
+    if not token:
+        return RedirectResponse(url="/login", status_code=302)
+    if not auth.verificar_sesion(token):
+        return RedirectResponse(url="/login", status_code=302)
+    return None
 
 
 def _page_context(
@@ -47,47 +60,64 @@ def _page_context(
 
 @router.get("/nexus-v1", response_class=HTMLResponse)
 async def nexus_v1_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Operador", active_primary="operator")
     return templates.TemplateResponse("nexus_v1.html", context)
 
 
 @router.get("/nexus-prompts", response_class=HTMLResponse)
 async def nexus_prompts_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Prompting", active_primary="", active_admin="settings")
     return templates.TemplateResponse("nexus_prompts.html", context)
 
 
 @router.get("/nexus-sales", response_class=HTMLResponse)
 async def nexus_sales_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Sales", active_primary="sales")
     return templates.TemplateResponse("nexus_sales.html", context)
 
 
+@router.get("/nexus-pepo", response_class=HTMLResponse)
+async def nexus_pepo_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
+    context = _page_context(request, page_title="PEPO", active_primary="pepo")
+    return templates.TemplateResponse("nexus_pepo.html", context)
+
+
 @router.get("/nexus/settings", response_class=HTMLResponse)
 async def nexus_settings_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Configuracion", active_primary="", active_admin="settings")
     return templates.TemplateResponse("nexus_settings.html", context)
 
 
 @router.get("/open-nexus", response_class=HTMLResponse)
 async def open_nexus_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Shell", active_primary="shell")
     return templates.TemplateResponse("open_nexus.html", context)
 
 
 @router.get("/open-nexus/models", response_class=HTMLResponse)
 async def open_nexus_models_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Modelos", active_primary="", active_admin="settings")
     return templates.TemplateResponse("open_nexus_models.html", context)
 
 
 @router.get("/nexus/vault", response_class=HTMLResponse)
 async def nexus_vault_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
     context = _page_context(request, page_title="Vault", active_primary="", active_admin="vault")
     return templates.TemplateResponse("nexus_vault.html", context)
 
-
-@router.get("/nexus/campaign", response_class=HTMLResponse)
-async def nexus_campaign_page(request: Request):
-    context = _page_context(request, page_title="Campana", active_primary="", active_admin="campaign")
-    return templates.TemplateResponse("nexus_campaign.html", context)

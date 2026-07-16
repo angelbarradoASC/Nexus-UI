@@ -50,7 +50,6 @@ function esc(value) {
 
 const settingsState = {
     prompts: [],
-    selectedPromptKey: null,
     integrations: [],
 };
 
@@ -96,53 +95,6 @@ async function loadGeneralSummary() {
     `).join("");
 }
 
-function renderPromptList() {
-    const container = document.getElementById("promptGroupList");
-    if (!settingsState.prompts.length) {
-        container.innerHTML = '<div class="empty-state-sm">No hay prompts cargados.</div>';
-        return;
-    }
-    const groups = settingsState.prompts.reduce((acc, prompt) => {
-        if (!acc[prompt.group]) {
-            acc[prompt.group] = [];
-        }
-        acc[prompt.group].push(prompt);
-        return acc;
-    }, {});
-
-    container.innerHTML = Object.entries(groups).map(([group, prompts]) => `
-        <section class="prompt-group">
-            <p class="prompt-group-title">${esc(group)}</p>
-            ${prompts.map((prompt) => `
-                <button class="prompt-nav-item ${prompt.key === settingsState.selectedPromptKey ? "active" : ""}" type="button" data-prompt-key="${esc(prompt.key)}">
-                    <strong>${esc(prompt.title)}</strong>
-                    <span>${esc(prompt.description)}</span>
-                </button>
-            `).join("")}
-        </section>
-    `).join("");
-
-    container.querySelectorAll("[data-prompt-key]").forEach((button) => {
-        button.addEventListener("click", () => selectPrompt(button.dataset.promptKey));
-    });
-}
-
-function selectPrompt(key) {
-    const prompt = settingsState.prompts.find((item) => item.key === key);
-    if (!prompt) {
-        return;
-    }
-    settingsState.selectedPromptKey = key;
-    document.getElementById("promptGroupLabel").textContent = prompt.group;
-    document.getElementById("promptTitle").textContent = prompt.title;
-    document.getElementById("promptKeyLabel").textContent = prompt.key;
-    document.getElementById("promptOverrideBadge").textContent = prompt.is_overridden ? "override" : "default";
-    document.getElementById("promptEditor").value = prompt.current_text;
-    document.getElementById("promptDefault").textContent = prompt.default_text;
-    document.getElementById("promptSaveStatus").textContent = prompt.is_overridden ? "Override activo" : "Sin cambios";
-    renderPromptList();
-}
-
 function upsertPrompt(prompt) {
     const index = settingsState.prompts.findIndex((item) => item.key === prompt.key);
     if (index === -1) {
@@ -152,95 +104,170 @@ function upsertPrompt(prompt) {
     }
 }
 
+function makePromptPanel(groupFilter, listId, titleId, badgeId, keyId, editorId, defaultId, statusId, saveBtnId, resetBtnId) {
+    let selectedKey = null;
+
+    function getPrompts() {
+        return settingsState.prompts.filter((p) => p.group === groupFilter);
+    }
+
+    function renderList() {
+        const container = document.getElementById(listId);
+        if (!container) return;
+        const prompts = getPrompts();
+        if (!prompts.length) {
+            container.innerHTML = '<div class="empty-state-sm">No hay prompts cargados.</div>';
+            return;
+        }
+        container.innerHTML = prompts.map((p) => `
+            <button class="prompt-nav-item ${p.key === selectedKey ? "active" : ""}" type="button" data-prompt-key="${esc(p.key)}">
+                <strong>${esc(p.title)}</strong>
+                <span>${esc(p.description)}</span>
+            </button>
+        `).join("");
+        container.querySelectorAll("[data-prompt-key]").forEach((btn) => {
+            btn.addEventListener("click", () => selectLocal(btn.dataset.promptKey));
+        });
+    }
+
+    function selectLocal(key) {
+        const prompt = settingsState.prompts.find((p) => p.key === key);
+        if (!prompt) return;
+        selectedKey = key;
+        document.getElementById(titleId).textContent = prompt.title;
+        document.getElementById(badgeId).textContent = prompt.is_overridden ? "override" : "default";
+        document.getElementById(keyId).textContent = prompt.key;
+        document.getElementById(editorId).value = prompt.current_text;
+        document.getElementById(defaultId).textContent = prompt.default_text;
+        document.getElementById(statusId).textContent = prompt.is_overridden ? "Override activo" : "Sin cambios";
+        renderList();
+    }
+
+    async function saveLocal() {
+        if (!selectedKey) return;
+        const status = document.getElementById(statusId);
+        status.textContent = "Guardando...";
+        const payload = await api.put(`/api/nexus/prompts/${encodeURIComponent(selectedKey)}`, {
+            current_text: document.getElementById(editorId).value,
+        });
+        upsertPrompt(payload.prompt);
+        selectLocal(payload.prompt.key);
+        status.textContent = "Guardado";
+    }
+
+    async function resetLocal() {
+        if (!selectedKey) return;
+        const status = document.getElementById(statusId);
+        status.textContent = "Reseteando...";
+        const payload = await api.post(`/api/nexus/prompts/${encodeURIComponent(selectedKey)}/reset`, {});
+        upsertPrompt(payload.prompt);
+        selectLocal(payload.prompt.key);
+        status.textContent = "Reset aplicado";
+    }
+
+    function init() {
+        document.getElementById(saveBtnId)?.addEventListener("click", () => {
+            saveLocal().catch((err) => { document.getElementById(statusId).textContent = err.message; });
+        });
+        document.getElementById(resetBtnId)?.addEventListener("click", () => {
+            resetLocal().catch((err) => { document.getElementById(statusId).textContent = err.message; });
+        });
+        document.getElementById(editorId)?.addEventListener("input", () => {
+            document.getElementById(statusId).textContent = "Cambios sin guardar";
+        });
+        renderList();
+        const prompts = getPrompts();
+        if (prompts.length) selectLocal(prompts[0].key);
+    }
+
+    return { init, renderList };
+}
+
+const shellPanel        = makePromptPanel("agents",     "shellPromptList",    "shellPromptTitle",    "shellPromptBadge",    "shellPromptKey",    "shellPromptEditor",    "shellPromptDefault",    "shellPromptStatus",    "shellSavePromptBtn",    "shellResetPromptBtn");
+const salesPromptPanel  = makePromptPanel("sales",      "salesPromptList",    "salesPromptTitle",    "salesPromptBadge",    "salesPromptKey",    "salesPromptEditor",    "salesPromptDefault",    "salesPromptStatus",    "salesSavePromptBtn",    "salesResetPromptBtn");
+const campanaPromptPanel= makePromptPanel("mail",       "campanaPromptList",  "campanaPromptTitle",  "campanaPromptBadge",  "campanaPromptKey",  "campanaPromptEditor",  "campanaPromptDefault",  "campanaPromptStatus",  "campanaSavePromptBtn",  "campanaResetPromptBtn");
+const operatorPromptPanel=makePromptPanel("operations", "operatorPromptList", "operatorPromptTitle", "operatorPromptBadge", "operatorPromptKey", "operatorPromptEditor", "operatorPromptDefault", "operatorPromptStatus", "operatorSavePromptBtn", "operatorResetPromptBtn");
+
 async function loadPrompts() {
     const payload = await api.get("/api/nexus/prompts");
     settingsState.prompts = payload.prompts || [];
-    renderPromptList();
-    if (settingsState.prompts.length) {
-        selectPrompt(settingsState.selectedPromptKey || settingsState.prompts[0].key);
-    }
+    [shellPanel, salesPromptPanel, campanaPromptPanel, operatorPromptPanel].forEach((p) => p.init());
 }
 
-async function savePrompt() {
-    if (!settingsState.selectedPromptKey) {
-        return;
-    }
-    const status = document.getElementById("promptSaveStatus");
+const _LEVEL_NAMES = { 0: "L0", 1: "L1", 2: "L2", 3: "L3" };
+
+function fillRouterForm(router, health) {
+    const priority = router.priority || "cost";
+    document.getElementById("routerPriority").value = priority;
+
+    [0, 1, 2, 3].forEach((n) => {
+        const lv = router[`l${n}`] || {};
+        document.getElementById(`l${n}Url`).value = lv.url || "";
+        document.getElementById(`l${n}Model`).value = lv.model || "";
+        document.getElementById(`l${n}Key`).value = "";
+        document.getElementById(`l${n}Enabled`).checked = lv.enabled !== false;
+
+        const healthEl = document.getElementById(`levelHealth${n}`);
+        const isHealthy = health && health[String(n)];
+        const configured = Boolean(lv.url && lv.model);
+        if (!configured) {
+            healthEl.textContent = "sin configurar";
+            healthEl.className = "level-health level-health-off";
+        } else if (isHealthy === true) {
+            healthEl.textContent = "activo";
+            healthEl.className = "level-health level-health-ok";
+        } else if (isHealthy === false) {
+            healthEl.textContent = "sin respuesta";
+            healthEl.className = "level-health level-health-fail";
+        } else {
+            healthEl.textContent = "pendiente";
+            healthEl.className = "level-health level-health-off";
+        }
+    });
+}
+
+async function loadRouterConfig() {
+    const payload = await api.get("/api/desktop/llm-router");
+    fillRouterForm(payload.router || {}, payload.health || {});
+    const src = payload.source === "saved" ? "configuracion guardada" : "valores del entorno";
+    document.getElementById("routerStatus").textContent = src;
+    document.getElementById("routerSaveNote").textContent = payload.path || "";
+}
+
+async function saveRouterConfig() {
+    const status = document.getElementById("routerStatus");
+    const note = document.getElementById("routerSaveNote");
     status.textContent = "Guardando...";
-    const payload = await api.put(`/api/nexus/prompts/${encodeURIComponent(settingsState.selectedPromptKey)}`, {
-        current_text: document.getElementById("promptEditor").value,
+    const payload = await api.put("/api/desktop/llm-router", {
+        priority: document.getElementById("routerPriority").value,
+        l0: {
+            url: document.getElementById("l0Url").value.trim(),
+            model: document.getElementById("l0Model").value.trim(),
+            api_key: document.getElementById("l0Key").value.trim(),
+            enabled: document.getElementById("l0Enabled").checked,
+        },
+        l1: {
+            url: document.getElementById("l1Url").value.trim(),
+            model: document.getElementById("l1Model").value.trim(),
+            api_key: document.getElementById("l1Key").value.trim(),
+            enabled: document.getElementById("l1Enabled").checked,
+        },
+        l2: {
+            url: document.getElementById("l2Url").value.trim(),
+            model: document.getElementById("l2Model").value.trim(),
+            api_key: document.getElementById("l2Key").value.trim(),
+            enabled: document.getElementById("l2Enabled").checked,
+        },
+        l3: {
+            url: document.getElementById("l3Url").value.trim(),
+            model: document.getElementById("l3Model").value.trim(),
+            api_key: document.getElementById("l3Key").value.trim(),
+            enabled: document.getElementById("l3Enabled").checked,
+        },
     });
-    upsertPrompt(payload.prompt);
-    selectPrompt(payload.prompt.key);
-    status.textContent = "Guardado";
-}
-
-async function resetPrompt() {
-    if (!settingsState.selectedPromptKey) {
-        return;
-    }
-    const status = document.getElementById("promptSaveStatus");
-    status.textContent = "Reseteando...";
-    const payload = await api.post(`/api/nexus/prompts/${encodeURIComponent(settingsState.selectedPromptKey)}/reset`, {});
-    upsertPrompt(payload.prompt);
-    selectPrompt(payload.prompt.key);
-    status.textContent = "Reset aplicado";
-}
-
-function fillProviderForm(provider) {
-    document.getElementById("providerLabel").value = provider.provider_label || "";
-    document.getElementById("providerType").value = provider.provider_type || "openai_compatible";
-    document.getElementById("providerBaseUrl").value = provider.api_base_url || "";
-    document.getElementById("providerModel").value = provider.model || "";
-    document.getElementById("providerApiKey").value = "";
-    document.getElementById("providerEnabled").checked = Boolean(provider.enabled);
-}
-
-function renderProviderSummary(payload, paths = null) {
-    const provider = payload.provider || {};
-    document.getElementById("providerSummary").innerHTML = [
-        `Etiqueta: ${provider.provider_label || "n/a"}`,
-        `Tipo: ${provider.provider_type || "n/a"}`,
-        `Base URL: ${provider.api_base_url || "n/a"}`,
-        `Modelo: ${provider.model || "n/a"}`,
-        `API key: ${provider.api_key || "sin configurar"}`,
-        `Habilitado: ${provider.enabled ? "si" : "no"}`,
-        `Aplicado: ${payload.applied ? "si" : "no"}`,
-        `Actualizado: ${provider.updated_at || "n/a"}`,
-    ].map((item) => `<div>${esc(item)}</div>`).join("");
-
-    if (paths) {
-        document.getElementById("providerPaths").innerHTML = [
-            `Config: ${paths.config_dir || "n/a"}`,
-            `Fichero: ${paths.provider_file || "n/a"}`,
-        ].map((item) => `<div>${esc(item)}</div>`).join("");
-    }
-}
-
-async function loadProviderConfig() {
-    const payload = await api.get("/api/desktop/providers");
-    fillProviderForm(payload.provider || {});
-    renderProviderSummary(payload);
-    document.getElementById("providerStatus").textContent = payload.applied
-        ? "Proveedor remoto cargado en runtime"
-        : "Todavia no hay proveedor remoto activo";
-}
-
-async function saveProviderConfig(event) {
-    event.preventDefault();
-    const status = document.getElementById("providerStatus");
-    status.textContent = "Guardando y aplicando...";
-    const payload = await api.put("/api/desktop/providers", {
-        provider_label: document.getElementById("providerLabel").value.trim(),
-        provider_type: document.getElementById("providerType").value,
-        api_base_url: document.getElementById("providerBaseUrl").value.trim(),
-        api_key: document.getElementById("providerApiKey").value.trim(),
-        model: document.getElementById("providerModel").value.trim(),
-        enabled: document.getElementById("providerEnabled").checked,
-    });
-    renderProviderSummary(payload, payload.paths);
-    document.getElementById("providerApiKey").value = "";
-    status.textContent = payload.applied ? "Proveedor guardado y aplicado" : "Configuracion guardada, pero incompleta";
+    [0, 1, 2, 3].forEach((n) => document.getElementById(`l${n}Key`).value = "");
+    status.textContent = "Aplicado";
+    note.textContent = payload.path || "";
     await loadGeneralSummary();
 }
 
@@ -412,23 +439,117 @@ async function deleteIntegration(integrationId = null, integrationName = "") {
     await Promise.all([loadIntegrations(), loadGeneralSummary()]);
 }
 
+function _updateSalesStatus(payload) {
+    const active = [
+        payload.brave.enabled,
+        payload.google_places.enabled,
+        payload.assets_crm.enabled,
+        payload.odoo.enabled,
+    ].filter(Boolean).length;
+    const el = document.getElementById("salesStatus");
+    if (!el) { return; }
+    el.textContent = `${active} fuente(s) activa(s)`;
+    el.className = active > 0 ? "info-badge" : "info-badge info-badge-muted";
+}
+
+async function loadSalesConfig() {
+    const payload = await api.get("/api/desktop/settings/sales");
+    document.getElementById("braveEnabled").checked = Boolean(payload.brave.enabled);
+    document.getElementById("braveRateLimit").value = payload.brave.rate_limit ?? "";
+    document.getElementById("gpEnabled").checked = Boolean(payload.google_places.enabled);
+    document.getElementById("gpRateLimit").value = payload.google_places.rate_limit ?? "";
+    document.getElementById("gpMaxResults").value = payload.google_places.max_results ?? "";
+    document.getElementById("assetsCrmEnabled").checked = Boolean(payload.assets_crm.enabled);
+    document.getElementById("assetsCrmUrl").value = payload.assets_crm.base_url || "";
+    document.getElementById("assetsCrmUser").value = payload.assets_crm.username || "";
+    document.getElementById("odooEnabled").checked = Boolean(payload.odoo.enabled);
+    document.getElementById("odooUrl").value = payload.odoo.base_url || "";
+    document.getElementById("odooDatabase").value = payload.odoo.database || "";
+    document.getElementById("odooUser").value = payload.odoo.username || "";
+    document.getElementById("odooTeam").value = payload.odoo.default_team || "";
+    document.getElementById("odooStage").value = payload.odoo.default_stage || "";
+    _updateSalesStatus(payload);
+}
+
+async function saveSalesConfig() {
+    const note = document.getElementById("salesSaveNote");
+    note.textContent = "Guardando...";
+    const payload = await api.put("/api/desktop/settings/sales", {
+        brave_enabled: document.getElementById("braveEnabled").checked,
+        brave_api_key: document.getElementById("braveApiKey").value.trim(),
+        brave_rate_limit: parseFloat(document.getElementById("braveRateLimit").value) || 1.0,
+        gp_enabled: document.getElementById("gpEnabled").checked,
+        gp_api_key: document.getElementById("gpApiKey").value.trim(),
+        gp_rate_limit: parseFloat(document.getElementById("gpRateLimit").value) || 0.5,
+        gp_max_results: parseInt(document.getElementById("gpMaxResults").value) || 20,
+        assets_crm_enabled: document.getElementById("assetsCrmEnabled").checked,
+        assets_crm_base_url: document.getElementById("assetsCrmUrl").value.trim(),
+        assets_crm_username: document.getElementById("assetsCrmUser").value.trim(),
+        assets_crm_password: document.getElementById("assetsCrmPassword").value,
+        odoo_enabled: document.getElementById("odooEnabled").checked,
+        odoo_base_url: document.getElementById("odooUrl").value.trim(),
+        odoo_database: document.getElementById("odooDatabase").value.trim(),
+        odoo_username: document.getElementById("odooUser").value.trim(),
+        odoo_password: document.getElementById("odooPassword").value,
+        odoo_default_team: document.getElementById("odooTeam").value.trim(),
+        odoo_default_stage: document.getElementById("odooStage").value.trim(),
+    });
+    document.getElementById("braveApiKey").value = "";
+    document.getElementById("gpApiKey").value = "";
+    document.getElementById("assetsCrmPassword").value = "";
+    document.getElementById("odooPassword").value = "";
+    note.textContent = "Guardado";
+    await loadSalesConfig();
+}
+
+async function loadCampaignConfig() {
+    const payload = await api.get("/api/desktop/settings/campaign");
+    document.getElementById("outreachEnabled").checked = Boolean(payload.outreach.enabled);
+    document.getElementById("outreachFromAddress").value = payload.outreach.from_address || "";
+    document.getElementById("outreachSenderName").value = payload.outreach.sender_name || "";
+    document.getElementById("outreachDailyCap").value = payload.outreach.daily_cap ?? "";
+    document.getElementById("outreachFollowupDelays").value = payload.outreach.followup_delays || "";
+    document.getElementById("smtpHost").value = payload.smtp.host || "";
+    document.getElementById("smtpPort").value = payload.smtp.port ?? "";
+    document.getElementById("smtpUser").value = payload.smtp.user || "";
+    document.getElementById("imapHost").value = payload.imap.host || "";
+    document.getElementById("imapPort").value = payload.imap.port ?? "";
+    document.getElementById("imapUser").value = payload.imap.user || "";
+    const statusEl = document.getElementById("campanaStatus");
+    if (statusEl) {
+        statusEl.textContent = payload.outreach.enabled ? "habilitado" : "deshabilitado";
+        statusEl.className = payload.outreach.enabled ? "info-badge" : "info-badge info-badge-muted";
+    }
+}
+
+async function saveCampaignConfig() {
+    const note = document.getElementById("campanaSaveNote");
+    note.textContent = "Guardando...";
+    await api.put("/api/desktop/settings/campaign", {
+        outreach_enabled: document.getElementById("outreachEnabled").checked,
+        outreach_from_address: document.getElementById("outreachFromAddress").value.trim(),
+        outreach_sender_name: document.getElementById("outreachSenderName").value.trim(),
+        outreach_daily_cap: parseInt(document.getElementById("outreachDailyCap").value) || 20,
+        outreach_followup_delays: document.getElementById("outreachFollowupDelays").value.trim(),
+        smtp_host: document.getElementById("smtpHost").value.trim(),
+        smtp_port: parseInt(document.getElementById("smtpPort").value) || 465,
+        smtp_user: document.getElementById("smtpUser").value.trim(),
+        smtp_password: document.getElementById("smtpPassword").value,
+        imap_host: document.getElementById("imapHost").value.trim(),
+        imap_port: parseInt(document.getElementById("imapPort").value) || 993,
+        imap_user: document.getElementById("imapUser").value.trim(),
+        imap_password: document.getElementById("imapPassword").value,
+    });
+    document.getElementById("smtpPassword").value = "";
+    document.getElementById("imapPassword").value = "";
+    note.textContent = "Guardado";
+    await loadCampaignConfig();
+}
+
 function wireEvents() {
-    document.getElementById("savePromptBtn").addEventListener("click", () => {
-        savePrompt().catch((error) => {
-            document.getElementById("promptSaveStatus").textContent = error.message;
-        });
-    });
-    document.getElementById("resetPromptBtn").addEventListener("click", () => {
-        resetPrompt().catch((error) => {
-            document.getElementById("promptSaveStatus").textContent = error.message;
-        });
-    });
-    document.getElementById("promptEditor").addEventListener("input", () => {
-        document.getElementById("promptSaveStatus").textContent = "Cambios sin guardar";
-    });
-    document.getElementById("providerForm").addEventListener("submit", (event) => {
-        saveProviderConfig(event).catch((error) => {
-            document.getElementById("providerStatus").textContent = error.message;
+    document.getElementById("saveRouterBtn").addEventListener("click", () => {
+        saveRouterConfig().catch((error) => {
+            document.getElementById("routerStatus").textContent = error.message;
         });
     });
     document.getElementById("integrationForm").addEventListener("submit", (event) => {
@@ -447,6 +568,16 @@ function wireEvents() {
         });
     });
     document.getElementById("newIntegrationBtn").addEventListener("click", resetIntegrationForm);
+    document.getElementById("saveSalesBtn").addEventListener("click", () => {
+        saveSalesConfig().catch((error) => {
+            document.getElementById("salesSaveNote").textContent = error.message;
+        });
+    });
+    document.getElementById("saveCampanaBtn").addEventListener("click", () => {
+        saveCampaignConfig().catch((error) => {
+            document.getElementById("campanaSaveNote").textContent = error.message;
+        });
+    });
 }
 
 async function bootstrap() {
@@ -456,8 +587,16 @@ async function bootstrap() {
     await Promise.all([
         loadGeneralSummary(),
         loadPrompts(),
-        loadProviderConfig(),
+        loadRouterConfig(),
         loadIntegrations(),
+        loadSalesConfig().catch(() => {
+            const el = document.getElementById("salesStatus");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadCampaignConfig().catch(() => {
+            const el = document.getElementById("campanaStatus");
+            if (el) { el.textContent = "no disponible"; }
+        }),
     ]);
 }
 

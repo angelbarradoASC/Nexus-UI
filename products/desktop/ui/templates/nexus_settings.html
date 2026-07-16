@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
-    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260615a">
+    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260715g">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
 </head>
 <body>
@@ -28,12 +28,14 @@
                 </div>
                 <div class="settings-nav" id="settingsNav">
                     <button type="button" class="settings-nav-btn active" data-section="general">General</button>
-                    <button type="button" class="settings-nav-btn" data-section="prompting">Prompting</button>
+                    <button type="button" class="settings-nav-btn" data-section="shell">Shell</button>
                     <button type="button" class="settings-nav-btn" data-section="modelos">Modelos</button>
                     <button type="button" class="settings-nav-btn" data-section="operator">Operator</button>
+                    <button type="button" class="settings-nav-btn" data-section="sales">Sales</button>
+                    <button type="button" class="settings-nav-btn" data-section="campana">Campaña</button>
                 </div>
                 <div class="settings-sidebar-note">
-                    <p>Todo lo de Nexus Desktop se gobierna desde aqui. `Sales` queda fuera para no mezclar prospeccion con operacion.</p>
+                    <p>Todo lo de Nexus Desktop se gobierna desde aqui: modelos, prompts por modulo, integraciones de Operator, y config de Sales y Campana.</p>
                 </div>
             </aside>
 
@@ -55,33 +57,28 @@
                     </div>
                 </section>
 
-                <section class="card settings-panel" data-panel="prompting">
+                <section class="card settings-panel" data-panel="shell">
                     <div class="panel-hero">
                         <div>
-                            <p class="eyebrow eyebrow-tight">Edicion viva</p>
-                            <h2>Prompting</h2>
+                            <p class="eyebrow eyebrow-tight">Agentes Shell</p>
+                            <h2>Shell</h2>
                         </div>
-                        <span id="promptSaveStatus" class="info-badge info-badge-muted">Sin cambios</span>
-                    </div>
-                    <div class="settings-note-block settings-note-inline">
-                        <strong>Sales ya usa estos prompts</strong>
-                        <p>La prospeccion autonoma de `Sales` se gobierna desde aqui: brief guardian, brief refiner, source strategist, query architect, search auditor, candidate qualifier y crm packager, ademas de interpretacion y clasificacion.</p>
+                        <span id="shellPromptStatus" class="info-badge info-badge-muted">Sin cambios</span>
                     </div>
                     <div class="prompt-settings-layout">
                         <aside class="prompt-settings-sidebar">
-                            <div id="promptGroupList" class="prompt-group-list">
+                            <div id="shellPromptList" class="prompt-group-list">
                                 <div class="empty-state-sm">Cargando prompts...</div>
                             </div>
                         </aside>
                         <section class="prompt-settings-editor">
                             <div class="prompt-editor-head">
                                 <div>
-                                    <p id="promptGroupLabel" class="eyebrow eyebrow-tight">Grupo</p>
-                                    <h3 id="promptTitle">Selecciona un prompt</h3>
+                                    <h3 id="shellPromptTitle">Selecciona un prompt</h3>
                                 </div>
                                 <div class="editor-meta">
-                                    <span id="promptOverrideBadge" class="mini-pill">default</span>
-                                    <code id="promptKeyLabel">prompt.key</code>
+                                    <span id="shellPromptBadge" class="mini-pill">default</span>
+                                    <code id="shellPromptKey">prompt.key</code>
                                 </div>
                             </div>
                             <div class="prompt-panels">
@@ -90,19 +87,19 @@
                                         <h4>Actual</h4>
                                         <span class="panel-tip">Se aplica al instante.</span>
                                     </div>
-                                    <textarea id="promptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                                    <textarea id="shellPromptEditor" class="prompt-textarea" spellcheck="false"></textarea>
                                 </section>
                                 <section class="prompt-editor-panel prompt-editor-panel-muted">
                                     <div class="prompt-panel-head">
                                         <h4>Base</h4>
                                         <span class="panel-tip">Referencia para comparar o resetear.</span>
                                     </div>
-                                    <pre id="promptDefault" class="prompt-preview"></pre>
+                                    <pre id="shellPromptDefault" class="prompt-preview"></pre>
                                 </section>
                             </div>
                             <div class="form-actions">
-                                <button id="savePromptBtn" type="button">Guardar prompt</button>
-                                <button id="resetPromptBtn" type="button">Resetear a default</button>
+                                <button id="shellSavePromptBtn" type="button">Guardar prompt</button>
+                                <button id="shellResetPromptBtn" type="button">Resetear a default</button>
                             </div>
                         </section>
                     </div>
@@ -111,55 +108,128 @@
                 <section class="card settings-panel" data-panel="modelos">
                     <div class="panel-hero">
                         <div>
-                            <p class="eyebrow eyebrow-tight">Proveedor remoto</p>
+                            <p class="eyebrow eyebrow-tight">Router LLM</p>
                             <h2>Modelos</h2>
                         </div>
-                        <span id="providerStatus" class="info-badge info-badge-muted">Cargando configuracion...</span>
+                        <span id="routerStatus" class="info-badge info-badge-muted">Cargando...</span>
                     </div>
-                    <div class="settings-two-column">
-                        <form id="providerForm" class="provider-form">
+                    <div class="router-config-shell">
+                        <div class="router-priority-row">
                             <label class="field">
-                                <span>Etiqueta</span>
-                                <input id="providerLabel" type="text" placeholder="Servidor Claude, OpenRouter, NVIDIA..." />
-                            </label>
-                            <label class="field">
-                                <span>Tipo</span>
-                                <select id="providerType">
-                                    <option value="openai_compatible">OpenAI compatible</option>
+                                <span>Estrategia de escalado</span>
+                                <select id="routerPriority">
+                                    <option value="cost">Coste — escala L0 → L1 → L2 → L3</option>
+                                    <option value="speed">Velocidad — va directo al nivel más alto</option>
+                                    <option value="balanced">Balance — empieza en L2</option>
                                 </select>
                             </label>
-                            <label class="field field-wide">
-                                <span>Base URL</span>
-                                <input id="providerBaseUrl" type="url" placeholder="http://192.168.1.150:1234/v1" />
-                            </label>
-                            <label class="field field-wide">
-                                <span>Modelo</span>
-                                <input id="providerModel" type="text" placeholder="meta/llama, claude-sonnet, openrouter/free..." />
-                            </label>
-                            <label class="field field-wide">
-                                <span>API key</span>
-                                <input id="providerApiKey" type="password" placeholder="Se guarda localmente para el desktop" />
-                            </label>
-                            <label class="toggle-row">
-                                <input id="providerEnabled" type="checkbox" />
-                                <span>Activar proveedor remoto como runtime principal</span>
-                            </label>
-                            <div class="form-actions">
-                                <button type="submit">Guardar y aplicar</button>
+                        </div>
+                        <div class="router-levels">
+                            <div class="level-card" id="levelCard0">
+                                <div class="level-card-head">
+                                    <span class="level-badge">L0</span>
+                                    <span class="level-name">Servidor local</span>
+                                    <span class="level-health" id="levelHealth0">—</span>
+                                    <label class="level-toggle">
+                                        <input type="checkbox" id="l0Enabled" checked>
+                                        <span>Activo</span>
+                                    </label>
+                                </div>
+                                <div class="level-card-fields">
+                                    <label class="field level-url">
+                                        <span>URL base</span>
+                                        <input id="l0Url" type="text" placeholder="http://88.7.236.163:48434" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Modelo</span>
+                                        <input id="l0Model" type="text" placeholder="qwen2.5:3b" />
+                                    </label>
+                                    <label class="field">
+                                        <span>API key</span>
+                                        <input id="l0Key" type="password" placeholder="no necesaria" />
+                                    </label>
+                                </div>
                             </div>
-                        </form>
-                        <aside class="settings-side-stack">
-                            <section class="settings-side-card">
-                                <p class="eyebrow eyebrow-tight">Estado</p>
-                                <h3>Activo</h3>
-                                <div id="providerSummary" class="stack"></div>
-                            </section>
-                            <section class="settings-side-card">
-                                <p class="eyebrow eyebrow-tight">Persistencia</p>
-                                <h3>Rutas</h3>
-                                <div id="providerPaths" class="stack"></div>
-                            </section>
-                        </aside>
+                            <div class="level-card" id="levelCard1">
+                                <div class="level-card-head">
+                                    <span class="level-badge">L1</span>
+                                    <span class="level-name">Remoto principal</span>
+                                    <span class="level-health" id="levelHealth1">—</span>
+                                    <label class="level-toggle">
+                                        <input type="checkbox" id="l1Enabled" checked>
+                                        <span>Activo</span>
+                                    </label>
+                                </div>
+                                <div class="level-card-fields">
+                                    <label class="field level-url">
+                                        <span>URL base</span>
+                                        <input id="l1Url" type="text" placeholder="https://openrouter.ai/api/v1" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Modelo</span>
+                                        <input id="l1Model" type="text" placeholder="meta-llama/llama-3.3-70b-instruct:free" />
+                                    </label>
+                                    <label class="field">
+                                        <span>API key</span>
+                                        <input id="l1Key" type="password" placeholder="sk-or-..." />
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="level-card" id="levelCard2">
+                                <div class="level-card-head">
+                                    <span class="level-badge">L2</span>
+                                    <span class="level-name">Remoto secundario</span>
+                                    <span class="level-health" id="levelHealth2">—</span>
+                                    <label class="level-toggle">
+                                        <input type="checkbox" id="l2Enabled" checked>
+                                        <span>Activo</span>
+                                    </label>
+                                </div>
+                                <div class="level-card-fields">
+                                    <label class="field level-url">
+                                        <span>URL base</span>
+                                        <input id="l2Url" type="text" placeholder="https://openrouter.ai/api/v1" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Modelo</span>
+                                        <input id="l2Model" type="text" placeholder="nvidia/nemotron-nano-9b-v2:free" />
+                                    </label>
+                                    <label class="field">
+                                        <span>API key</span>
+                                        <input id="l2Key" type="password" placeholder="sk-or-..." />
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="level-card" id="levelCard3">
+                                <div class="level-card-head">
+                                    <span class="level-badge">L3</span>
+                                    <span class="level-name">Fallback</span>
+                                    <span class="level-health" id="levelHealth3">—</span>
+                                    <label class="level-toggle">
+                                        <input type="checkbox" id="l3Enabled" checked>
+                                        <span>Activo</span>
+                                    </label>
+                                </div>
+                                <div class="level-card-fields">
+                                    <label class="field level-url">
+                                        <span>URL base</span>
+                                        <input id="l3Url" type="text" placeholder="https://openrouter.ai/api/v1" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Modelo</span>
+                                        <input id="l3Model" type="text" placeholder="openai/gpt-oss-20b:free" />
+                                    </label>
+                                    <label class="field">
+                                        <span>API key</span>
+                                        <input id="l3Key" type="password" placeholder="sk-or-..." />
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="saveRouterBtn" type="button" class="btn">Guardar y aplicar</button>
+                            <span id="routerSaveNote" class="assets-form-note"></span>
+                        </div>
                     </div>
                 </section>
 
@@ -171,6 +241,7 @@
                         </div>
                         <span id="operatorStatus" class="info-badge info-badge-muted">Integraciones desktop</span>
                     </div>
+                    <div class="operator-layout">
                     <div class="settings-two-column">
                         <section class="operator-list-shell">
                             <div class="operator-toolbar">
@@ -258,11 +329,362 @@
                             </div>
                         </form>
                     </div>
+                        <div class="module-section module-prompt-block">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Agentes</p>
+                                <h3>Prompts</h3>
+                                <span id="operatorPromptStatus" class="info-badge info-badge-muted">Sin cambios</span>
+                            </div>
+                            <div class="prompt-settings-layout">
+                                <aside class="prompt-settings-sidebar">
+                                    <div id="operatorPromptList" class="prompt-group-list">
+                                        <div class="empty-state-sm">Cargando...</div>
+                                    </div>
+                                </aside>
+                                <section class="prompt-settings-editor">
+                                    <div class="prompt-editor-head">
+                                        <div>
+                                            <h3 id="operatorPromptTitle">Selecciona un prompt</h3>
+                                        </div>
+                                        <div class="editor-meta">
+                                            <span id="operatorPromptBadge" class="mini-pill">default</span>
+                                            <code id="operatorPromptKey">prompt.key</code>
+                                        </div>
+                                    </div>
+                                    <div class="prompt-panels">
+                                        <section class="prompt-editor-panel">
+                                            <div class="prompt-panel-head">
+                                                <h4>Actual</h4>
+                                                <span class="panel-tip">Se aplica al instante.</span>
+                                            </div>
+                                            <textarea id="operatorPromptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                                        </section>
+                                        <section class="prompt-editor-panel prompt-editor-panel-muted">
+                                            <div class="prompt-panel-head">
+                                                <h4>Base</h4>
+                                                <span class="panel-tip">Referencia para comparar o resetear.</span>
+                                            </div>
+                                            <pre id="operatorPromptDefault" class="prompt-preview"></pre>
+                                        </section>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button id="operatorSavePromptBtn" type="button">Guardar prompt</button>
+                                        <button id="operatorResetPromptBtn" type="button">Resetear a default</button>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="card settings-panel" data-panel="sales">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Prospeccion B2B</p>
+                            <h2>Sales</h2>
+                        </div>
+                        <span id="salesStatus" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Web scraping</p>
+                                <h3>Brave Search</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="braveEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field">
+                                    <span>API key</span>
+                                    <input id="braveApiKey" type="password" placeholder="bsa-... (vacio = mantener actual)" />
+                                </label>
+                                <label class="field">
+                                    <span>Rate limit (req/s)</span>
+                                    <input id="braveRateLimit" type="number" step="0.1" min="0" max="60" placeholder="1.0" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Leads locales</p>
+                                <h3>Google Places</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="gpEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field">
+                                    <span>API key</span>
+                                    <input id="gpApiKey" type="password" placeholder="AIza... (vacio = mantener actual)" />
+                                </label>
+                                <label class="field">
+                                    <span>Rate limit (req/s)</span>
+                                    <input id="gpRateLimit" type="number" step="0.1" min="0" max="10" placeholder="0.5" />
+                                </label>
+                                <label class="field">
+                                    <span>Max resultados</span>
+                                    <input id="gpMaxResults" type="number" min="1" max="20" placeholder="20" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">CRM propio</p>
+                                <h3>Assets CRM</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="assetsCrmEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Base URL</span>
+                                    <input id="assetsCrmUrl" type="url" placeholder="http://127.0.0.1:8000" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="assetsCrmUser" type="text" placeholder="admin" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="assetsCrmPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">CRM externo</p>
+                                <h3>Odoo CRM</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="odooEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Base URL</span>
+                                    <input id="odooUrl" type="url" placeholder="http://127.0.0.1:8069" />
+                                </label>
+                                <label class="field">
+                                    <span>Base de datos</span>
+                                    <input id="odooDatabase" type="text" placeholder="crm" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="odooUser" type="text" placeholder="admin" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="odooPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                                <label class="field">
+                                    <span>Equipo default</span>
+                                    <input id="odooTeam" type="text" placeholder="opcional" />
+                                </label>
+                                <label class="field">
+                                    <span>Etapa default</span>
+                                    <input id="odooStage" type="text" placeholder="opcional" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="saveSalesBtn" type="button">Guardar Sales</button>
+                            <span id="salesSaveNote" class="assets-form-note"></span>
+                        </div>
+                        </div><!-- /module-form-body -->
+                        <div class="module-section module-prompt-block">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Agentes</p>
+                                <h3>Prompts</h3>
+                                <span id="salesPromptStatus" class="info-badge info-badge-muted">Sin cambios</span>
+                            </div>
+                            <div class="prompt-settings-layout">
+                                <aside class="prompt-settings-sidebar">
+                                    <div id="salesPromptList" class="prompt-group-list">
+                                        <div class="empty-state-sm">Cargando...</div>
+                                    </div>
+                                </aside>
+                                <section class="prompt-settings-editor">
+                                    <div class="prompt-editor-head">
+                                        <div>
+                                            <h3 id="salesPromptTitle">Selecciona un prompt</h3>
+                                        </div>
+                                        <div class="editor-meta">
+                                            <span id="salesPromptBadge" class="mini-pill">default</span>
+                                            <code id="salesPromptKey">prompt.key</code>
+                                        </div>
+                                    </div>
+                                    <div class="prompt-panels">
+                                        <section class="prompt-editor-panel">
+                                            <div class="prompt-panel-head">
+                                                <h4>Actual</h4>
+                                                <span class="panel-tip">Se aplica al instante.</span>
+                                            </div>
+                                            <textarea id="salesPromptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                                        </section>
+                                        <section class="prompt-editor-panel prompt-editor-panel-muted">
+                                            <div class="prompt-panel-head">
+                                                <h4>Base</h4>
+                                                <span class="panel-tip">Referencia para comparar o resetear.</span>
+                                            </div>
+                                            <pre id="salesPromptDefault" class="prompt-preview"></pre>
+                                        </section>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button id="salesSavePromptBtn" type="button">Guardar prompt</button>
+                                        <button id="salesResetPromptBtn" type="button">Resetear a default</button>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card settings-panel" data-panel="campana">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Email outreach</p>
+                            <h2>Campaña</h2>
+                        </div>
+                        <span id="campanaStatus" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">General</p>
+                                <h3>Outreach</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="outreachEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field">
+                                    <span>Direccion remitente</span>
+                                    <input id="outreachFromAddress" type="email" placeholder="outreach@empresa.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Nombre remitente</span>
+                                    <input id="outreachSenderName" type="text" placeholder="Assets Consultores" />
+                                </label>
+                                <label class="field">
+                                    <span>Cap diario</span>
+                                    <input id="outreachDailyCap" type="number" min="1" max="50" placeholder="20" />
+                                </label>
+                                <label class="field">
+                                    <span>Follow-up (dias, separados por coma)</span>
+                                    <input id="outreachFollowupDelays" type="text" placeholder="4,9" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Envio</p>
+                                <h3>SMTP</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="field">
+                                    <span>Host</span>
+                                    <input id="smtpHost" type="text" placeholder="smtp.gmail.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Puerto</span>
+                                    <input id="smtpPort" type="number" min="1" max="65535" placeholder="465" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="smtpUser" type="text" placeholder="user@empresa.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="smtpPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Recepcion</p>
+                                <h3>IMAP</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="field">
+                                    <span>Host</span>
+                                    <input id="imapHost" type="text" placeholder="imap.gmail.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Puerto</span>
+                                    <input id="imapPort" type="number" min="1" max="65535" placeholder="993" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="imapUser" type="text" placeholder="user@empresa.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="imapPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="saveCampanaBtn" type="button">Guardar Campaña</button>
+                            <span id="campanaSaveNote" class="assets-form-note"></span>
+                        </div>
+                        </div><!-- /module-form-body -->
+                        <div class="module-section module-prompt-block">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Agentes</p>
+                                <h3>Prompts</h3>
+                                <span id="campanaPromptStatus" class="info-badge info-badge-muted">Sin cambios</span>
+                            </div>
+                            <div class="prompt-settings-layout">
+                                <aside class="prompt-settings-sidebar">
+                                    <div id="campanaPromptList" class="prompt-group-list">
+                                        <div class="empty-state-sm">Cargando...</div>
+                                    </div>
+                                </aside>
+                                <section class="prompt-settings-editor">
+                                    <div class="prompt-editor-head">
+                                        <div>
+                                            <h3 id="campanaPromptTitle">Selecciona un prompt</h3>
+                                        </div>
+                                        <div class="editor-meta">
+                                            <span id="campanaPromptBadge" class="mini-pill">default</span>
+                                            <code id="campanaPromptKey">prompt.key</code>
+                                        </div>
+                                    </div>
+                                    <div class="prompt-panels">
+                                        <section class="prompt-editor-panel">
+                                            <div class="prompt-panel-head">
+                                                <h4>Actual</h4>
+                                                <span class="panel-tip">Se aplica al instante.</span>
+                                            </div>
+                                            <textarea id="campanaPromptEditor" class="prompt-textarea" spellcheck="false"></textarea>
+                                        </section>
+                                        <section class="prompt-editor-panel prompt-editor-panel-muted">
+                                            <div class="prompt-panel-head">
+                                                <h4>Base</h4>
+                                                <span class="panel-tip">Referencia para comparar o resetear.</span>
+                                            </div>
+                                            <pre id="campanaPromptDefault" class="prompt-preview"></pre>
+                                        </section>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button id="campanaSavePromptBtn" type="button">Guardar prompt</button>
+                                        <button id="campanaResetPromptBtn" type="button">Resetear a default</button>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
                 </section>
             </section>
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20260615a"></script>
+    <script src="/static/js/nexus_settings.js?v=20260715g"></script>
 </body>
 </html>

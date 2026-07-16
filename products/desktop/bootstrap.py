@@ -23,7 +23,6 @@ from nexus.api.routes.prompts import router as prompts_router
 from nexus.api.routes.approvals import router as approvals_router
 from nexus.api.routes.cmdb import router as cmdb_router
 from nexus.api.routes.vault import router as vault_router
-from nexus.api.routes.campaign import router as campaign_router
 from products.desktop.routes.ui import router as ui_router
 
 _DESKTOP_ROOT = Path(__file__).resolve().parent
@@ -52,5 +51,4 @@ def register_desktop_product(app: FastAPI) -> None:
     app.include_router(approvals_router, prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(cmdb_router,      prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(vault_router,     prefix="/api/nexus", tags=["desktop-nexus"])
-    app.include_router(campaign_router,  prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(ui_router, tags=["desktop-product-ui"])

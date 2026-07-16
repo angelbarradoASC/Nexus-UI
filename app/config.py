@@ -108,15 +108,15 @@ class AppConfig(BaseSettings):
     connector_retry_count: int = Field(default=2, ge=0, le=10)
 
     outreach_enabled: bool = False
-    outreach_email_address: str = "vicentearaizeta@sls.assetsconsultores.es"
-    outreach_sender_name: str = "Vicente Araizeta"
-    outreach_smtp_host: str = "smtp.migadu.com"
+    outreach_email_address: str = ""
+    outreach_sender_name: str = ""
+    outreach_smtp_host: str = ""
     outreach_smtp_port: int = Field(default=465, ge=1, le=65535)
-    outreach_smtp_user: str = "vicentearaizeta@sls.assetsconsultores.es"
+    outreach_smtp_user: str = ""
     outreach_smtp_password: str = ""
-    outreach_imap_host: str = "imap.migadu.com"
+    outreach_imap_host: str = ""
     outreach_imap_port: int = Field(default=993, ge=1, le=65535)
-    outreach_imap_user: str = "vicentearaizeta@sls.assetsconsultores.es"
+    outreach_imap_user: str = ""
     outreach_imap_password: str = ""
     outreach_daily_cap_default: int = Field(default=20, ge=1, le=50)
     outreach_followup_delays_days: str = "4,9"

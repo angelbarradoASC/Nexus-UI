@@ -52,19 +52,14 @@ def _age_days(created_at: str | None) -> float:
         return 0.0
 
 
-async def update_campaign_metrics(
-    outreach_repository,
-    scheduler=None,
-) -> None:
+async def update_campaign_metrics(outreach_repository) -> None:
     """
-    Lee campaña y estado del scheduler, actualiza todos los gauges de campaña.
+    Lee el estado de todas las campañas outreach y actualiza los gauges Prometheus.
     Nunca lanza excepciones — falla silenciosamente para no interrumpir /metrics.
     """
     try:
         campaigns = await outreach_repository.load_campaigns()
         _update_campaign_gauges(campaigns)
-        if scheduler is not None:
-            _update_scheduler_gauges(scheduler.describe())
     except Exception as exc:
         logger.warning("update_campaign_metrics: error no crítico | {}", exc)
 
@@ -120,29 +115,3 @@ def _update_campaign_gauges(campaigns: list[dict[str, Any]]) -> None:
         m.CAMPAIGNS_ACTIVE.labels(vertical=vert).set(active)
 
 
-def _update_scheduler_gauges(sched_state: dict[str, Any]) -> None:
-    last_run_at = sched_state.get("last_run_at")
-    if last_run_at:
-        try:
-            dt = datetime.fromisoformat(last_run_at)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            m.DAILY_RUN_LAST_TIMESTAMP.set(dt.timestamp())
-        except Exception:
-            pass
-
-    report = sched_state.get("last_run_report") or {}
-    if not report:
-        return
-
-    # El agente guarda el vertical en new_campaign; si no hay, usa config
-    new_camp = report.get("new_campaign") or {}
-    vertical = new_camp.get("vertical") or "inmobiliaria"
-
-    found = new_camp.get("prospects", 0) or 0
-    sent  = new_camp.get("sent_count", 0) or 0
-    m.DAILY_RUN_FOUND.labels(vertical=vertical).set(found)
-    m.DAILY_RUN_SENT.labels(vertical=vertical).set(sent)
-
-    followups = (report.get("followups") or {}).get("executed_count", 0) or 0
-    m.DAILY_RUN_FOLLOWUPS.labels(vertical=vertical).set(followups)

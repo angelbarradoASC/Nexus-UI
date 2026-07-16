@@ -145,11 +145,16 @@ function Resolve-DesktopLauncher {
         }
     }
 
-    $pythonCommand = Get-Command python -ErrorAction Stop
-    $pythonExe = $pythonCommand.Source
-    $pythonDir = Split-Path $pythonExe -Parent
-    $pythonwExe = Join-Path $pythonDir "pythonw.exe"
-    $launcherExe = if (Test-Path $pythonwExe) { $pythonwExe } else { $pythonExe }
+    $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        $launcherExe = $venvPython
+    } else {
+        $pythonCommand = Get-Command python -ErrorAction Stop
+        $pythonExe = $pythonCommand.Source
+        $pythonDir = Split-Path $pythonExe -Parent
+        $pythonwExe = Join-Path $pythonDir "pythonw.exe"
+        $launcherExe = if (Test-Path $pythonwExe) { $pythonwExe } else { $pythonExe }
+    }
 
     $sourceLauncher = [PSCustomObject]@{
         FilePath = $launcherExe

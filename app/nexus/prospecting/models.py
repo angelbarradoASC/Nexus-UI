@@ -133,17 +133,41 @@ def _normalize_slug(value: str) -> str:
     return ""
 
 
+_VERTICAL_HINTS: dict[str, tuple[str, ...]] = {
+    "restaurants": ("restauran", "hosteleria", "hostelero", "gastro", "cocina"),
+    "asesoria": ("asesor", "gestor", "gestoria", "fiscal", "laboral", "contable"),
+    "inmobiliaria": ("inmobiliaria", "inmobiliarias", "inmob", "pisos", "alquiler", "vivienda"),
+    "public_administration": ("ayuntamiento", "municipio", "administracion", "concejal"),
+    "salud": ("clinic", "dentist", "odont", "salud", "medic"),
+}
+
+
+def _slug_to_canonical(slug: str) -> str | None:
+    for canonical, hints in _VERTICAL_HINTS.items():
+        if any(hint in slug for hint in hints):
+            return canonical
+    return None
+
+
 def normalize_vertical(vertical: str | None, *, fallback_text: str = "") -> str:
     raw = _normalize_slug(vertical or "")
     if raw in KNOWN_VERTICALS:
         return raw
+    # Intenta mapear el slug a un vertical canónico por keywords
+    canonical = _slug_to_canonical(raw)
+    if canonical:
+        return canonical
+    # Si el slug no encaja con ningún vertical, prueba el texto libre como fallback
+    if fallback_text:
+        fallback_slug = _normalize_slug(fallback_text)
+        if fallback_slug in KNOWN_VERTICALS:
+            return fallback_slug
+        canonical = _slug_to_canonical(fallback_slug)
+        if canonical:
+            return canonical
+    # Conserva el slug original solo si es significativo y no es ruido del prompt
     if raw and raw != "custom":
         return raw
-    fallback = _normalize_slug(fallback_text)
-    if fallback in KNOWN_VERTICALS:
-        return fallback
-    if fallback:
-        return fallback
     return "custom"
 
 

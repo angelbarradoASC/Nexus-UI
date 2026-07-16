@@ -101,31 +101,6 @@ CAMPAIGNS_TOTAL = Gauge(
     ["vertical"],
 )
 
-# ── Métricas del scheduler diario ────────────────────────────────────────
-
-DAILY_RUN_LAST_TIMESTAMP = Gauge(
-    "nexus_daily_prospecting_last_run_timestamp",
-    "Timestamp Unix de la ultima ejecucion del ciclo diario de prospeccion",
-)
-
-DAILY_RUN_FOUND = Gauge(
-    "nexus_daily_prospecting_found_last_run",
-    "Prospectos encontrados en la ultima ejecucion por vertical",
-    ["vertical"],
-)
-
-DAILY_RUN_SENT = Gauge(
-    "nexus_daily_prospecting_sent_last_run",
-    "Emails enviados en la ultima ejecucion por vertical (contacto inicial)",
-    ["vertical"],
-)
-
-DAILY_RUN_FOLLOWUPS = Gauge(
-    "nexus_daily_prospecting_followups_last_run",
-    "Follow-ups enviados en la ultima ejecucion por vertical",
-    ["vertical"],
-)
-
 
 def _label(value: Any, fallback: str = "unknown") -> str:
     text = str(value or fallback).strip()

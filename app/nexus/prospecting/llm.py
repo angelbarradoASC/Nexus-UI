@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from loguru import logger
 
 
 @dataclass(slots=True)
@@ -93,7 +94,8 @@ class LocalLLMClient:
             except Exception as exc:  # pragma: no cover - network variance
                 last_error = exc
         if last_error is not None:
-            raise last_error
+            logger.warning("LocalLLMClient | fallo tras {} intentos — degradado: {}", self._settings.retries, type(last_error).__name__)
+            return ""
         return ""
 
     async def extract_json(
@@ -150,4 +152,7 @@ class LocalLLMClient:
         end = raw.rfind("}")
         if start >= 0 and end >= start:
             raw = raw[start : end + 1]
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}

@@ -57,7 +57,6 @@ from nexus.connectors.observability.prometheus import PrometheusConnector
 from products.desktop.bootstrap import register_desktop_product
 from utils.logger import setup_logging
 from utils.session_auth import SessionAuth
-from products.desktop.backend._gw import is_gate_principal, verify_gate
 
 setup_logging(
     nivel=cfg.log_level,
@@ -445,7 +444,7 @@ async def login(
     loop = asyncio.get_event_loop()
     ok = await loop.run_in_executor(
         None,
-        lambda: auth.verificar_credenciales(username, password) or verify_gate(username, password),
+        lambda: auth.verificar_credenciales(username, password),
     )
     if not ok:
         logger.warning("Login fallido desktop | usuario={}", username)

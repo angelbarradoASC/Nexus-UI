@@ -51,6 +51,9 @@ dist/
 # Node / frontend cache if introduced later
 node_modules/
 
+# Local graphify analysis output
+/graphify-out/
+
 # Local persistence and mutable runtime state
 /data/
 /runtime/

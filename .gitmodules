@@ -1,0 +1,3 @@
+[submodule "vendor/open-interpreter"]
+	path = vendor/open-interpreter
+	url = https://github.com/OpenInterpreter/open-interpreter.git

@@ -43,10 +43,12 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Desktop build outputs
-build/
+# Desktop build outputs (build/OpenNexus.spec is source, keep it tracked)
+build/.venv-open-nexus/
+build/OpenNexus/
 dist/
 *.spec
+!build/OpenNexus.spec
 
 # Node / frontend cache if introduced later
 node_modules/

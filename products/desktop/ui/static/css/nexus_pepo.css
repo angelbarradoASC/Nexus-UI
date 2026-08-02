@@ -1,0 +1,341 @@
+/* ── PEPO — layout + componentes propios ─────────────────────────────────── */
+/* Anula el zoom 0.75 de nexus_v1.css: PEPO es chat puro, escala nativa. */
+html { zoom: 1; }
+:root { --ui-zoom: 1; }
+
+.workspace-pepo {
+    height: 100dvh;
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* ── Split 70/30 ─────────────────────────────────────────────────────────── */
+.pepo-layout {
+    display: grid;
+    grid-template-columns: 70fr 30fr;
+    gap: var(--shell-gap);
+    min-height: 0;
+}
+
+/* ── Panel compartido (chat + skills) ────────────────────────────────────── */
+.pepo-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(180deg, rgba(255,253,250,0.98) 0%, rgba(248,243,235,0.96) 100%);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    gap: 10px;
+}
+
+/* ── Cabeceras de panel ───────────────────────────────────────────────────── */
+.pepo-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+}
+
+.pepo-panel-head h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--forest);
+    letter-spacing: -0.02em;
+}
+
+/* ── Log de mensajes ─────────────────────────────────────────────────────── */
+.pepo-chat-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 4px 2px;
+}
+
+.pepo-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 84%;
+}
+
+.pepo-msg-user { align-self: flex-end; align-items: flex-end; }
+.pepo-msg-pepo { align-self: flex-start; align-items: flex-start; }
+
+.pepo-msg-role {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+}
+
+.pepo-bubble {
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 0.875rem;
+    line-height: 1.58;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+
+.pepo-msg-user .pepo-bubble {
+    background: var(--forest);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+
+.pepo-msg-pepo .pepo-bubble {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-bottom-left-radius: 4px;
+}
+
+/* ── Indicador de "pensando" ─────────────────────────────────────────────── */
+.pepo-thinking {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    border-bottom-left-radius: 4px;
+    width: fit-content;
+}
+
+.pepo-thinking-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: pepo-bounce 1.3s infinite ease-in-out;
+}
+
+.pepo-thinking-dot:nth-child(2) { animation-delay: 0.22s; }
+.pepo-thinking-dot:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes pepo-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
+    40%            { transform: scale(1);   opacity: 1;    }
+}
+
+/* ── Quick chips ─────────────────────────────────────────────────────────── */
+.pepo-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.pepo-chip {
+    font-size: 0.75rem;
+    font-family: inherit;
+    padding: 5px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--line-strong);
+    background: var(--panel-2);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.14s;
+}
+
+.pepo-chip:hover {
+    border-color: var(--forest-2);
+    color: var(--forest);
+    background: var(--ok-soft);
+}
+
+/* ── Compositor de mensajes ───────────────────────────────────────────────── */
+.pepo-composer {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.pepo-composer-textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 0.875rem;
+    background: var(--bg-soft);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 44px;
+    max-height: 140px;
+    overflow-y: auto;
+    outline: none;
+    transition: border-color 0.14s;
+}
+
+.pepo-composer-textarea:focus {
+    border-color: var(--forest-2);
+}
+
+/* ── Panel de skills (30%) ───────────────────────────────────────────────── */
+.pepo-skills-panel {
+    overflow-y: auto;
+}
+
+.skill-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.skill-group + .skill-group {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+
+.skill-group-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+}
+
+/* ── Skill cards ─────────────────────────────────────────────────────────── */
+.skill-card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    background: var(--panel-2);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.14s;
+}
+
+.skill-card:hover { border-color: var(--line-strong); }
+
+.skill-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.skill-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.skill-badge {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+.skill-badge-sales {
+    background: var(--gold-soft);
+    color: var(--gold);
+    border: 1px solid rgba(169, 123, 47, 0.25);
+}
+
+.skill-badge-op {
+    background: var(--ok-soft);
+    color: var(--forest-2);
+    border: 1px solid rgba(26, 101, 89, 0.25);
+}
+
+.skill-textarea {
+    resize: none;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 0.8rem;
+    background: var(--panel);
+    color: var(--text);
+    line-height: 1.4;
+    min-height: 54px;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.skill-textarea:focus { border-color: var(--forest-2); }
+
+.skill-footer {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.skill-btn {
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: var(--forest);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.14s;
+    white-space: nowrap;
+}
+
+.skill-btn:hover { background: var(--forest-2); }
+.skill-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Resultado de skill ───────────────────────────────────────────────────── */
+.skill-result {
+    display: none;
+    font-size: 0.77rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.skill-result.is-visible { display: block; }
+.skill-result-ok { border-left: 3px solid var(--forest-2); }
+.skill-result-err { border-left: 3px solid var(--danger); color: var(--danger); }
+
+.send-to-pepo {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 0.72rem;
+    background: none;
+    border: none;
+    color: var(--forest-2);
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.send-to-pepo:hover { color: var(--forest); }

@@ -36,8 +36,46 @@ Rules:
 - Extract city and province literally from user text"""
 
 
+_CHAT_SYSTEM = """Eres un asistente de prospección B2B en español. Ayudas al usuario a especificar qué quiere buscar para lanzar una búsqueda automatizada.
+
+CAMPOS NECESARIOS:
+- vertical: "asesoria" (asesor/gestor/fiscal/laboral/contable), "salud" (clinica/dentista), "inmobiliaria" (pisos/agencia), "restaurants" (restaurante/hosteleria/bar), "public_administration" (ayuntamiento/municipio), o un slug snake_case custom
+- city: ciudad concreta (OBLIGATORIO — pregunta esto primero si falta)
+- province: provincia (déjala igual que city si no se menciona)
+- region: comunidad autónoma (puede quedar vacío)
+- target_description: frase breve de lo que busca
+- desired_count: número de resultados (por defecto 20)
+- minimum_score: umbral 0-100 (por defecto 40)
+- represented_by: "assets" (por defecto) o "automato" si se menciona
+- must_have: lista de requisitos ["Email directo", "Teléfono", "Web propia", "Dirección física"]
+- dry_run: true por defecto; false solo si el usuario dice explícitamente "real" o "lanzar de verdad"
+
+REGLAS:
+1. Si no tienes city, PREGÚNTALA primero. Es el campo más crítico.
+2. Haz solo UNA pregunta a la vez.
+3. Cuando tengas city y vertical, ya puedes confirmar con status=ready.
+4. Sé natural y directo. Sin listas de puntos en el reply.
+5. SIEMPRE responde con JSON válido, sin texto fuera del JSON.
+
+RESPUESTA cuando necesitas más información:
+{"status": "clarifying", "reply": "Pregunta natural y breve."}
+
+RESPUESTA cuando tienes lo suficiente para lanzar:
+{"status": "ready", "reply": "Resumen breve de lo que vas a buscar.", "brief": {"vertical":"asesoria","city":"Toledo","province":"Toledo","region":"Castilla-La Mancha","target_description":"asesorias fiscales con email","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["Email directo"],"dry_run":true}}"""
+
+
 class InterpretRequest(BaseModel):
     text: str
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
 
 
 def _normalize_text(value: str) -> str:
@@ -138,6 +176,81 @@ async def interpret_brief(payload: InterpretRequest) -> dict:
     brief.setdefault("must_have", [])
 
     return {"status": "ok", "brief": brief}
+
+
+def _parse_llm_json(raw: str) -> dict | None:
+    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.MULTILINE)
+    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
+    s, e = raw.find("{"), raw.rfind("}")
+    if s >= 0 and e >= s:
+        try:
+            return json.loads(raw[s : e + 1])
+        except Exception:
+            pass
+    return None
+
+
+@router.post("/prospecting/chat")
+async def prospecting_chat(
+    payload: ChatRequest,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    """Motor conversacional: extrae intención, aclara dudas y valida empíricamente antes de confirmar."""
+    history = [{"role": m.role, "content": m.content} for m in payload.history]
+    history.append({"role": "user", "content": payload.message})
+
+    llm = get_router()
+    response = await llm.call(
+        messages=[{"role": "system", "content": _CHAT_SYSTEM}, *history],
+        preferred_level=1,
+        temperature=0.2,
+        max_tokens=700,
+    )
+
+    parsed = None
+    if not response.error:
+        parsed = _parse_llm_json(response.content or "")
+
+    if not parsed:
+        return {
+            "status": "clarifying",
+            "reply": "No entendí bien. ¿Puedes describir qué tipo de negocio buscas y en qué ciudad?",
+        }
+
+    status = parsed.get("status", "clarifying")
+    reply = str(parsed.get("reply", ""))
+    brief = parsed.get("brief")
+
+    # Probe empírico cuando el LLM dice que ya tiene suficiente
+    if status == "ready" and brief and brief.get("city"):
+        probe = await prospecting.quick_probe(
+            city=brief["city"],
+            vertical=brief.get("vertical", ""),
+        )
+        if probe.get("quality") == "empty":
+            city = brief.get("city", "")
+            vertical_label = brief.get("vertical", "").replace("_", " ")
+            status = "clarifying"
+            reply = (
+                f"He hecho una búsqueda rápida de {vertical_label} en {city} "
+                f"y no encontré resultados reales. "
+                f"¿Estás seguro de la ubicación o del tipo de negocio?"
+            )
+            brief = None
+        elif probe.get("quality") == "sparse":
+            reply += f" La zona tiene pocos resultados en abierto — puede que el run sea corto."
+
+    if status == "ready" and brief:
+        brief.setdefault("province", brief.get("city", ""))
+        brief.setdefault("region", "")
+        brief.setdefault("target_description", "")
+        brief.setdefault("desired_count", 20)
+        brief.setdefault("minimum_score", 40)
+        brief.setdefault("represented_by", "assets")
+        brief.setdefault("must_have", [])
+        brief.setdefault("dry_run", True)
+
+    return {"status": status, "reply": reply, "brief": brief}
 
 
 @router.post("/prospecting/run", response_model=ProspectingRunResponse)

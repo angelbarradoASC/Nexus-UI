@@ -450,11 +450,11 @@ async def login(
         logger.warning("Login fallido desktop | usuario={}", username)
         return RedirectResponse(
             url="/login?error=Credenciales incorrectas",
-            status_code=status.HTTP_302_FOUND,
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     token = auth.crear_sesion(username)
-    response = RedirectResponse(url="/open-nexus", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url="/open-nexus", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
         key="session_token",
         value=token,

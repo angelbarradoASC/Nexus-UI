@@ -511,7 +511,122 @@ async function loadProspecting(runId = latestProspectingRunId) {
     }
 }
 
-// ── Interpretar con IA ────────────────────────────────────────────────────────
+// ── Llenar formulario desde brief ─────────────────────────────────────────────
+
+function fillFormFromBrief(brief) {
+    const set = (id, value) => { const el = document.getElementById(id); if (el && value !== undefined && value !== null) el.value = String(value); };
+    ensureSelectOption("prospectingVertical", brief.vertical);
+    ensureSelectOption("prospectingRepresentedBy", brief.represented_by);
+    set("prospectingTargetDescription", brief.target_description);
+    set("prospectingCity", brief.city);
+    set("prospectingProvince", brief.province);
+    set("prospectingRegion", brief.region);
+    set("prospectingDesiredCount", brief.desired_count);
+    set("prospectingMinimumScore", brief.minimum_score);
+    const dryRunEl = document.getElementById("prospectingDryRun");
+    if (dryRunEl) dryRunEl.checked = brief.dry_run !== false;
+
+    document.getElementById("prospectingParamsBlock")?.classList.add("hidden-btn");
+
+    const vertical = brief.vertical || "asesoria";
+    renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.custom, brief.must_have || []);
+    renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom, brief.nice_to_have || []);
+    renderChips("crmTagsChips", CRM_TAG_OPTIONS, brief.crm_tags || []);
+}
+
+// ── Motor conversacional ──────────────────────────────────────────────────────
+
+let _chatHistory = [];
+let _chatActive = false;
+
+function _renderChatLog() {
+    const output = document.getElementById("aiInterpretationOutput");
+    if (!output) return;
+    if (!_chatHistory.length) {
+        output.className = "ai-interp-output empty-state";
+        output.innerHTML = "Interpreta una busqueda para ver el desglose.";
+        return;
+    }
+    output.className = "ai-interp-output chat-log-mode";
+    output.innerHTML = _chatHistory.map((msg) => {
+        const cls = msg.role === "user" ? "chat-bubble chat-bubble-user" : "chat-bubble chat-bubble-ai";
+        return `<div class="${cls}"><p>${escapeHtml(msg.content)}</p></div>`;
+    }).join("");
+    output.scrollTop = output.scrollHeight;
+}
+
+function resetChat() {
+    _chatHistory = [];
+    _chatActive = false;
+    const btn = document.getElementById("interpretBriefBtn");
+    if (btn) { btn.textContent = "Interpretar con IA"; btn.classList.remove("btn-secondary"); }
+    const textarea = document.getElementById("aiBriefText");
+    if (textarea) { textarea.placeholder = "Ej: busca asesorias fiscales en Toledo, unas 20, para Automato"; }
+    const statusEl = document.getElementById("interpretStatus");
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "interpret-status"; }
+    const resetLink = document.getElementById("chatResetBtn");
+    if (resetLink) resetLink.classList.add("hidden-btn");
+    _renderChatLog();
+}
+
+async function sendChatMessage() {
+    const textarea = document.getElementById("aiBriefText");
+    const text = textarea?.value.trim();
+    const statusEl = document.getElementById("interpretStatus");
+    const btn = document.getElementById("interpretBriefBtn");
+
+    if (!text) {
+        if (statusEl) { statusEl.textContent = "Escribe algo primero."; statusEl.className = "interpret-status error"; }
+        return;
+    }
+
+    if (btn) btn.disabled = true;
+    if (statusEl) { statusEl.textContent = "Pensando..."; statusEl.className = "interpret-status loading"; }
+    if (textarea) textarea.value = "";
+
+    const historyToSend = [..._chatHistory];
+    _chatHistory.push({ role: "user", content: text });
+    _renderChatLog();
+
+    try {
+        const response = await requestJson("/api/nexus/prospecting/chat", {
+            method: "POST",
+            body: JSON.stringify({ message: text, history: historyToSend }),
+        });
+
+        const reply = response.reply || "";
+        const status = response.status || "clarifying";
+        const brief = response.brief;
+
+        _chatHistory.push({ role: "assistant", content: reply });
+        _renderChatLog();
+
+        if (status === "ready" && brief) {
+            _chatActive = false;
+            latestProspectingOrchestration = null;
+            fillFormFromBrief(brief);
+            showSearchSummary(brief);
+            renderInterpretation(brief);
+            if (btn) { btn.textContent = "Interpretar con IA"; btn.classList.remove("btn-secondary"); }
+            if (textarea) textarea.placeholder = "Ej: busca asesorias fiscales en Toledo, unas 20, para Automato";
+            if (statusEl) { statusEl.textContent = "Listo — revisa y lanza"; statusEl.className = "interpret-status ok"; }
+        } else {
+            _chatActive = true;
+            if (btn) { btn.textContent = "Responder"; btn.classList.add("btn-secondary"); }
+            if (textarea) textarea.placeholder = "Escribe tu respuesta...";
+            document.getElementById("chatResetBtn")?.classList.remove("hidden-btn");
+            if (statusEl) { statusEl.textContent = ""; statusEl.className = "interpret-status"; }
+        }
+    } catch (error) {
+        _chatHistory.pop(); // deshace el push del mensaje del usuario
+        _renderChatLog();
+        if (statusEl) { statusEl.textContent = `Error: ${error.message}`; statusEl.className = "interpret-status error"; }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// ── Interpretar con IA (legado — sin historial, un solo turno) ────────────────
 
 async function interpretBrief() {
     const text = document.getElementById("aiBriefText")?.value.trim();
@@ -532,35 +647,11 @@ async function interpretBrief() {
             body: JSON.stringify({ text }),
         });
         const brief = response.brief || {};
-        const orchestration = response.orchestration || null;
-        latestProspectingOrchestration = orchestration;
+        latestProspectingOrchestration = response.orchestration || null;
 
-        // Guardar en los campos ocultos (van al JSON del run)
-        const set = (id, value) => { const el = document.getElementById(id); if (el && value !== undefined && value !== null) el.value = String(value); };
-        ensureSelectOption("prospectingVertical", brief.vertical);
-        ensureSelectOption("prospectingRepresentedBy", brief.represented_by);
-        set("prospectingTargetDescription", brief.target_description);
-        set("prospectingCity", brief.city);
-        set("prospectingProvince", brief.province);
-        set("prospectingRegion", brief.region);
-        set("prospectingDesiredCount", brief.desired_count);
-        set("prospectingMinimumScore", brief.minimum_score);
-        const dryRunEl = document.getElementById("prospectingDryRun");
-        if (dryRunEl) dryRunEl.checked = brief.dry_run !== false;
-
-        // Ocultar params, mostrar resumen compacto
-        document.getElementById("prospectingParamsBlock")?.classList.add("hidden-btn");
+        fillFormFromBrief(brief);
         showSearchSummary(brief);
-        renderInterpretation(brief, orchestration);
-
-        // Re-renderizar chips según el vertical interpretado
-        const vertical = brief.vertical || "asesoria";
-        const preSelectedMust = (brief.must_have || []);
-        const preSelectedNice = (brief.nice_to_have || []);
-        const preSelectedTags = (brief.crm_tags || []);
-        renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.custom, preSelectedMust);
-        renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom, preSelectedNice);
-        renderChips("crmTagsChips", CRM_TAG_OPTIONS, preSelectedTags);
+        renderInterpretation(brief, latestProspectingOrchestration);
 
         const noCityWarn = !brief.city && !brief.province && !brief.region;
         if (statusEl) {
@@ -963,9 +1054,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom);
     });
 
-    document.getElementById("interpretBriefBtn")?.addEventListener("click", interpretBrief);
+    document.getElementById("interpretBriefBtn")?.addEventListener("click", sendChatMessage);
+    document.getElementById("chatResetBtn")?.addEventListener("click", resetChat);
     document.getElementById("aiBriefText")?.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) interpretBrief();
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendChatMessage();
     });
     document.getElementById("runProspectingBtn")?.addEventListener("click", runProspecting);
     document.getElementById("refreshProspectingBtn")?.addEventListener("click", () => loadProspecting());

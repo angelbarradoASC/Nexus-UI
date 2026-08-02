@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- open-nexus desktop product PEPO -->
+<!-- open-nexus desktop — PEPO: agente personal polivalente -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -10,9 +10,12 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260626c">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+    <link rel="stylesheet" href="/static/css/nexus_pepo.css?v=20260730">
 </head>
 <body>
     <main class="workspace workspace-pepo">
+
+        <!-- ── Topbar ─────────────────────────────────────────────────────── -->
         <header class="shell-topbar">
             <div class="brand-cluster brand-cluster-compact">
                 <h1>PEPO</h1>
@@ -20,9 +23,166 @@
             {% include "partials/desktop_nav.html" %}
         </header>
 
-        <section class="zone-placeholder">
-            <span class="zone-placeholder-label">PEPO — Personal Polivalente. Pendiente de definir flujo.</span>
-        </section>
+        <!-- ── Split 70/30 ────────────────────────────────────────────────── -->
+        <div class="pepo-layout">
+
+            <!-- ── CHAT (70%) ─────────────────────────────────────────────── -->
+            <section class="pepo-panel">
+
+                <div class="pepo-panel-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Agente personal</p>
+                        <h2>Chat con PEPO</h2>
+                    </div>
+                    <div class="inline-badges">
+                        <span class="badge">polivalente</span>
+                        <span class="badge badge-muted" id="pepoChatStatus">listo</span>
+                    </div>
+                </div>
+
+                <!-- Historial -->
+                <div id="pepoChatLog" class="pepo-chat-log">
+                    <div class="pepo-msg pepo-msg-pepo">
+                        <p class="pepo-msg-role">PEPO</p>
+                        <div class="pepo-bubble">Hola. Soy PEPO, tu agente personal. Puedo ayudarte con operaciones, prospección comercial, incidentes y más. También puedes lanzar skills desde el panel de la derecha. ¿En qué empezamos?</div>
+                    </div>
+                </div>
+
+                <!-- Chips de acceso rápido -->
+                <div class="pepo-chips">
+                    <button class="pepo-chip" type="button"
+                        data-pepo-prompt="¿Cuál es el estado operativo general del sistema?">Estado del sistema</button>
+                    <button class="pepo-chip" type="button"
+                        data-pepo-prompt="Resume la actividad comercial reciente y los siguientes pasos">Actividad comercial</button>
+                    <button class="pepo-chip" type="button"
+                        data-pepo-prompt="¿Hay incidentes o alertas que requieran atención inmediata?">Alertas urgentes</button>
+                    <button class="pepo-chip" type="button"
+                        data-pepo-prompt="Propón una búsqueda de leads para este mes">Proponer prospección</button>
+                </div>
+
+                <!-- Compositor -->
+                <form id="pepoChatForm" class="pepo-composer">
+                    <textarea
+                        id="pepoInput"
+                        class="pepo-composer-textarea"
+                        rows="1"
+                        placeholder="Escribe un mensaje… (Enter para enviar, Shift+Enter para nueva línea)"></textarea>
+                    <button id="pepoChatSendBtn" class="btn" type="submit">Enviar</button>
+                </form>
+
+            </section>
+
+            <!-- ── SKILLS (30%) ────────────────────────────────────────────── -->
+            <aside class="pepo-panel pepo-skills-panel">
+
+                <div class="pepo-panel-head">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Capacidades</p>
+                        <h2>Skills</h2>
+                    </div>
+                </div>
+
+                <!-- ── Sales ──────────────────────────────────────────────── -->
+                <div class="skill-group">
+                    <span class="skill-group-label">Sales</span>
+
+                    <!-- Buscar leads -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Buscar leads</span>
+                            <span class="skill-badge skill-badge-sales">prospecting</span>
+                        </div>
+                        <textarea
+                            id="skillProspectText"
+                            class="skill-textarea"
+                            rows="3"
+                            placeholder="Ej: busca asesorías fiscales en Toledo, unas 20, para Assets"></textarea>
+                        <div class="skill-footer">
+                            <button id="skillProspectBtn" class="skill-btn" type="button"
+                                onclick="runSkillProspecting()">Ejecutar</button>
+                        </div>
+                        <div id="skillProspectResult" class="skill-result"></div>
+                    </div>
+
+                    <!-- Ver resultados -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Ver resultados</span>
+                            <span class="skill-badge skill-badge-sales">crm</span>
+                        </div>
+                        <div class="skill-footer">
+                            <button id="skillResultsBtn" class="skill-btn" type="button"
+                                onclick="runSkillProspectResults()">Ver resultados</button>
+                        </div>
+                        <div id="skillResultsResult" class="skill-result"></div>
+                    </div>
+
+                    <!-- Push a CRM -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Push válidos a CRM</span>
+                            <span class="skill-badge skill-badge-sales">crm</span>
+                        </div>
+                        <div class="skill-footer">
+                            <button id="skillPushCrmBtn" class="skill-btn" type="button"
+                                onclick="runSkillPushCrm()">Push a CRM</button>
+                        </div>
+                        <div id="skillPushCrmResult" class="skill-result"></div>
+                    </div>
+
+                </div>
+
+                <!-- ── Operador ────────────────────────────────────────────── -->
+                <div class="skill-group">
+                    <span class="skill-group-label">Operador</span>
+
+                    <!-- Alertas -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Alertas activas</span>
+                            <span class="skill-badge skill-badge-op">monitoring</span>
+                        </div>
+                        <div class="skill-footer">
+                            <button id="skillAlertsBtn" class="skill-btn" type="button"
+                                onclick="runSkillAlerts()">Ver alertas</button>
+                        </div>
+                        <div id="skillAlertsResult" class="skill-result"></div>
+                    </div>
+
+                    <!-- Incidentes -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Incidentes</span>
+                            <span class="skill-badge skill-badge-op">incidents</span>
+                        </div>
+                        <div class="skill-footer">
+                            <button id="skillIncidentsBtn" class="skill-btn" type="button"
+                                onclick="runSkillIncidents()">Ver incidentes</button>
+                        </div>
+                        <div id="skillIncidentsResult" class="skill-result"></div>
+                    </div>
+
+                    <!-- Tickets Assets -->
+                    <div class="skill-card">
+                        <div class="skill-card-head">
+                            <span class="skill-name">Tickets Assets</span>
+                            <span class="skill-badge skill-badge-op">ops</span>
+                        </div>
+                        <div class="skill-footer">
+                            <button id="skillTicketsBtn" class="skill-btn" type="button"
+                                onclick="runSkillTickets()">Ver tickets</button>
+                        </div>
+                        <div id="skillTicketsResult" class="skill-result"></div>
+                    </div>
+
+                </div>
+
+            </aside>
+
+        </div><!-- /.pepo-layout -->
+
     </main>
+
+    <script src="/static/js/nexus_pepo.js?v=20260730"></script>
 </body>
 </html>

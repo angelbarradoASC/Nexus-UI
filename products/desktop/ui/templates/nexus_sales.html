@@ -18,6 +18,60 @@
         :root {
             --ui-zoom: 0.9;
         }
+
+        /* ── Chat conversacional ── */
+        .ai-interp-output.chat-log-mode {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            overflow-y: auto;
+            max-height: 320px;
+        }
+
+        .chat-bubble {
+            max-width: 88%;
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            line-height: 1.45;
+        }
+
+        .chat-bubble p { margin: 0; }
+
+        .chat-bubble-user {
+            align-self: flex-end;
+            background: var(--color-accent, #2563eb);
+            color: #fff;
+            border-bottom-right-radius: 3px;
+        }
+
+        .chat-bubble-ai {
+            align-self: flex-start;
+            background: var(--color-surface-raised, #f1f5f9);
+            color: var(--color-text, #1e293b);
+            border-bottom-left-radius: 3px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .chat-bubble-ai {
+                background: var(--color-surface-raised, #1e293b);
+                color: var(--color-text, #e2e8f0);
+            }
+        }
+
+        .chat-reset-btn {
+            font-size: 0.78rem;
+            color: var(--color-text-muted, #64748b);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0 4px;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .chat-reset-btn:hover { color: var(--color-text, #1e293b); }
     </style>
 </head>
 <body>
@@ -52,6 +106,7 @@
                     <div class="ai-brief-footer">
                         <button id="interpretBriefBtn" class="btn btn-ai" type="button">Interpretar con IA</button>
                         <span id="interpretStatus" class="interpret-status"></span>
+                        <button id="chatResetBtn" class="btn-link chat-reset-btn hidden-btn" type="button">reiniciar</button>
                     </div>
                 </div>
 

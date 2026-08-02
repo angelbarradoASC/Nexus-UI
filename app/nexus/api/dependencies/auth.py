@@ -18,6 +18,7 @@ from nexus.application.services.assistant_runtime_core import AssistantRuntimeCo
 from nexus.cmdb.source import FileCMDB
 from nexus.vault.service import VaultService
 from nexus.access.service import AgentAccessService
+from nexus.connectors.itsm.jira import JiraConnector
 from nexus.connectors.observability.alertmanager import AlertmanagerConnector
 from nexus.connectors.observability.grafana import GrafanaConnector
 from nexus.connectors.observability.prometheus import PrometheusConnector
@@ -55,6 +56,7 @@ class NexusRuntime:
     mail:              ThunderbirdMailManager = None
     teams:             TeamsChatManager = None
     case_log:          CaseLogStore = None
+    jira:              JiraConnector = None
 
 
 def build_runtime(cfg) -> NexusRuntime:
@@ -82,11 +84,13 @@ def build_runtime(cfg) -> NexusRuntime:
         timeout_seconds=cfg.connector_timeout_seconds,
     )
     operations = AssetsOperationsService(cfg=cfg, llm_router=llm_router)
+    jira_connector = JiraConnector(cfg)
     coordinator = NexusCoordinator(
         alertmanager=alertmanager,
         grafana=grafana,
         prometheus=prometheus,
         operations=operations,
+        jira=jira_connector,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
         runbooks=RunbookRegistry(),
@@ -121,6 +125,7 @@ def build_runtime(cfg) -> NexusRuntime:
         mail=mail,
         teams=teams,
         case_log=case_log,
+        jira=jira_connector,
     )
 
 

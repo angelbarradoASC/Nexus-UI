@@ -212,6 +212,26 @@ class DesktopLocalState:
         )
         return data
 
+    def load_itsm_config(self) -> dict | None:
+        self.ensure_layout()
+        path = self.settings.itsm_config_path
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def save_itsm_config(self, data: dict) -> dict:
+        self.ensure_layout()
+        data["saved_at"] = datetime.now(timezone.utc).isoformat()
+        atomic_write_text(
+            self.settings.itsm_config_path,
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return data
+
     @staticmethod
     def _default_provider_credential_ref(provider_config: DesktopLLMProviderConfig) -> str:
         provider_type = str(provider_config.provider_type or "provider").strip().lower().replace(" ", "_")

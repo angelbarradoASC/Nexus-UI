@@ -207,12 +207,46 @@ def _apply_desktop_campaign_config(cfg, data: dict) -> None:
         cfg.outreach_imap_password = imap["password"]
 
 
+def _apply_desktop_itsm_config(config, data: dict | None) -> None:
+    if not data:
+        return
+    assets = data.get("assets", {})
+    jira = data.get("jira", {})
+    sn = data.get("servicenow", {})
+    if assets.get("enabled") is not None:
+        config.assets_itsm_enabled = bool(assets["enabled"])
+    if jira.get("enabled") is not None:
+        config.use_jira = bool(jira["enabled"])
+    if jira.get("url") is not None:
+        config.jira_url = jira["url"]
+    if jira.get("email") is not None:
+        config.jira_email = jira["email"]
+    if jira.get("api_token"):
+        config.jira_api_token = jira["api_token"]
+    if jira.get("project_key") is not None:
+        config.jira_project_key = jira["project_key"] or "NEXUS"
+    if sn.get("enabled") is not None:
+        config.use_servicenow = bool(sn["enabled"])
+    if sn.get("url") is not None:
+        config.servicenow_url = sn["url"]
+    if sn.get("username") is not None:
+        config.servicenow_username = sn["username"]
+    if sn.get("password"):
+        config.servicenow_password = sn["password"]
+    if sn.get("client_id") is not None:
+        config.servicenow_client_id = sn["client_id"]
+    if sn.get("client_secret"):
+        config.servicenow_client_secret = sn["client_secret"]
+
+
 if cfg.is_desktop:
     _apply_desktop_startup_config()
     _sales_data = _get_desktop_local_state().load_sales_config()
     _apply_desktop_sales_config(cfg, _sales_data)
     _campaign_data = _get_desktop_local_state().load_campaign_config()
     _apply_desktop_campaign_config(cfg, _campaign_data)
+    _itsm_data = _get_desktop_local_state().load_itsm_config()
+    _apply_desktop_itsm_config(cfg, _itsm_data)
 
 
 def get_session_auth() -> SessionAuth:
@@ -972,6 +1006,92 @@ async def save_desktop_campaign_config(body: _DesktopCampaignConfigBody):
     saved = state.save_campaign_config(data)
     _apply_desktop_campaign_config(cfg, saved)
     return {"status": "saved", "path": str(state.settings.campaign_config_path)}
+
+
+@app.get("/api/desktop/settings/itsm")
+async def get_desktop_itsm_config():
+    return {
+        "available": True,
+        "source": "runtime",
+        "assets": {
+            "enabled": cfg.assets_itsm_enabled,
+            "base_url": cfg.assets_crm_base_url,
+            "username": cfg.assets_crm_username,
+            "password_set": bool(cfg.assets_crm_password),
+        },
+        "jira": {
+            "enabled": cfg.use_jira,
+            "url": cfg.jira_url,
+            "email": cfg.jira_email,
+            "api_token_set": bool(cfg.jira_api_token),
+            "project_key": cfg.jira_project_key,
+        },
+        "servicenow": {
+            "enabled": cfg.use_servicenow,
+            "url": cfg.servicenow_url,
+            "username": cfg.servicenow_username,
+            "password_set": bool(cfg.servicenow_password),
+            "client_id": cfg.servicenow_client_id,
+            "client_secret_set": bool(cfg.servicenow_client_secret),
+        },
+    }
+
+
+class _DesktopItsmConfigBody(BaseModel):
+    assets_enabled: bool = True
+    assets_base_url: str = ""
+    assets_username: str = ""
+    assets_password: str = ""
+    jira_enabled: bool = False
+    jira_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+    jira_project_key: str = "NEXUS"
+    sn_enabled: bool = False
+    sn_url: str = ""
+    sn_username: str = ""
+    sn_password: str = ""
+    sn_client_id: str = ""
+    sn_client_secret: str = ""
+
+
+@app.put("/api/desktop/settings/itsm")
+async def save_desktop_itsm_config(body: _DesktopItsmConfigBody):
+    state = _get_desktop_local_state()
+    existing = state.load_itsm_config() or {}
+    ex_assets = existing.get("assets", {})
+    ex_jira = existing.get("jira", {})
+    ex_sn = existing.get("servicenow", {})
+
+    def _keep(new_val: str, old_val: str) -> str:
+        return new_val if new_val else (old_val or "")
+
+    data = {
+        "assets": {
+            "enabled": body.assets_enabled,
+            "base_url": body.assets_base_url,
+            "username": body.assets_username,
+            "password": _keep(body.assets_password, ex_assets.get("password", "")),
+        },
+        "jira": {
+            "enabled": body.jira_enabled,
+            "url": body.jira_url,
+            "email": body.jira_email,
+            "api_token": _keep(body.jira_api_token, ex_jira.get("api_token", "")),
+            "project_key": body.jira_project_key or "NEXUS",
+        },
+        "servicenow": {
+            "enabled": body.sn_enabled,
+            "url": body.sn_url,
+            "username": body.sn_username,
+            "password": _keep(body.sn_password, ex_sn.get("password", "")),
+            "client_id": body.sn_client_id,
+            "client_secret": _keep(body.sn_client_secret, ex_sn.get("client_secret", "")),
+        },
+    }
+    saved = state.save_itsm_config(data)
+    _apply_desktop_itsm_config(cfg, saved)
+    return {"status": "saved", "path": str(state.settings.itsm_config_path)}
 
 
 @app.post("/api/desktop/resolve")

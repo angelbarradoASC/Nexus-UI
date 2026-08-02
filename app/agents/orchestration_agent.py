@@ -6,7 +6,7 @@ Orquestador central — recibe consultas, clasifica y delega.
 Flujo:
   1. IntentionAgent clasifica y extrae entidades
   2. Si faltan datos → devuelve pregunta de seguimiento
-  3. Routing → SSHAgent | WebAgent | GenerationAgent
+  3. Routing → SSHAgent | JiraAgent | WebAgent | GenerationAgent
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from .base_agent import AgentResult
 from .coder_agent import CoderAgent
 from .generation_agent import GenerationAgent
 from .intention_agent import Intencion, IntentionAgent
+from .jira_agent import JiraAgent
 from .llm_router import LLMRouter, get_router
 from .researcher_agent import ResearcherAgent
 from .ssh_agent import SSHAgent
@@ -77,6 +78,7 @@ class OrchestrationAgent:
         web_agent = WebAgent(self._router)
         self._agents: dict[Intencion, Any] = {
             Intencion.DIAGNOSTICO_SERVIDOR: SSHAgent(self._router),
+            Intencion.CREAR_TICKET_JIRA:    JiraAgent(self._router),
             Intencion.BUSQUEDA_WEB:         web_agent,
             Intencion.GENERAL:              GenerationAgent(self._router),
         }

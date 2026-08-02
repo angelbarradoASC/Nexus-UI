@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "nexus-web",
-      "runtimeExecutable": "curl",
-      "runtimeArgs": ["-s", "http://localhost:5010/nexus-sales"],
-      "port": 5010
+      "name": "nexus-ui",
+      "runtimeExecutable": "C:\\DEV\\Nexus-UI\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["run_preview.py"],
+      "port": 11430
     }
   ]
 }

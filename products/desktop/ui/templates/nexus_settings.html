@@ -33,6 +33,7 @@
                     <button type="button" class="settings-nav-btn" data-section="operator">Operator</button>
                     <button type="button" class="settings-nav-btn" data-section="sales">Sales</button>
                     <button type="button" class="settings-nav-btn" data-section="campana">Campaña</button>
+                    <button type="button" class="settings-nav-btn" data-section="itsm">ITSM</button>
                 </div>
                 <div class="settings-sidebar-note">
                     <p>Todo lo de Nexus Desktop se gobierna desde aqui: modelos, prompts por modulo, integraciones de Operator, y config de Sales y Campana.</p>
@@ -681,6 +682,118 @@
                         </div>
                     </div>
                 </section>
+                <section class="card settings-panel" data-panel="itsm">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Ticketing</p>
+                            <h2>ITSM</h2>
+                        </div>
+                        <span id="itsmStatus" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Backend primario</p>
+                                <h3>Assets</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="itsmAssetsEnabled" type="checkbox" checked />
+                                    <span>Habilitado (ticketing via Assets API)</span>
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Base URL</span>
+                                    <input id="itsmAssetsUrl" type="url" placeholder="http://127.0.0.1:8000" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="itsmAssetsUser" type="text" placeholder="admin" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="itsmAssetsPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Backend alternativo</p>
+                                <h3>Jira Cloud</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="itsmJiraEnabled" type="checkbox" />
+                                    <span>Habilitado (USE_JIRA)</span>
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Instance URL</span>
+                                    <input id="itsmJiraUrl" type="url" placeholder="https://tu-dominio.atlassian.net" />
+                                </label>
+                                <label class="field">
+                                    <span>Email</span>
+                                    <input id="itsmJiraEmail" type="email" placeholder="tu@empresa.com" />
+                                </label>
+                                <label class="field">
+                                    <span>API Token</span>
+                                    <input id="itsmJiraToken" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                                <label class="field">
+                                    <span>Project Key</span>
+                                    <input id="itsmJiraProject" type="text" placeholder="NEXUS" />
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Backend alternativo</p>
+                                <h3>ServiceNow</h3>
+                            </div>
+                            <div class="provider-form">
+                                <label class="toggle-row">
+                                    <input id="itsmSnEnabled" type="checkbox" />
+                                    <span>Habilitado</span>
+                                </label>
+                                <label class="field field-wide">
+                                    <span>Instance URL</span>
+                                    <input id="itsmSnUrl" type="url" placeholder="https://dev12345.service-now.com" />
+                                </label>
+                                <label class="field">
+                                    <span>Usuario</span>
+                                    <input id="itsmSnUser" type="text" placeholder="admin" />
+                                </label>
+                                <label class="field">
+                                    <span>Password</span>
+                                    <input id="itsmSnPassword" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                                <label class="field">
+                                    <span>Client ID (OAuth)</span>
+                                    <input id="itsmSnClientId" type="text" placeholder="opcional" />
+                                </label>
+                                <label class="field">
+                                    <span>Client Secret (OAuth)</span>
+                                    <input id="itsmSnClientSecret" type="password" placeholder="vacio = mantener actual" />
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-note-block">
+                            <strong>Prioridad de routing</strong>
+                            <p>Assets es el backend primario para incidentes y tickets. Si no está disponible, Nexus usará Jira como fallback. ServiceNow se activará cuando la integración esté completa.</p>
+                        </div>
+
+                        <div class="form-actions">
+                            <button id="saveItsmBtn" type="button">Guardar ITSM</button>
+                            <span id="itsmSaveNote" class="assets-form-note"></span>
+                        </div>
+
+                        </div><!-- /module-form-body -->
+                    </div>
+                </section>
+
             </section>
         </section>
     </main>

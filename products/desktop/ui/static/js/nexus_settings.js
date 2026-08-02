@@ -546,6 +546,64 @@ async function saveCampaignConfig() {
     await loadCampaignConfig();
 }
 
+async function loadItsmConfig() {
+    const payload = await api.get("/api/desktop/settings/itsm");
+    document.getElementById("itsmAssetsEnabled").checked = Boolean(payload.assets.enabled);
+    document.getElementById("itsmAssetsUrl").value = payload.assets.base_url || "";
+    document.getElementById("itsmAssetsUser").value = payload.assets.username || "";
+    document.getElementById("itsmJiraEnabled").checked = Boolean(payload.jira.enabled);
+    document.getElementById("itsmJiraUrl").value = payload.jira.url || "";
+    document.getElementById("itsmJiraEmail").value = payload.jira.email || "";
+    document.getElementById("itsmJiraProject").value = payload.jira.project_key || "NEXUS";
+    document.getElementById("itsmSnEnabled").checked = Boolean(payload.servicenow.enabled);
+    document.getElementById("itsmSnUrl").value = payload.servicenow.url || "";
+    document.getElementById("itsmSnUser").value = payload.servicenow.username || "";
+    document.getElementById("itsmSnClientId").value = payload.servicenow.client_id || "";
+
+    const active = [
+        payload.assets.enabled,
+        payload.jira.enabled,
+        payload.servicenow.enabled,
+    ].filter(Boolean);
+    const el = document.getElementById("itsmStatus");
+    if (el) {
+        const labels = [];
+        if (payload.assets.enabled) { labels.push("Assets"); }
+        if (payload.jira.enabled) { labels.push("Jira"); }
+        if (payload.servicenow.enabled) { labels.push("ServiceNow"); }
+        el.textContent = labels.length ? labels.join(" · ") : "ninguno activo";
+        el.className = labels.length ? "info-badge" : "info-badge info-badge-muted";
+    }
+}
+
+async function saveItsmConfig() {
+    const note = document.getElementById("itsmSaveNote");
+    note.textContent = "Guardando...";
+    await api.put("/api/desktop/settings/itsm", {
+        assets_enabled: document.getElementById("itsmAssetsEnabled").checked,
+        assets_base_url: document.getElementById("itsmAssetsUrl").value.trim(),
+        assets_username: document.getElementById("itsmAssetsUser").value.trim(),
+        assets_password: document.getElementById("itsmAssetsPassword").value,
+        jira_enabled: document.getElementById("itsmJiraEnabled").checked,
+        jira_url: document.getElementById("itsmJiraUrl").value.trim(),
+        jira_email: document.getElementById("itsmJiraEmail").value.trim(),
+        jira_api_token: document.getElementById("itsmJiraToken").value,
+        jira_project_key: document.getElementById("itsmJiraProject").value.trim() || "NEXUS",
+        sn_enabled: document.getElementById("itsmSnEnabled").checked,
+        sn_url: document.getElementById("itsmSnUrl").value.trim(),
+        sn_username: document.getElementById("itsmSnUser").value.trim(),
+        sn_password: document.getElementById("itsmSnPassword").value,
+        sn_client_id: document.getElementById("itsmSnClientId").value.trim(),
+        sn_client_secret: document.getElementById("itsmSnClientSecret").value,
+    });
+    document.getElementById("itsmAssetsPassword").value = "";
+    document.getElementById("itsmJiraToken").value = "";
+    document.getElementById("itsmSnPassword").value = "";
+    document.getElementById("itsmSnClientSecret").value = "";
+    note.textContent = "Guardado";
+    await loadItsmConfig();
+}
+
 function wireEvents() {
     document.getElementById("saveRouterBtn").addEventListener("click", () => {
         saveRouterConfig().catch((error) => {
@@ -578,6 +636,11 @@ function wireEvents() {
             document.getElementById("campanaSaveNote").textContent = error.message;
         });
     });
+    document.getElementById("saveItsmBtn").addEventListener("click", () => {
+        saveItsmConfig().catch((error) => {
+            document.getElementById("itsmSaveNote").textContent = error.message;
+        });
+    });
 }
 
 async function bootstrap() {
@@ -595,6 +658,10 @@ async function bootstrap() {
         }),
         loadCampaignConfig().catch(() => {
             const el = document.getElementById("campanaStatus");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadItsmConfig().catch(() => {
+            const el = document.getElementById("itsmStatus");
             if (el) { el.textContent = "no disponible"; }
         }),
     ]);

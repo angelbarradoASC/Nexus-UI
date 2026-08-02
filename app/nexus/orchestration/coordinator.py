@@ -24,6 +24,7 @@ from nexus.api.schemas.monitoring import (
     RunbooksResponse,
 )
 from nexus.audit.repository import MemoryAuditRepository
+from nexus.connectors.itsm.jira import JiraConnector
 from nexus.connectors.observability.alertmanager import AlertmanagerConnector
 from nexus.connectors.observability.grafana import GrafanaConnector
 from nexus.connectors.observability.prometheus import PrometheusConnector
@@ -56,11 +57,13 @@ class NexusCoordinator:
         llm_router: Any | None = None,
         docker_diagnostics: DockerPreDiagnosticService | None = None,
         operations: AssetsOperationsService | None = None,
+        jira: JiraConnector | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
         self._prometheus = prometheus
         self._operations = operations
+        self._jira = jira
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -664,17 +667,31 @@ class NexusCoordinator:
     async def _maybe_create_ticket(self, payload: IncidentIngestRequest, runbook: dict) -> dict:
         if not should_create_ticket(payload.severity, runbook):
             return {}
-        if self._operations is None:
-            return {"status": "not_configured", "reason": "assets_operations_unavailable"}
-        try:
-            return await self._operations.create_ticket_from_alarm(
-                title=payload.title,
-                severity=payload.severity,
-                details=payload.payload,
-                source="codex",
-            )
-        except Exception as exc:
-            return {"status": "error", "reason": str(exc)}
+
+        # Assets es el backend primario
+        if self._operations is not None:
+            try:
+                return await self._operations.create_ticket_from_alarm(
+                    title=payload.title,
+                    severity=payload.severity,
+                    details=payload.payload,
+                    source="codex",
+                )
+            except Exception as exc:
+                return {"status": "error", "provider": "assets", "reason": str(exc)}
+
+        # Jira como backend alternativo
+        if self._jira is not None:
+            try:
+                return await self._jira.create_incident_ticket(
+                    title=payload.title,
+                    severity=payload.severity,
+                    details=payload.payload,
+                )
+            except Exception as exc:
+                return {"status": "error", "provider": "jira", "reason": str(exc)}
+
+        return {"status": "not_configured", "reason": "no_itsm_backend_available"}
 
     def _enrich_alert(self, alert: dict) -> dict:
         payload = dict(alert)

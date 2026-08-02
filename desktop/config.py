@@ -73,6 +73,10 @@ class DesktopSettings:
     def campaign_config_path(self) -> Path:
         return self.config_dir / "campaign_config.json"
 
+    @property
+    def itsm_config_path(self) -> Path:
+        return self.config_dir / "itsm_config.json"
+
     @classmethod
     def from_env(cls) -> "DesktopSettings":
         """Build desktop settings from environment variables."""

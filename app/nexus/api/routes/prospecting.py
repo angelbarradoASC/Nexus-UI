@@ -28,10 +28,9 @@ from nexus.utils.text import normalize_text
 
 router = APIRouter()
 
-# NOTE: this constant is not used — the live call uses resolve_prompt_sync("sales.prospecting.interpret")
-# Kept here only as a reference; canonical version lives in nexus/prompts/catalogue.py
-_INTERPRET_SYSTEM = "see nexus/prompts/catalogue.py: sales.prospecting.interpret"
-# Chat system prompt → catalogue key: sales.prospecting.chat
+# System prompts live in nexus/prompts/catalogue.py:
+#   interpret → "sales.prospecting.interpret"
+#   chat      → "sales.prospecting.chat"
 
 
 class InterpretRequest(BaseModel):

@@ -7,15 +7,24 @@ from typing import Any
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting.autonomy import SalesAutonomousSystem
 from nexus.prospecting.models import ProspectingBrief
+from nexus.utils.text import normalize_text as _normalize_text
 
 
 class ProspectingPromptOrchestrator:
     """Refine user intent with guardrails and decide the discovery source plan."""
 
-    def __init__(self, *, llm_client, brave_enabled: bool, places_enabled: bool) -> None:
+    def __init__(
+        self,
+        *,
+        llm_client,
+        brave_enabled: bool,
+        places_enabled: bool,
+        ddg_enabled: bool = True,
+    ) -> None:
         self._llm = llm_client
         self._brave_enabled = bool(brave_enabled)
         self._places_enabled = bool(places_enabled)
+        self._ddg_enabled = bool(ddg_enabled)
         self._autonomy = SalesAutonomousSystem()
 
     async def orchestrate(
@@ -120,22 +129,45 @@ class ProspectingPromptOrchestrator:
 
         ordered = self._normalize_source_order(ordered, geography_present=geography_present)
 
+        is_industrial_zone = bool(getattr(brief, "industrial_zone", ""))
         sources: list[dict[str, Any]] = []
         for source in ordered:
-            if source != "google_places" or not places_available:
-                continue
-            role = "primary" if not sources else "secondary"
-            sources.append(
-                {
-                    "name": source,
-                    "role": role,
-                    "enabled": True,
-                    "reason": self._source_reason(source, brief, role),
-                }
-            )
+            if source == "google_places":
+                if not places_available or is_industrial_zone:
+                    continue
+                role = "primary" if not sources else "secondary"
+                sources.append(
+                    {
+                        "name": source,
+                        "role": role,
+                        "enabled": True,
+                        "reason": self._source_reason(source, brief, role),
+                    }
+                )
+            elif source == "brave":
+                if not self._brave_enabled:
+                    continue
+                # Brave como discovery solo si: zona industrial (Places no sirve) o sin geografía (Places no disponible)
+                if places_available and not is_industrial_zone:
+                    continue
+                role = "primary" if not sources else "secondary"
+                reason = (
+                    "Brave como fuente primaria para zona industrial: directorios como Axesor/Einforma indexan empresas de polígonos."
+                    if is_industrial_zone
+                    else self._source_reason(source, brief, role)
+                )
+                sources.append(
+                    {
+                        "name": source,
+                        "role": role,
+                        "enabled": True,
+                        "reason": reason,
+                    }
+                )
 
         enrichment_sources: list[dict[str, Any]] = []
-        if self._brave_enabled:
+        discovery_names = {s["name"] for s in sources}
+        if self._brave_enabled and "brave" not in discovery_names:
             enrichment_sources.append(
                 {
                     "name": "brave",
@@ -146,7 +178,14 @@ class ProspectingPromptOrchestrator:
             )
 
         if sources:
-            strategy = "google_places_with_brave_enrichment" if enrichment_sources else "google_places_only"
+            uses_brave_discovery = any(s["name"] == "brave" for s in sources)
+            uses_places = any(s["name"] == "google_places" for s in sources)
+            if uses_places and enrichment_sources:
+                strategy = "google_places_with_brave_enrichment"
+            elif uses_brave_discovery:
+                strategy = "brave_discovery"
+            else:
+                strategy = "google_places_only"
             summary = sources[0]["reason"]
             if enrichment_sources:
                 summary = f"{summary} Luego {enrichment_sources[0]['reason'].lower()}"
@@ -162,6 +201,60 @@ class ProspectingPromptOrchestrator:
             "sources": sources,
             "enrichment_sources": enrichment_sources,
         }
+
+    def plan_rounds(self, brief: ProspectingBrief) -> list[dict[str, Any]]:
+        """Return the escalation ladder for the agentic discovery loop.
+
+        Each round lists NEW sources to query.  Sources accumulate — a source
+        already queried in a previous round is NOT repeated.
+
+        Order: DDG (free) → Places (geographic) → Brave (paid, last resort).
+        Brave only enters if the cheaper sources haven't met the quality threshold.
+        """
+        has_geo = bool(brief.geography_label)
+        is_industrial = bool(getattr(brief, "industrial_zone", ""))
+        rounds: list[dict[str, Any]] = []
+
+        # Round 1 — DDG, always free
+        if self._ddg_enabled:
+            rounds.append({
+                "round": 1,
+                "label": "DDG libre",
+                "new_sources": ["ddg"],
+                "cost": "free",
+            })
+
+        # Round 2 — Google Places (only if geographic and not an industrial zone)
+        if has_geo and not is_industrial and self._places_enabled:
+            rounds.append({
+                "round": 2,
+                "label": "Google Places",
+                "new_sources": ["google_places"],
+                "cost": "low",
+            })
+
+        # Round 3 — Brave (paid per query, only after free sources exhausted)
+        if self._brave_enabled:
+            rounds.append({
+                "round": len(rounds) + 1,
+                "label": "Brave Search",
+                "new_sources": ["brave"],
+                "cost": "medium",
+            })
+
+        # Fallback: if nothing is configured, use what plan_sources gives us
+        if not rounds:
+            source_plan = self.plan_sources(brief)
+            for i, source in enumerate(source_plan.get("sources", []), 1):
+                if source.get("enabled"):
+                    rounds.append({
+                        "round": i,
+                        "label": source["name"],
+                        "new_sources": [source["name"]],
+                        "cost": "unknown",
+                    })
+
+        return rounds
 
     async def _refine_with_guardrails(
         self,
@@ -231,7 +324,7 @@ class ProspectingPromptOrchestrator:
             warnings.append("Falta geografia; Sales pedira ciudad, provincia o region antes del run.")
         if not brief.target_description.strip():
             warnings.append("El objetivo es generico; conviene concretar el tipo de lead buscado.")
-        description = self._normalize_text(brief.target_description)
+        description = _normalize_text(brief.target_description)
         if description:
             vertical_hints = {
                 "restaurants": ("restaurante", "hosteleria", "cocina"),
@@ -393,10 +486,3 @@ class ProspectingPromptOrchestrator:
             result.append(cleaned)
         return result[:10]
 
-    @staticmethod
-    def _normalize_text(value: Any) -> str:
-        import unicodedata
-
-        raw = unicodedata.normalize("NFKD", str(value or ""))
-        ascii_text = raw.encode("ascii", "ignore").decode("ascii")
-        return " ".join(ascii_text.lower().split())

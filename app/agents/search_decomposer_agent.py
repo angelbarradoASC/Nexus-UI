@@ -6,7 +6,6 @@ Se conecta al sistema existente cuando se incorpore en la Fase 3.
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +15,7 @@ from loguru import logger
 
 from agents.llm_router import get_router
 from nexus.prompts import resolve_prompt_sync
+from nexus.utils.llm_json import parse_llm_json
 
 
 # ── Cadenas conocidas por sector ─────────────────────────────────────────────
@@ -324,15 +324,8 @@ class SearchDecomposerAgent:
         if response is None or response.error:
             return None
 
-        raw = (response.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-        raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0 or end < start:
-            return None
-        try:
-            parsed = json.loads(raw[start : end + 1])
-        except Exception:
+        parsed = parse_llm_json(response.content or "")
+        if parsed is None:
             return None
 
         required = {"business_type", "sector", "location", "search_queries", "guardrail_criteria"}

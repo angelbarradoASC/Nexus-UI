@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,51 +16,19 @@ from nexus.connectors.crm import AssetsCRMConnector
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting.autonomy import SalesAutonomousSystem
 from nexus.prospecting.brave import BraveSearchClient, BraveSearchSettings
+from nexus.prospecting.ddg import DdgSearchClient, DdgSearchSettings
 from nexus.prospecting.extractors import WebProspectExtractor
 from nexus.prospecting.google_places import GooglePlacesClient, GooglePlacesSettings
 from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
+from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import KNOWN_VERTICALS, ProspectingBrief, default_tags_for_vertical, normalize_vertical
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
 from nexus.prospecting.api_budget import BudgetExceededError, PlacesApiBudget
+from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES, VERTICAL_BLOCKLIST
+from nexus.utils.text import normalize_text as _normalize_text
 from nexus.prospecting.repository import ProspectingRepository
 from nexus.prospecting.scoring import ProspectScorer
 from nexus.prospecting.validators import DomainValidator, EmailValidator, MXValidator
-
-_GENERIC_DIRECTORY_HINTS = (
-    "facebook.com",
-    "instagram.com",
-    "linkedin.com",
-    "tripadvisor.",
-    "thefork.",
-    "google.com",
-    "google.es",
-    "paginasamarillas",
-    "yelp.",
-)
-
-_VERTICAL_BLOCKLIST: dict[str, tuple[str, ...]] = {
-    "inmobiliaria": (
-        "fotocasa.",
-        "idealista.",
-        "pisos.com",
-        "habitaclia.",
-        "yaencontre.",
-        "indomio.",
-        "globaliza.",
-        "trovimap.",
-        "milanuncios.",
-        "thinkspain.",
-        "kyero.",
-        "nestoria.",
-    ),
-    "asesoria": (
-        "expansion.com/directorio",
-        "einforma.",
-        "axesor.",
-        "infocif.",
-        "empresite.",
-    ),
-}
 
 
 class ProspectingAgentService:
@@ -75,6 +42,7 @@ class ProspectingAgentService:
         connector: AssetsCRMConnector | None = None,
         llm_client: LocalLLMClient | None = None,
         brave_client: BraveSearchClient | None = None,
+        ddg_client: DdgSearchClient | None = None,
         places_client: GooglePlacesClient | None = None,
         extractor: WebProspectExtractor | None = None,
         email_validator: EmailValidator | None = None,
@@ -109,6 +77,14 @@ class ProspectingAgentService:
             ),
             repository=self._repository,
         )
+        self._ddg = ddg_client or DdgSearchClient(
+            settings=DdgSearchSettings(
+                enabled=True,
+                rate_limit_seconds=1.5,
+                timeout=float(getattr(cfg, "prospecting_http_timeout_seconds", 20)),
+            ),
+            repository=self._repository,
+        )
         self._places = places_client or GooglePlacesClient(
             settings=GooglePlacesSettings(
                 api_key=getattr(cfg, "google_places_api_key", None),
@@ -132,6 +108,7 @@ class ProspectingAgentService:
             llm_client=self._llm,
             brave_enabled=self._brave.enabled,
             places_enabled=self._places.enabled,
+            ddg_enabled=self._ddg.enabled,
         )
         self._autonomy = SalesAutonomousSystem()
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -152,7 +129,7 @@ class ProspectingAgentService:
         log_fn = getattr(_logger, level, _logger.info)
         log_fn(f"[{run.get('run_id', '?')}] {message}" + (f" | {extra}" if extra else ""))
 
-    async def run(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def run(self, payload: ProspectingRunRequest) -> dict[str, Any]:
         brief = self._normalize_brief(payload)
         source_plan = self._orchestrator.plan_sources(brief)
         run_id = f"pros-{uuid4().hex[:10]}"
@@ -163,13 +140,14 @@ class ProspectingAgentService:
             self._tasks[run_id] = asyncio.create_task(self._execute_run(run_id, brief))
             return self._run_summary(run)
 
+        timeout_seconds = float(max(getattr(brief, "max_run_minutes", 10), 2)) * 60.0
         try:
-            run = await asyncio.wait_for(self._execute_run(run_id, brief), timeout=240.0)
+            run = await asyncio.wait_for(self._execute_run(run_id, brief), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             saved = await self._repository.get_run(run_id)
             if saved:
                 saved["status"] = "timeout"
-                saved["error"] = "Run timeout (>4 min) — probablemente web sin respuesta"
+                saved["error"] = f"Run timeout (>{int(timeout_seconds//60)} min) — demasiadas webs lentas o DDG bloqueado"
                 saved["finished_at"] = datetime.now(timezone.utc).isoformat()
                 runs = await self._repository.load_runs()
                 for i, r in enumerate(runs):
@@ -204,6 +182,24 @@ class ProspectingAgentService:
         if run is None:
             return {"status": "not_found", "run_id": run_id}
         return run
+
+    async def quick_probe(self, *, city: str, vertical: str) -> dict:
+        """3-result DDG probe to check if a city/vertical combination has real results."""
+        vertical_label = vertical.replace("_", " ")
+        query = f"{vertical_label} {city} contacto email"
+        try:
+            payload = await self._ddg.search(run_id="", query=query, max_results=5)
+            results = payload.get("results", [])
+            real = [r for r in results if not self._ddg.is_directory_domain(r.get("url", ""))]
+            if len(real) >= 2:
+                quality = "ok"
+            elif real:
+                quality = "sparse"
+            else:
+                quality = "empty"
+            return {"hits": len(real), "quality": quality}
+        except Exception:
+            return {"hits": 0, "quality": "unknown"}
 
     async def list_results(
         self,
@@ -334,11 +330,35 @@ class ProspectingAgentService:
                 f"\"inmobiliaria\" \"{geo}\" \"aviso legal\" {exclusions}",
                 f"\"inmobiliaria\" \"{geo}\" \"equipo\" {exclusions}",
             ]
+        elif brief.industrial_zone:
+            zone = brief.industrial_zone
+            prov = brief.province or brief.city or geography
+            desc = brief.target_description or "empresa"
+            base = [
+                f"empresas \"{zone}\" {prov} contacto email",
+                f"\"{zone}\" {prov} empresa teléfono email",
+                f"site:axesor.es \"{zone}\" {prov}",
+                f"site:einforma.com \"{zone}\" {prov}",
+                f"\"{zone}\" {prov} directorio empresas",
+                f"{desc} polígono industrial \"{zone}\" {prov}",
+            ]
         else:
             base = [
                 f"{brief.target_description} {geography} contacto",
                 f"{brief.target_description} {geography} email teléfono",
             ]
+
+        # Employee range hint in queries
+        if brief.min_employees or brief.max_employees:
+            emp_label = ""
+            if brief.min_employees and brief.max_employees:
+                emp_label = f"{brief.min_employees}-{brief.max_employees} empleados"
+            elif brief.min_employees:
+                emp_label = f"más de {brief.min_employees} empleados"
+            else:
+                emp_label = f"hasta {brief.max_employees} empleados"
+            geo = brief.industrial_zone or geography
+            base.append(f"{brief.target_description or 'empresa'} {geo} {emp_label}")
 
         for token in brief.must_have[:3]:
             base.append(f"{brief.target_description or brief.vertical} {geography} {token}")
@@ -403,26 +423,54 @@ class ProspectingAgentService:
             raw_hits: list[dict[str, Any]] = []
             run["queries"] = []
             used_sources: list[str] = []
-            for source in source_plan.get("sources", []):
-                if not source.get("enabled"):
-                    continue
-                source_name = source.get("name")
-                if source_name == "google_places":
-                    batch = await self._discover_with_places(run, brief, geography=geography)
-                    if batch is None:
-                        await self._repository.update_run(run_id, lambda r: {**r, **run})
-                        return run
-                    hits, queries = batch
-                else:
-                    continue
-                if hits:
-                    used_sources.append(str(source_name))
-                    raw_hits.extend(hits)
-                run["queries"].extend(query for query in queries if query not in run["queries"])
-                if len(raw_hits) >= int(source_plan.get("fallback_threshold") or brief.desired_count):
+
+            # ── Agentic multi-round discovery ────────────────────────────────
+            rounds = self._orchestrator.plan_rounds(brief)
+            quality_threshold = max(3, brief.desired_count // 4)
+            queried_sources: set[str] = set()
+
+            for round_cfg in rounds:
+                round_label = round_cfg["label"]
+                new_sources = round_cfg["new_sources"]
+                self._log(run, f"Ronda {round_cfg['round']}: {round_label}", sources=new_sources)
+
+                round_hits: list[dict[str, Any]] = []
+                for source_name in new_sources:
+                    if source_name in queried_sources:
+                        continue
+                    if source_name == "ddg":
+                        hits, queries = await self._discover_with_ddg(run_id, run, brief)
+                    elif source_name == "google_places":
+                        batch = await self._discover_with_places(run, brief, geography=geography)
+                        if batch is None:
+                            await self._repository.update_run(run_id, lambda r: {**r, **run})
+                            return run
+                        hits, queries = batch
+                    elif source_name == "brave":
+                        hits, queries = await self._discover_with_brave(run_id, run, brief)
+                    else:
+                        continue
+                    queried_sources.add(source_name)
+                    if hits:
+                        if source_name not in used_sources:
+                            used_sources.append(source_name)
+                        round_hits.extend(hits)
+                    run["queries"].extend(q for q in queries if q not in run["queries"])
+
+                raw_hits = self._merge_raw_hits(raw_hits, round_hits)
+                real_count = self._count_real_domains(raw_hits)
+                self._log(
+                    run,
+                    f"Ronda {round_cfg['round']} terminada: {real_count} dominios reales acumulados (umbral={quality_threshold})",
+                    new_hits=len(round_hits),
+                    total_hits=len(raw_hits),
+                )
+                if real_count >= quality_threshold:
+                    self._log(run, f"Umbral alcanzado tras ronda {round_cfg['round']} — sin escalada adicional")
                     break
+
             if used_sources:
-                run["discovery_source"] = "+".join(used_sources)
+                run["discovery_source"] = "+".join(dict.fromkeys(used_sources))
             search_audit = await self._audit_search_phase(
                 brief,
                 queries=run["queries"],
@@ -569,6 +617,9 @@ class ProspectingAgentService:
                     self._log(run, f"Objetivo alcanzado: {len(run['results'])} resultados")
                     break
 
+            # LinkedIn pass: enrich accepted results with real snippet-based contacts
+            await self._linkedin_pass(run["results"], brief)
+
             self._update_autonomous_agent(
                 run,
                 brief,
@@ -646,6 +697,103 @@ class ProspectingAgentService:
             run["finished_at"] = datetime.now(timezone.utc).isoformat()
             await self._repository.save_runs(runs)
         return run
+
+    # ── DDG discovery ────────────────────────────────────────────────────────
+
+    async def _discover_with_ddg(
+        self,
+        run_id: str,
+        run: dict[str, Any],
+        brief: ProspectingBrief,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        queries = self.generate_queries(brief)
+        if self._llm.enabled:
+            extra_queries = await self._llm_expand_queries(brief, queries)
+            for q in extra_queries:
+                if q.lower() not in {item.lower() for item in queries}:
+                    queries.append(q)
+        self._log(run, f"DDG Search: {len(queries)} queries", queries=queries[:5])
+        raw_hits: list[dict[str, Any]] = []
+        for query in queries:
+            payload = await self._ddg.search(
+                run_id=run_id,
+                query=query,
+                max_results=min(max(brief.desired_count, 5), 20),
+            )
+            batch = [
+                {
+                    "query": query,
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "description": item.get("description", ""),
+                    "source": "ddg",
+                }
+                for item in payload.get("results", [])
+                if not self._ddg.is_directory_domain(item.get("url", ""))
+            ]
+            raw_hits.extend(batch)
+            self._log(run, f"DDG '{query[:60]}' → {len(batch)} resultados limpios")
+        return raw_hits, queries
+
+    # ── Agentic loop helpers ──────────────────────────────────────────────────
+
+    @staticmethod
+    def _count_real_domains(raw_hits: list[dict[str, Any]]) -> int:
+        """Count unique non-directory domains in the hit list."""
+        seen: set[str] = set()
+        for hit in raw_hits:
+            url = hit.get("url", "")
+            if not url:
+                continue
+            hostname = (urlparse(url).hostname or "").lower().removeprefix("www.")
+            if hostname:
+                seen.add(hostname)
+        return len(seen)
+
+    @staticmethod
+    def _merge_raw_hits(
+        existing: list[dict[str, Any]],
+        new_hits: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Append new_hits to existing, deduplicating by URL."""
+        seen: set[str] = {(hit.get("url") or "").rstrip("/").lower() for hit in existing}
+        merged = list(existing)
+        for hit in new_hits:
+            key = (hit.get("url") or "").rstrip("/").lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(hit)
+        return merged
+
+    async def _linkedin_pass(
+        self,
+        results: list[dict[str, Any]],
+        brief: ProspectingBrief,
+    ) -> None:
+        """Attempt to fill contact_person/contact_role from real DDG LinkedIn snippets.
+
+        Only writes to a result if the DDG snippet actually contains the company name,
+        so no data is ever invented. Mutates results in-place.
+        """
+        if not self._ddg.enabled:
+            return
+        geography = brief.geography_label
+        for result in results:
+            if result.get("contact_person"):
+                continue
+            company_name = result.get("name", "")
+            if not company_name:
+                continue
+            contact = await self._ddg.find_linkedin_contact(
+                company_name=company_name,
+                city=geography,
+            )
+            if contact:
+                result["contact_person"] = contact.get("name", "")
+                result["contact_role"] = contact.get("role", "")
+                result.setdefault("notes", [])
+                if isinstance(result["notes"], list):
+                    result["notes"].append(f"Contacto LinkedIn (DDG snippet): {contact.get('source_url','')}")
 
     async def _discover_with_places(
         self,
@@ -927,8 +1075,6 @@ class ProspectingAgentService:
             "name": "",
             "city": "",
             "province": "",
-            "contact_person": "",
-            "contact_role": "",
             "quality_signals": [],
             "is_premium": False,
             "official_website": False,
@@ -953,14 +1099,8 @@ class ProspectingAgentService:
         merged["notes"] = self._dedupe_list([heuristic.get("notes", ""), response.get("notes", "")])
         merged["is_premium"] = bool(heuristic.get("is_premium") or response.get("is_premium", False))
         merged["official_website"] = bool(heuristic.get("official_website") or response.get("official_website", False))
-
-        contact_person = response.get("contact_person")
-        if self._looks_like_person_name(contact_person):
-            merged["contact_person"] = str(contact_person).strip()
-        contact_role = response.get("contact_role")
-        if self._looks_like_role_label(contact_role):
-            merged["contact_role"] = str(contact_role).strip()
-
+        # contact_person and contact_role are NEVER filled by LLM inference — only by
+        # real website scraping or LinkedIn DDG snippets. See _linkedin_pass().
         return merged
 
     def _heuristic_classification(self, candidate: dict[str, Any], extracted: dict[str, Any], brief: ProspectingBrief) -> dict[str, Any]:
@@ -1205,43 +1345,32 @@ class ProspectingAgentService:
             words.pop()
         return ' '.join(words)
 
-    def _normalize_brief(self, payload: dict[str, Any]) -> ProspectingBrief:
-        if "vertical" not in payload:
-            payload = {
-                "vertical": "public_administration",
-                "city": payload.get("zone", ""),
-                "province": payload.get("province", ""),
-                "region": payload.get("community", ""),
-                "radius_km": payload.get("radius_km", 30),
-                "desired_count": payload.get("target_results", 20),
-                "must_have": payload.get("keywords", []),
-                "minimum_score": 20,
-                "dry_run": payload.get("dry_run", True),
-                "target_description": payload.get("organism_type", "ayuntamiento"),
-            }
-
-        payload["vertical"] = normalize_vertical(str(payload.get("vertical") or "custom"), fallback_text=str(payload.get("target_description") or ""))
-
+    def _normalize_brief(self, payload: ProspectingRunRequest) -> ProspectingBrief:
+        vertical = normalize_vertical(payload.vertical or "custom", fallback_text=payload.target_description)
         return ProspectingBrief(
-            vertical=str(payload.get("vertical") or "custom").strip(),
-            target_description=str(payload.get("target_description") or "").strip(),
-            city=self._clean_location(str(payload.get("city") or "")),
-            province=self._clean_location(str(payload.get("province") or "")),
-            region=str(payload.get("region") or "").strip(),
-            radius_km=int(payload["radius_km"]) if payload.get("radius_km") else None,
-            desired_count=max(1, min(int(payload.get("desired_count") or 20), 100)),
-            must_have=self._parse_list(payload.get("must_have")),
-            nice_to_have=self._parse_list(payload.get("nice_to_have")),
-            exclude=self._parse_list(payload.get("exclude")),
-            crm_tags=self._parse_list(payload.get("crm_tags")),
-            campaign_type=str(payload.get("campaign_type") or "").strip(),
-            minimum_score=max(0, min(int(payload.get("minimum_score") or 50), 100)),
-            country=str(payload.get("country") or "es").strip(),
-            language=str(payload.get("language") or "es").strip(),
-            dry_run=bool(payload.get("dry_run", True)),
-            async_mode=bool(payload.get("async_mode", False)),
-            represented_by=str(payload.get("represented_by") or "assets").strip(),
-            vertical_created=bool(payload.get("vertical_created", False)),
+            vertical=vertical,
+            target_description=payload.target_description.strip(),
+            city=self._clean_location(payload.city),
+            province=self._clean_location(payload.province),
+            region=payload.region.strip(),
+            radius_km=payload.radius_km,
+            desired_count=max(1, min(payload.desired_count, 100)),
+            must_have=self._parse_list(payload.must_have),
+            nice_to_have=self._parse_list(payload.nice_to_have),
+            exclude=self._parse_list(payload.exclude),
+            crm_tags=self._parse_list(payload.crm_tags),
+            campaign_type=payload.campaign_type.strip(),
+            minimum_score=max(0, min(payload.minimum_score, 100)),
+            country=payload.country.strip() or "es",
+            language=payload.language.strip() or "es",
+            dry_run=payload.dry_run,
+            async_mode=payload.async_mode,
+            represented_by=payload.represented_by.strip() or "assets",
+            vertical_created=False,
+            min_employees=payload.min_employees,
+            max_employees=payload.max_employees,
+            industrial_zone=payload.industrial_zone.strip(),
+            max_run_minutes=max(2, min(payload.max_run_minutes, 30)),
         )
 
     def _parse_list(self, value: Any) -> list[str]:
@@ -1406,6 +1535,26 @@ class ProspectingAgentService:
             result.append(cleaned)
         return result
 
+    _DEAD_PAGE_PATTERNS = (
+        "pagina no encontrada",
+        "página no encontrada",
+        "page not found",
+        "404 not found",
+        "error 404",
+        "no existe la pagina",
+        "no existe la página",
+        "contenido no encontrado",
+        "this page could not be found",
+    )
+
+    def _is_dead_page(self, candidate: dict[str, Any], extracted: dict[str, Any]) -> bool:
+        """Return True if the page title or extracted name indicates a 404 / missing page."""
+        title_blob = _normalize_text(" ".join([
+            str(candidate.get("title", "")),
+            str(extracted.get("name", "")),
+        ]))
+        return any(pat in title_blob for pat in self._DEAD_PAGE_PATTERNS)
+
     def _evaluate_candidate_guardrails(
         self,
         candidate: dict[str, Any],
@@ -1413,6 +1562,9 @@ class ProspectingAgentService:
         brief: ProspectingBrief,
     ) -> list[str]:
         failures: list[str] = []
+        if self._is_dead_page(candidate, extracted):
+            failures.append("page_not_found")
+            return self._dedupe_list(failures)
         if self._looks_like_blocked_listing(candidate, extracted, brief.vertical):
             failures.append("marketplace_or_directory")
         if not bool(extracted.get("is_relevant", True)):
@@ -1434,7 +1586,7 @@ class ProspectingAgentService:
         own_website = website and not self._looks_like_blocked_listing({}, extracted, brief.vertical)
 
         for raw_item in brief.must_have:
-            item = self._normalize_text(raw_item)
+            item = _normalize_text(raw_item)
             if "email" in item and not email:
                 failures.append("must_have_email")
             elif "telefono" in item and not phone:
@@ -1463,7 +1615,7 @@ class ProspectingAgentService:
         extracted: dict[str, Any],
         vertical: str,
     ) -> bool:
-        blob = self._normalize_text(
+        blob = _normalize_text(
             " ".join(
                 [
                     str(candidate.get("title", "")),
@@ -1475,8 +1627,8 @@ class ProspectingAgentService:
                 ]
             )
         )
-        for hint in [*_GENERIC_DIRECTORY_HINTS, *_VERTICAL_BLOCKLIST.get(vertical, ())]:
-            if self._normalize_text(hint) in blob:
+        for hint in [*BLOCKED_HINT_PREFIXES, *VERTICAL_BLOCKLIST.get(vertical, ())]:
+            if _normalize_text(hint) in blob:
                 return True
         if vertical == "inmobiliaria":
             return any(token in blob for token in ("portal inmobiliario", "anuncios de pisos", "buscador de viviendas"))
@@ -1488,11 +1640,11 @@ class ProspectingAgentService:
         extracted: dict[str, Any],
         brief: ProspectingBrief,
     ) -> bool:
-        requested_city = self._normalize_text(brief.city)
-        requested_province = self._normalize_text(brief.province)
+        requested_city = _normalize_text(brief.city)
+        requested_province = _normalize_text(brief.province)
         if not requested_city and not requested_province:
             return True
-        blob = self._normalize_text(
+        blob = _normalize_text(
             " ".join(
                 [
                     str(candidate.get("title", "")),
@@ -1521,6 +1673,7 @@ class ProspectingAgentService:
 
     def _humanize_reason(self, reason: str | None) -> str:
         mapping = {
+            "page_not_found": "pagina no encontrada (404)",
             "marketplace_or_directory": "portal o directorio",
             "vertical_mismatch": "no encaja con la vertical pedida",
             "geography_mismatch": "fuera de la geografia pedida",
@@ -1536,11 +1689,6 @@ class ProspectingAgentService:
         }
         return mapping.get(str(reason or ""), str(reason or "motivo no disponible"))
 
-    def _normalize_text(self, value: Any) -> str:
-        raw = unicodedata.normalize("NFKD", str(value or ""))
-        ascii_text = raw.encode("ascii", "ignore").decode("ascii")
-        return " ".join(ascii_text.lower().split())
-
     def _locate_result(self, runs: list[dict[str, Any]], result_id: str) -> tuple[int, dict[str, Any], dict[str, Any]] | None:
         for run_index, run in enumerate(runs):
             for result in run.get("results", []):
@@ -1550,4 +1698,5 @@ class ProspectingAgentService:
 
 
 MunicipalProspectorService = ProspectingAgentService
+
 

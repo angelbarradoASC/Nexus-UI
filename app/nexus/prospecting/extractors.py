@@ -18,11 +18,16 @@ _PUBLIC_LINK_HINTS = ("contacto", "contact", "corporacion", "corporación", "con
 _RESTAURANT_LINK_HINTS = ("contacto", "contact", "reservas", "reservation", "menu", "carta", "eventos", "about", "legal")
 
 
+_JINA_BASE = "https://r.jina.ai"
+_MIN_USEFUL_CHARS = 300  # below this we try Jina Reader as fallback
+
+
 @dataclass(slots=True)
 class WebProspectExtractor:
     timeout_seconds: float = 12.0
     user_agent: str = "Open-Nexus Prospecting/1.0"
     max_pages_per_site: int = 4
+    use_jina_fallback: bool = True  # free JS-render fallback via Jina Reader API
 
     async def extract(self, *, url: str, vertical: str) -> dict[str, Any]:
         website = self._normalize_url(url)
@@ -37,7 +42,12 @@ class WebProspectExtractor:
             try:
                 base_response = await client.get(website)
                 base_response.raise_for_status()
+                base_html = base_response.text
             except Exception:
+                # httpx failed — try Jina Reader directly as the only source
+                jina_text = await self._jina_fetch(website) if self.use_jina_fallback else ""
+                if jina_text:
+                    return self._extract_from_plain_text(jina_text, website, source="jina")
                 return {
                     "source_url": website,
                     "evidence_urls": [],
@@ -46,8 +56,15 @@ class WebProspectExtractor:
                     "social_links": [],
                 }
 
-            pages = [(str(base_response.url), base_response.text)]
-            for link in self._candidate_links(base_response.text, str(base_response.url), vertical):
+            # If the page returned very little usable text (JS-only render), use Jina
+            plain_preview = BeautifulSoup(base_html, "html.parser").get_text(" ", strip=True)
+            if self.use_jina_fallback and len(plain_preview) < _MIN_USEFUL_CHARS:
+                jina_text = await self._jina_fetch(website)
+                if jina_text and len(jina_text) > len(plain_preview):
+                    return self._extract_from_plain_text(jina_text, website, source="jina")
+
+            pages = [(str(base_response.url), base_html)]
+            for link in self._candidate_links(base_html, str(base_response.url), vertical):
                 if len(pages) >= self.max_pages_per_site:
                     break
                 try:
@@ -168,6 +185,47 @@ class WebProspectExtractor:
                 "transparencia",
             )
         return [token for token in tokens if token in lowered]
+
+    async def _jina_fetch(self, url: str) -> str:
+        """Fetch a JS-rendered page via Jina Reader (free, no API key)."""
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(
+                    f"{_JINA_BASE}/{url}",
+                    headers={"User-Agent": self.user_agent, "Accept": "text/plain"},
+                )
+                if resp.status_code == 200:
+                    return resp.text
+        except Exception:
+            pass
+        return ""
+
+    def _extract_from_plain_text(
+        self, text: str, website: str, *, source: str = "jina"
+    ) -> dict[str, Any]:
+        """Extract contact signals from plain/markdown text (Jina Reader output)."""
+        domain = (urlparse(website).hostname or "").lower()
+        emails = self._dedupe([item.lower() for item in _EMAIL_RE.findall(text)])
+        phones = self._dedupe([self._clean_phone(item) for item in _PHONE_RE.findall(text)])
+        addresses = self._dedupe([self._clean_address(item) for item in _ADDRESS_RE.findall(text)])
+        # Infer name from first non-empty line of the markdown text
+        first_line = next((ln.strip().lstrip("#").strip() for ln in text.splitlines() if ln.strip()), "")
+        return {
+            "name": first_line[:120] if first_line else domain,
+            "website": website,
+            "domain": domain,
+            "emails": emails,
+            "phones": [p for p in phones if p],
+            "address": addresses[0] if addresses else "",
+            "city": self._infer_city(text),
+            "province": self._infer_province(text),
+            "contact_form_only": not bool(emails) and self._contains_contact_form(text),
+            "social_links": [],
+            "source_url": website,
+            "evidence_urls": [website] if (emails or phones) else [],
+            "quality_signals": self._quality_signals("custom", text),
+            "notes": [f"Fuente: Jina Reader ({source})"] if (emails or phones) else [],
+        }
 
     def _normalize_url(self, value: str | None) -> str:
         if not value:

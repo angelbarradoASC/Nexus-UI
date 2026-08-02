@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from loguru import logger
+
+from nexus.utils.llm_json import parse_llm_json
 
 
 @dataclass(slots=True)
@@ -141,18 +142,4 @@ class LocalLLMClient:
         return f"{base}{path}"
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
-        raw = text.strip()
-        if not raw:
-            return {}
-        if raw.startswith("```"):
-            match = re.search(r"```(?:json)?\s*(.*?)```", raw, re.DOTALL | re.IGNORECASE)
-            if match:
-                raw = match.group(1).strip()
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start >= 0 and end >= start:
-            raw = raw[start : end + 1]
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
+        return parse_llm_json(text) or {}

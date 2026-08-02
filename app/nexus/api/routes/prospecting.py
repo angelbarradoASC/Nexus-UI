@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,39 +23,44 @@ from nexus.api.schemas.prospecting import (
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting import ProspectingAgentService
 from nexus.prospecting.models import normalize_vertical
+from nexus.utils.llm_json import parse_llm_json
+from nexus.utils.text import normalize_text
 
 router = APIRouter()
 
 # NOTE: this constant is not used — the live call uses resolve_prompt_sync("sales.prospecting.interpret")
 # Kept here only as a reference; canonical version lives in nexus/prompts/catalogue.py
 _INTERPRET_SYSTEM = "see nexus/prompts/catalogue.py: sales.prospecting.interpret"
+# Chat system prompt → catalogue key: sales.prospecting.chat
 
 
 class InterpretRequest(BaseModel):
     text: str
 
 
-def _normalize_text(value: str) -> str:
-    import unicodedata
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
-    raw = unicodedata.normalize("NFKD", str(value or ""))
-    ascii_text = raw.encode("ascii", "ignore").decode("ascii")
-    return " ".join(ascii_text.lower().split())
+
+class ProspectingChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
 
 
 def _fallback_parse(text: str) -> dict:
     """Reglas heurísticas si el LLM no devuelve JSON válido."""
-    t = text.lower()
+    t = normalize_text(text)
 
     if any(w in t for w in ("asesor", "gestor", "fiscal", "laboral", "contable")):
         vertical = "asesoria"
-    elif any(w in t for w in ("clinica", "clínica", "dentista", "odont", "odontologia", "odontología", "salud")):
+    elif any(w in t for w in ("clinica", "dentista", "odont", "odontologia", "salud")):
         vertical = "salud"
     elif any(w in t for w in ("inmobiliaria", "agencia inmob", "pisos", "alquiler", "vivienda")):
         vertical = "inmobiliaria"
-    elif any(w in t for w in ("ayuntamiento", "municipio", "administración", "concejal")):
+    elif any(w in t for w in ("ayuntamiento", "municipio", "administracion", "concejal")):
         vertical = "public_administration"
-    elif any(w in t for w in ("restaurante", "hostelería", "bar ", "cafetería")):
+    elif any(w in t for w in ("restaurante", "hosteleria", "bar ", "cafeteria")):
         vertical = "restaurants"
     else:
         vertical = normalize_vertical("custom", fallback_text=text)
@@ -67,31 +71,75 @@ def _fallback_parse(text: str) -> dict:
     count_match = re.search(r"\b(unas?\s*)?(\d+)\s*(empresa|lead|result|negocio|unas?)", t)
     desired_count = int(count_match.group(2)) if count_match else 20
 
+    # Rango de empleados: "de 30 a 50 empleados", "entre 10 y 50 empleados"
+    emp_match = re.search(
+        r"(?:de\s+|entre\s+)(\d+)\s+(?:a|y)\s+(\d+)\s+empleados?",
+        t,
+    )
+    min_employees: int | None = None
+    max_employees: int | None = None
+    if emp_match:
+        min_employees = int(emp_match.group(1))
+        max_employees = int(emp_match.group(2))
+    else:
+        single_emp = re.search(r"(\d+)\s+empleados?", t)
+        if single_emp:
+            max_employees = int(single_emp.group(1))
+
+    # Zona industrial: "polígono de Malpica", "polígono Malpica", "pol. industrial Malpica"
+    poligono_match = re.search(
+        r"pol[ií]gono(?:\s+(?:industrial|ind\.?|de))?\s+(?:de\s+)?([a-zà-ü]{3,})",
+        t,
+    )
+    industrial_zone = poligono_match.group(1).title() if poligono_match else ""
+
+    # Must-have: contacto requerido
+    must_have: list[str] = []
+    if any(w in t for w in ("correo", "email", "e-mail", "mail")):
+        must_have.append("email")
+    if any(w in t for w in ("telefono", "tlf", "movil", "whatsapp")):
+        must_have.append("telefono")
+
     stop_lower = {
         "quiero", "busca", "buscar", "dame", "encuentra", "en", "de", "por", "con",
         "cerca", "radio", "provincia", "zona", "sur", "norte", "este", "oeste",
         "la", "el", "los", "las", "un", "una", "unos", "como", "unas", "para",
         "que", "hay", "del", "al", "se", "fiscal", "laboral", "contable",
+        "poligono", "industrial", "ind",
     }
 
-    # 1. Palabras después de preposiciones de lugar (captura minúsculas también)
-    prep_hits = re.findall(
-        r'\b(?:en|cerca de|en la ciudad de|ciudad de|municipio de|en el municipio de)\s+'
-        r'([a-záéíóúña-z][a-záéíóúña-zA-ZÁÉÍÓÚÑ]*(?:\s+[a-záéíóúña-zA-ZÁÉÍÓÚÑ]+)?)',
-        text, re.IGNORECASE,
-    )
-    # 2. Palabras capitalizadas directamente en el texto original
-    cap_hits = re.findall(r'\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})\b', text)
+    # Si hay polígono, forzar ciudad = nombre del polígono y buscar provincia en el texto
+    if industrial_zone:
+        city = industrial_zone
+        # Buscar la ciudad/provincia real: primer topónimo capitalizado que no sea el polígono
+        prov_candidates = re.findall(
+            r"(?:en|,)\s+(?!el\s+pol|pol[ií]gono)([A-Za-zÀ-ÿ]{3,}(?:\s+[A-Za-zÀ-ÿ]{3,})?)",
+            text, re.IGNORECASE,
+        )
+        province = ""
+        for cand in prov_candidates:
+            cand_clean = cand.strip().title()
+            if cand_clean.lower() != industrial_zone.lower() and len(cand_clean) > 2:
+                province = cand_clean
+                break
+    else:
+        # 1. Palabras después de preposiciones de lugar
+        prep_hits = re.findall(
+            r'\b(?:en|cerca de|en la ciudad de|ciudad de|municipio de|en el municipio de)\s+'
+            r'([a-zà-ü][a-zÀ-ü]*(?:\s+[a-zÀ-ü]+)?)',
+            text, re.IGNORECASE,
+        )
+        # 2. Palabras capitalizadas en el texto original
+        cap_hits = re.findall(r'\b([A-ZÀ-Ü][a-zà-ü]{2,})\b', text)
 
-    # Unir, capitalizar y filtrar palabras de parada
-    seen: list[str] = []
-    for raw in prep_hits + cap_hits:
-        normalized = raw.strip().title()  # "parla" → "Parla", "La Parla" → "La Parla"
-        if normalized.lower() not in stop_lower and normalized not in seen and len(normalized) > 2:
-            seen.append(normalized)
+        seen: list[str] = []
+        for raw in prep_hits + cap_hits:
+            normalized = raw.strip().title()
+            if normalized.lower() not in stop_lower and normalized not in seen and len(normalized) > 2:
+                seen.append(normalized)
 
-    city     = seen[0] if seen else ""
-    province = seen[1] if len(seen) > 1 else ""
+        city     = seen[0] if seen else ""
+        province = seen[1] if len(seen) > 1 else ""
 
     return {
         "vertical": vertical,
@@ -102,7 +150,10 @@ def _fallback_parse(text: str) -> dict:
         "desired_count": desired_count,
         "minimum_score": 40,
         "dry_run": True,
-        "must_have": [],
+        "must_have": must_have,
+        "min_employees": min_employees,
+        "max_employees": max_employees,
+        "industrial_zone": industrial_zone,
         "target_description": text[:120],
         "_fallback": True,
     }
@@ -139,16 +190,7 @@ async def interpret_brief(
     brief = None
 
     if response is not None and not response.error:
-        raw = (response.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-        raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-        start, end = raw.find("{"), raw.rfind("}")
-        if start >= 0 and end >= start:
-            raw = raw[start : end + 1]
-        try:
-            brief = json.loads(raw)
-        except Exception:
-            brief = None
+        brief = parse_llm_json(response.content or "")
 
     # Fallback por reglas si el LLM falla o devuelve basura
     if brief is None:
@@ -185,12 +227,97 @@ async def interpret_brief(
     }
 
 
+
+@router.post("/prospecting/chat")
+async def prospecting_chat(
+    payload: ProspectingChatRequest,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    """Motor conversacional: extrae intención, aclara dudas y valida empíricamente antes de confirmar."""
+    history = [{"role": m.role, "content": m.content} for m in payload.history]
+    history.append({"role": "user", "content": payload.message})
+
+    llm = get_router()
+    parsed = None
+    try:
+        response = await asyncio.wait_for(
+            llm.call(
+                messages=[{"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat")}, *history],
+                preferred_level=1,
+                temperature=0.2,
+                max_tokens=700,
+                timeout=8.0,
+            ),
+            timeout=20.0,
+        )
+        if not response.error:
+            parsed = parse_llm_json(response.content or "")
+    except asyncio.TimeoutError:
+        logger.warning("prospecting/chat | llm timeout")
+
+    if not parsed:
+        # Fallback heurístico — combina todos los mensajes del usuario e intenta extraer parámetros
+        all_user_text = " ".join(
+            m["content"] for m in history if m["role"] == "user"
+        )
+        fb = _fallback_parse(all_user_text)
+        if fb.get("city"):
+            # Sanear artefactos del parser heurístico
+            fb["province"] = fb["city"]
+            fb.pop("min_employees", None)
+            fb.pop("max_employees", None)
+            fb.pop("industrial_zone", None)
+            # desired_count: re-buscar número en el texto combinado
+            num_match = re.search(r"\b(\d+)\b", all_user_text)
+            if num_match:
+                candidate = int(num_match.group(1))
+                if 1 <= candidate <= 200:
+                    fb["desired_count"] = candidate
+            parsed = {
+                "status": "ready",
+                "reply": f"(sin LLM) Buscaré {fb.get('vertical', '')} en {fb['city']}.",
+                "brief": fb,
+            }
+        else:
+            return {
+                "status": "clarifying",
+                "reply": "¿En qué ciudad quieres buscar y qué tipo de negocio?",
+                "brief": None,
+            }
+
+    status = parsed.get("status", "clarifying")
+    reply = str(parsed.get("reply", ""))
+    brief = parsed.get("brief")
+
+    # Probe empírico — solo advierte, nunca bloquea (DDG filtra directorios
+    # y en ciudades grandes casi todo son directorios, dando falsos "empty")
+    if status == "ready" and brief and brief.get("city"):
+        probe = await prospecting.quick_probe(
+            city=brief["city"],
+            vertical=brief.get("vertical", ""),
+        )
+        if probe.get("quality") in ("empty", "sparse"):
+            reply += " ⚠ La búsqueda de prueba encontró pocos resultados directos — puede que la zona tenga poca presencia online o que el run sea corto."
+
+    if status == "ready" and brief:
+        brief.setdefault("province", brief.get("city", ""))
+        brief.setdefault("region", "")
+        brief.setdefault("target_description", "")
+        brief.setdefault("desired_count", 20)
+        brief.setdefault("minimum_score", 40)
+        brief.setdefault("represented_by", "assets")
+        brief.setdefault("must_have", [])
+        brief.setdefault("dry_run", True)
+
+    return {"status": status, "reply": reply, "brief": brief}
+
+
 @router.post("/prospecting/run", response_model=ProspectingRunResponse)
 async def run_prospecting(
     payload: ProspectingRunRequest,
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> ProspectingRunResponse:
-    return await prospecting.run(payload.model_dump())
+    return await prospecting.run(payload)
 
 
 @router.post("/prospecting/runs/{run_id}/resume", response_model=ProspectingRunResponse)
@@ -289,58 +416,6 @@ async def push_valid_results_to_crm(
     if response.get("status") == "not_found":
         raise HTTPException(status_code=404, detail=f"Run {payload.run_id} not found")
     return response
-
-
-# Backward-compatible aliases while the UI settles.
-@router.post("/prospecting/municipal/run", response_model=ProspectingRunResponse)
-async def run_municipal_alias(
-    payload: ProspectingRunRequest,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingRunResponse:
-    return await prospecting.run(payload.model_dump())
-
-
-@router.get("/prospecting/municipal/runs/{run_id}", response_model=ProspectingRunDetailResponse)
-async def get_municipal_run_alias(
-    run_id: str,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingRunDetailResponse:
-    return await get_run(run_id, prospecting)
-
-
-@router.get("/prospecting/municipal/results", response_model=ProspectingResultListResponse)
-async def list_municipal_results_alias(
-    run_id: str | None = Query(default=None),
-    min_score: int | None = Query(default=None, ge=0, le=100),
-    crm_state: str | None = Query(default=None),
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingResultListResponse:
-    return await prospecting.list_results(run_id=run_id, min_score=min_score, crm_state=crm_state, vertical="public_administration")
-
-
-@router.get("/prospecting/municipal/discarded", response_model=ProspectingDiscardedListResponse)
-async def list_municipal_discarded_alias(
-    run_id: str | None = Query(default=None),
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingDiscardedListResponse:
-    return await prospecting.list_discarded(run_id=run_id, vertical="public_administration")
-
-
-@router.post("/prospecting/municipal/results/{result_id}/push-to-crm", response_model=ProspectingPushResponse)
-async def push_municipal_result_to_crm_alias(
-    result_id: str,
-    payload: ProspectingPushRequest,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingPushResponse:
-    return await push_result_to_crm(result_id, payload, prospecting)
-
-
-@router.post("/prospecting/municipal/push-valid-to-crm", response_model=ProspectingPushResponse)
-async def push_valid_municipal_results_to_crm_alias(
-    payload: ProspectingPushRequest,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
-) -> ProspectingPushResponse:
-    return await push_valid_results_to_crm(payload, prospecting)
 
 
 # ── Search Decomposer (Fase 1 del pipeline agéntico) ─────────────────────────

@@ -26,6 +26,10 @@ class ProspectingRunRequest(BaseModel):
     dry_run: bool = True
     async_mode: bool = False
     represented_by: str = Field(default="assets", pattern=r"^(assets|automato|other)$")
+    min_employees: int | None = Field(default=None, ge=1)
+    max_employees: int | None = Field(default=None, ge=1)
+    industrial_zone: str = ""
+    max_run_minutes: int = Field(default=10, ge=2, le=30)
 
 
 class ProspectingRunResponse(BaseModel):

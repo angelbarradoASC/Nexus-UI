@@ -15,6 +15,7 @@ from agents.llm_router import LLMRouter
 from nexus.prompts import resolve_prompt_sync
 from nexus.outreach.repository import OutreachRepository
 from nexus.outreach.transports import IMAPMailboxMonitor, SMTPOutreachTransport
+from nexus.utils.llm_json import strip_llm_fences
 
 
 class OutreachManager:
@@ -70,16 +71,22 @@ class OutreachManager:
 
     async def launch_campaign(self, payload: dict[str, Any]) -> dict[str, Any]:
         prospects = self._parse_prospects(payload)
+        sender_name = (payload.get("sender_name") or self._cfg.outreach_sender_name or "").strip()
+        if not sender_name:
+            raise ValueError(
+                "sender_name es obligatorio para lanzar una campaña. "
+                "Configúralo en daily_config.json o en los ajustes de outreach."
+            )
         campaign_id = f"out-{uuid.uuid4().hex[:10]}"
         now = datetime.now(timezone.utc)
         followup_delays = payload.get("followup_delays_days") or self._default_followup_days()
         campaign = {
             "campaign_id": campaign_id,
             "campaign_name": payload["campaign_name"],
-            "sender_name": payload.get("sender_name") or self._cfg.outreach_sender_name,
+            "sender_name": sender_name,
             "sender_email": self._cfg.outreach_email_address,
             "proposition": payload["proposition"],
-            "cta": payload.get("cta") or "Si te encaja, puedo proponerte una llamada breve esta semana.",
+            "cta": payload.get("cta") or "¿Te viene bien una llamada de 15 minutos esta semana?",
             "audience_hint": payload.get("audience_hint") or "",
             "max_daily_send": int(payload.get("max_daily_send") or self._cfg.outreach_daily_cap_default),
             "followup_delays_days": followup_delays,
@@ -206,22 +213,40 @@ class OutreachManager:
         if self._llm_router is None:
             return self._fallback_draft(campaign, prospect, step_index)
 
+        first_name = (prospect.get("first_name") or "").strip()
+        # Si el primer_name parece un email, descartarlo — es un error de importación
+        if "@" in first_name or not first_name:
+            nombre_instruccion = (
+                "NO hay nombre del destinatario. "
+                "Abre con 'Hola,' o directamente con el cuerpo. "
+                "NUNCA uses el email, el dominio ni escribas 'sin nombre' como saludo."
+            )
+        else:
+            nombre_instruccion = f"Nombre: {first_name}"
+
+        # Limpiar historial: quitar campos que el LLM no necesita (evita que use el email como nombre)
+        safe_history = [
+            {k: v for k, v in event.items() if k in ("step_index", "subject", "body", "event_type", "timestamp")}
+            for event in prospect.get("history", [])
+        ]
+
         messages = [
             {"role": "system", "content": resolve_prompt_sync("outreach.system")},
             {
                 "role": "user",
                 "content": (
-                    f"Redacta un {step_name} de prospección B2B.\n"
-                    f"Remitente: {campaign['sender_name']} ({campaign['sender_email']})\n"
+                    f"Redacta un {step_name} de prospección B2B.\n\n"
+                    f"REMITENTE — firma obligatoria: {campaign['sender_name']}\n"
+                    f"No uses '[Firma]' ni placeholders. El cuerpo debe terminar con el nombre real: {campaign['sender_name']}\n\n"
                     f"Propuesta de valor: {campaign['proposition']}\n"
                     f"CTA deseada: {campaign['cta']}\n"
-                    f"Contexto de audiencia: {campaign.get('audience_hint', '')}\n"
-                    f"Destinatario: nombre={prospect.get('first_name') or 'sin nombre'}, "
-                    f"empresa={prospect.get('company') or 'sin empresa'}, "
-                    f"cargo={prospect.get('job_title') or 'sin cargo'}, "
-                    f"dominio={prospect.get('company_domain') or 'sin dominio'}, "
-                    f"notas={prospect.get('notes') or 'sin notas'}\n"
-                    f"Historial previo: {json.dumps(prospect.get('history', []), ensure_ascii=False)}"
+                    f"Contexto de audiencia: {campaign.get('audience_hint') or 'despacho de asesoria fiscal y laboral'}\n\n"
+                    f"Destinatario — {nombre_instruccion}\n"
+                    f"Empresa: {prospect.get('company') or 'sin dato'}\n"
+                    f"Cargo: {prospect.get('job_title') or 'sin dato'}\n"
+                    f"Dominio: {prospect.get('company_domain') or 'sin dato'}\n"
+                    f"Notas: {prospect.get('notes') or 'sin notas'}\n\n"
+                    f"Historial de contactos previos: {json.dumps(safe_history, ensure_ascii=False)}"
                 ),
             },
         ]
@@ -239,7 +264,7 @@ class OutreachManager:
 
     def _parse_draft_content(self, content: str) -> dict[str, str] | None:
         try:
-            cleaned = content.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            cleaned = strip_llm_fences(content)
             payload = json.loads(cleaned)
         except json.JSONDecodeError:
             return None
@@ -250,24 +275,29 @@ class OutreachManager:
         return {"subject": subject, "body": body}
 
     def _fallback_draft(self, campaign: dict[str, Any], prospect: dict[str, Any], step_index: int) -> dict[str, str]:
-        company = prospect.get("company") or "tu equipo"
-        first_name = prospect.get("first_name") or "hola"
+        company = prospect.get("company") or ""
+        raw_name = (prospect.get("first_name") or "").strip()
+        # Descartar si parece un email o está vacío
+        saludo = raw_name if raw_name and "@" not in raw_name else ""
+        apertura = f"{saludo},\n\n" if saludo else "Hola,\n\n"
+        cierre = f"Un saludo,\n{campaign['sender_name']}"
+        company_ref = f" en {company}" if company else ""
+
         if step_index == 0:
-            subject = f"Idea para {company}"
+            subject = f"{campaign['proposition'][:50]}"
             body = (
-                f"{first_name},\n\n"
-                f"Te escribo porque desde Assets Consultores ayudamos a equipos B2B a mejorar {campaign['proposition']}.\n\n"
-                f"Si tiene sentido para {company}, encantado de compartirte en un correo breve cómo lo estamos enfocando y ver si merece una conversación de 15 minutos.\n\n"
-                f"{campaign['cta']}\n\n"
-                f"Un saludo,\n{campaign['sender_name']}"
+                f"{apertura}"
+                f"Me pongo en contacto porque trabajamos con despachos de asesoría en {campaign['proposition']}.\n\n"
+                f"¿Te viene bien una llamada breve esta semana para ver si aplica a vuestro caso?\n\n"
+                f"{cierre}"
             )
         else:
-            subject = f"Seguimiento sobre {company}"
+            subject = f"Re: {campaign['proposition'][:50]}"
             body = (
-                f"{first_name},\n\n"
-                f"Te reenvío esta nota por si ahora sí tiene sentido revisar {campaign['proposition']} en {company}.\n\n"
-                f"{campaign['cta']}\n\n"
-                f"Gracias,\n{campaign['sender_name']}"
+                f"{apertura}"
+                f"Te escribo de nuevo sobre {campaign['proposition']}{company_ref}.\n\n"
+                f"Si no es el momento adecuado, sin problema — dímelo y no vuelvo a molestar.\n\n"
+                f"{cierre}"
             )
         return {"subject": subject, "body": body}
 

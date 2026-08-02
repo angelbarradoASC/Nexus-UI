@@ -31,6 +31,10 @@ class ProspectingBrief:
     async_mode: bool = False
     represented_by: str = "assets"  # assets | automato | other
     vertical_created: bool = False
+    min_employees: int | None = None
+    max_employees: int | None = None
+    industrial_zone: str = ""
+    max_run_minutes: int = 10
 
     @property
     def geography_label(self) -> str:
@@ -58,6 +62,10 @@ class ProspectingBrief:
             "async_mode": self.async_mode,
             "represented_by": self.represented_by,
             "vertical_created": self.vertical_created,
+            "min_employees": self.min_employees,
+            "max_employees": self.max_employees,
+            "industrial_zone": self.industrial_zone,
+            "max_run_minutes": self.max_run_minutes,
         }
 
 

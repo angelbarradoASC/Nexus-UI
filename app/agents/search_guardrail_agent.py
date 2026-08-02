@@ -14,6 +14,7 @@ from loguru import logger
 
 from agents.llm_router import get_router
 from nexus.prompts import resolve_prompt_sync
+from nexus.utils.llm_json import parse_llm_json, strip_llm_fences
 
 
 # ── Verificadores locales (sin LLM) ──────────────────────────────────────────
@@ -359,11 +360,9 @@ class SearchGuardrailAgent:
                 "needs_navigation": False,
             }
 
-        raw = (response.content or "").strip()
-        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-        raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-        start, end = raw.find("{"), raw.rfind("}")
-        if start < 0 or end < start:
+        raw = strip_llm_fences(response.content or "")
+        parsed = parse_llm_json(raw)
+        if parsed is None:
             return {
                 "criterion": criterion,
                 "result": "uncertain",
@@ -371,16 +370,6 @@ class SearchGuardrailAgent:
                 "reasoning": raw[:100],
                 "needs_navigation": False,
             }
-        try:
-            parsed = json.loads(raw[start : end + 1])
-            parsed.setdefault("criterion", criterion)
-            parsed.setdefault("needs_navigation", False)
-            return parsed
-        except Exception:
-            return {
-                "criterion": criterion,
-                "result": "uncertain",
-                "evidence": "JSON inválido del LLM",
-                "reasoning": raw[:100],
-                "needs_navigation": False,
-            }
+        parsed.setdefault("criterion", criterion)
+        parsed.setdefault("needs_navigation", False)
+        return parsed

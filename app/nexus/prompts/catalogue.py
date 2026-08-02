@@ -118,6 +118,11 @@ Objetivo:
 - sonar humano, claro y serio
 - evitar tono agresivo, grandilocuente o spam
 
+REGLAS CRITICAS — incumplirlas invalida el correo:
+- FIRMA: el campo body DEBE terminar con el nombre real del remitente que se te pasa. NUNCA escribas "[Firma]", "[Tu nombre]" ni ningun placeholder. Si el remitente es "Juan Garcia", el correo cierra con "Juan Garcia".
+- SALUDO: si no tienes nombre del destinatario, abre con "Hola," o directamente con el primer parrafo. NUNCA uses una direccion de email como saludo (ejemplo de error: "Hola info@empresa.es,"). NUNCA escribas "sin nombre" en el cuerpo.
+- FOLLOW-UPS: jamas abras con "te escribo de nuevo", "por si el anterior mensaje no llego", "retomo el hilo", "insisto" ni variantes. Un follow-up es un mensaje nuevo, no una disculpa por haber enviado el anterior.
+
 Reglas de estilo:
 - escribe en espanol de Espana natural
 - se directo pero educado
@@ -141,14 +146,14 @@ Reglas anti-robot:
 - no suenes a mensaje masivo de LinkedIn
 - si no hay contexto fuerte, entra por un problema real del negocio, no por la persona
 - evita expresiones genericas y plantilleras
-- evita frases como "desde Assets Consultores ayudamos a", "si te encaja", "si tiene sentido", "merece una conversacion", "queria compartirte"
+- evita frases como "desde Assets Consultores ayudamos a", "si te encaja", "si tiene sentido", "merece una conversacion", "queria compartirte", "revision rapida sin compromiso", "sin compromiso"
 - evita listas de buzzwords como "observabilidad, automatizacion y mejora del control operativo" si no estan aterrizadas
 - no digas que ayudamos a "equipos B2B"; habla del problema concreto de la empresa o del sector
 
 Formato esperado:
-- asunto corto
-- cuerpo con saludo, 2 o 3 parrafos breves y cierre simple
-- firma sobria
+- asunto corto y concreto
+- cuerpo con saludo (sin nombre si no lo tienes), 2 parrafos breves y cierre con nombre real del remitente
+- sin linea en blanco de mas, sin despedida de plantilla
 
 Criterio de calidad:
 - si el correo podria enviarse igual a 200 empresas cambiando solo el nombre, reescribelo
@@ -158,7 +163,7 @@ Criterio de calidad:
 Devuelve SOLO un JSON valido con esta forma:
 {
   "subject": "asunto del correo",
-  "body": "cuerpo del correo"
+  "body": "cuerpo del correo completo con firma real incluida"
 }""",
     ),
     "sales.prospecting.interpret": PromptDefinition(
@@ -172,16 +177,13 @@ CRITICO — INTERPRETA LA INTENCION, NO DESCOMPONGAS LAS PALABRAS:
 El texto puede ser conversacional. Frases como "quiero que me busques", "necesito que encuentres", "busca", "dame", "encuentra", "me puedes buscar", "que me traigas" son INSTRUCCIONES DEL USUARIO que indican lo que quiere — NO son el vertical ni el objetivo. El vertical y el objetivo vienen del SINTAGMA NOMINAL que describe el tipo de negocio. Nunca uses una frase verbal como vertical.
 
 Ejemplo de entrada: "busca asesorias fiscales en Toledo, unas 30, para Automato"
-Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Toledo","province":"Toledo","region":"","desired_count":30,"minimum_score":40,"represented_by":"automato","must_have":[],"dry_run":true}
+Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Toledo","province":"Toledo","region":"","desired_count":30,"minimum_score":40,"represented_by":"automato","must_have":[],"dry_run":true,"min_employees":null,"max_employees":null,"industrial_zone":""}
 
 Ejemplo de entrada: "Quiero que me busques restaurantes de lujo en la zona de Salamanca"
-Ejemplo de salida: {"vertical":"restaurants","target_description":"restaurantes de lujo","city":"Salamanca","province":"Salamanca","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+Ejemplo de salida: {"vertical":"restaurants","target_description":"restaurantes de lujo","city":"Salamanca","province":"Salamanca","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true,"min_employees":null,"max_employees":null,"industrial_zone":""}
 
-Ejemplo de entrada: "Necesito que me encuentres asesorias fiscales cerca de Madrid, unas 15"
-Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias fiscales","city":"Madrid","province":"Madrid","region":"","desired_count":15,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
-
-Ejemplo de entrada: "cerca de parla en un radio de 20 km, asesorias"
-Ejemplo de salida: {"vertical":"asesoria","target_description":"asesorias","city":"Parla","province":"Madrid","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true}
+Ejemplo de entrada: "empresas en el poligono de Malpica en Zaragoza, de 30 a 50 empleados con correo electronico"
+Ejemplo de salida: {"vertical":"custom","target_description":"empresas en poligono industrial","city":"Malpica","province":"Zaragoza","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["email"],"dry_run":true,"min_employees":30,"max_employees":50,"industrial_zone":"Malpica"}
 
 Reglas:
 - PRIMERO: ignora los verbos de instruccion al inicio (quiero que, necesito que, busca, dame, encuentra, me puedes buscar, que me busques, etc.) — extrae solo el sintagma nominal que describe el tipo de negocio
@@ -191,7 +193,10 @@ Reglas:
 - desired_count: extrae el numero si se menciona, si no 20
 - dry_run: true salvo que el usuario diga "real" o "lanzar de verdad"
 - CAPITALIZA siempre los nombres propios: ciudades y provincias (parla→Parla, toledo→Toledo, madrid→Madrid)
-- Extrae ciudad y provincia del contexto; infiere la provincia de ciudades conocidas cuando no sea explicita""",
+- Extrae ciudad y provincia del contexto; infiere la provincia de ciudades conocidas cuando no sea explicita
+- industrial_zone: si el texto menciona "poligono de X", "poligono X" o "pol. industrial X", extrae el nombre X en el campo industrial_zone y usa X como city; si no hay poligono, deja industrial_zone vacío ("")
+- min_employees / max_employees: si el texto indica un rango de empleados ("de 30 a 50 empleados", "entre 10 y 100 trabajadores"), extrae los limites como enteros; si no se menciona, devuelve null
+- must_have: si el usuario pide explicitamente correo electronico o email, incluye "email"; si pide telefono, incluye "telefono"; si no pide ninguno, devuelve []""",
     ),
     "sales.prospecting.refine": PromptDefinition(
         key="sales.prospecting.refine",
@@ -425,6 +430,38 @@ Reglas estrictas:
 - para not_chain: falla si el nombre coincide con cadena conocida O el dominio es subdominio corporativo O la web tiene selector de múltiples sedes
 - para has_email: pasa si hay un email real visible, falla si solo hay formulario de contacto
 - devuelve SOLO JSON""",
+    ),
+    "sales.prospecting.chat": PromptDefinition(
+        key="sales.prospecting.chat",
+        title="Sales Prospecting Chat",
+        group="sales",
+        description="Asistente conversacional que extrae parámetros de prospección B2B preguntando lo que falta.",
+        default_text="""Eres un asistente de prospección B2B en español. Ayudas al usuario a especificar qué quiere buscar para lanzar una búsqueda automatizada.
+
+CAMPOS NECESARIOS:
+- vertical: "asesoria" (asesor/gestor/fiscal/laboral/contable), "salud" (clinica/dentista), "inmobiliaria" (pisos/agencia), "restaurants" (restaurante/hosteleria/bar), "public_administration" (ayuntamiento/municipio), o slug snake_case custom
+- city: ciudad concreta (OBLIGATORIO — pregunta esto primero si falta)
+- province: provincia (igual que city si no se menciona)
+- region: comunidad autónoma (puede quedar vacío)
+- target_description: frase breve de lo que busca
+- desired_count: número de resultados (por defecto 20)
+- minimum_score: umbral 0-100 (por defecto 40)
+- represented_by: "assets" (por defecto) o "automato" si se menciona
+- must_have: lista de requisitos ["Email directo", "Teléfono", "Web propia", "Dirección física"]
+- dry_run: true por defecto; false solo si el usuario dice explícitamente "real" o "lanzar de verdad"
+
+REGLAS:
+1. Si no tienes city, PREGÚNTALA primero. Es el campo más crítico.
+2. Haz solo UNA pregunta a la vez.
+3. Cuando tengas city y vertical, ya puedes confirmar con status=ready.
+4. Sé natural y directo. Sin listas en el reply.
+5. SIEMPRE responde con JSON válido, sin texto fuera del JSON.
+
+RESPUESTA cuando necesitas más información:
+{"status": "clarifying", "reply": "Pregunta natural y breve."}
+
+RESPUESTA cuando tienes lo suficiente para lanzar:
+{"status": "ready", "reply": "Resumen breve de lo que vas a buscar.", "brief": {"vertical":"asesoria","city":"Toledo","province":"Toledo","region":"","target_description":"asesorias fiscales con email","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["Email directo"],"dry_run":true}}""",
     ),
     "mail.qualification": PromptDefinition(
         key="mail.qualification",

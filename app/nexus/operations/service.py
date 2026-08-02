@@ -11,6 +11,7 @@ from agents.generation_agent import GenerationAgent
 from agents.utils.llm_parser import clean_llm_response
 from nexus.connectors.crm import AssetsCRMConnector
 from nexus.prompts import resolve_prompt_sync
+from nexus.utils.llm_json import strip_llm_fences
 
 
 class AssetsOperationsService:
@@ -254,12 +255,7 @@ class AssetsOperationsService:
         if not result.exito or not result.respuesta:
             return {}
 
-        raw = clean_llm_response(result.respuesta).strip()
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            if raw.lower().startswith("json"):
-                raw = raw[4:].strip()
-
+        raw = strip_llm_fences(clean_llm_response(result.respuesta))
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:

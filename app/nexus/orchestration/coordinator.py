@@ -24,7 +24,6 @@ from nexus.api.schemas.monitoring import (
     RunbooksResponse,
 )
 from nexus.audit.repository import MemoryAuditRepository
-from nexus.connectors.itsm.jira import JiraConnector
 from nexus.connectors.observability.alertmanager import AlertmanagerConnector
 from nexus.connectors.observability.grafana import GrafanaConnector
 from nexus.connectors.observability.prometheus import PrometheusConnector
@@ -51,7 +50,6 @@ class NexusCoordinator:
         alertmanager: AlertmanagerConnector,
         grafana: GrafanaConnector,
         prometheus: PrometheusConnector,
-        jira: JiraConnector,
         incident_repository: MemoryIncidentRepository,
         audit_repository: MemoryAuditRepository,
         runbooks: RunbookRegistry,
@@ -62,7 +60,6 @@ class NexusCoordinator:
         self._alertmanager = alertmanager
         self._grafana = grafana
         self._prometheus = prometheus
-        self._jira = jira
         self._operations = operations
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
@@ -667,21 +664,17 @@ class NexusCoordinator:
     async def _maybe_create_ticket(self, payload: IncidentIngestRequest, runbook: dict) -> dict:
         if not should_create_ticket(payload.severity, runbook):
             return {}
-        if self._operations is not None:
-            try:
-                return await self._operations.create_ticket_from_alarm(
-                    title=payload.title,
-                    severity=payload.severity,
-                    details=payload.payload,
-                    source="codex",
-                )
-            except Exception:
-                pass
-        return await self._jira.create_incident_ticket(
-            title=payload.title,
-            severity=payload.severity,
-            details=payload.payload,
-        )
+        if self._operations is None:
+            return {"status": "not_configured", "reason": "assets_operations_unavailable"}
+        try:
+            return await self._operations.create_ticket_from_alarm(
+                title=payload.title,
+                severity=payload.severity,
+                details=payload.payload,
+                source="codex",
+            )
+        except Exception as exc:
+            return {"status": "error", "reason": str(exc)}
 
     def _enrich_alert(self, alert: dict) -> dict:
         payload = dict(alert)

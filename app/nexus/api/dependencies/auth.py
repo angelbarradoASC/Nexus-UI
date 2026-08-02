@@ -21,7 +21,6 @@ from nexus.access.service import AgentAccessService
 from nexus.connectors.observability.alertmanager import AlertmanagerConnector
 from nexus.connectors.observability.grafana import GrafanaConnector
 from nexus.connectors.observability.prometheus import PrometheusConnector
-from nexus.connectors.itsm.jira import JiraConnector
 from nexus.diagnostics.docker_pre_diagnostic import DockerPreDiagnosticService
 from nexus.incidents.repository import MemoryIncidentRepository, MongoIncidentRepository
 from nexus.monitoring.runbooks import RunbookRegistry
@@ -31,6 +30,9 @@ from nexus.outreach import OutreachManager
 from nexus.crm import CRMBridgeService
 from nexus.prospecting import ProspectingAgentService
 from nexus.prompts import PromptManager, set_default_prompt_manager
+from nexus.mail import ThunderbirdMailManager
+from nexus.teams import TeamsChatManager
+from nexus.pepo import CaseLogStore
 from agents.llm_router import get_router
 
 
@@ -50,6 +52,9 @@ class NexusRuntime:
     cmdb:              FileCMDB = None
     vault:             VaultService = None
     access:            AgentAccessService = None
+    mail:              ThunderbirdMailManager = None
+    teams:             TeamsChatManager = None
+    case_log:          CaseLogStore = None
 
 
 def build_runtime(cfg) -> NexusRuntime:
@@ -81,7 +86,6 @@ def build_runtime(cfg) -> NexusRuntime:
         alertmanager=alertmanager,
         grafana=grafana,
         prometheus=prometheus,
-        jira=JiraConnector(cfg),
         operations=operations,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
@@ -97,6 +101,9 @@ def build_runtime(cfg) -> NexusRuntime:
     cmdb  = FileCMDB()
     vault = VaultService()
     access = AgentAccessService(cmdb=cmdb, vault=vault)
+    case_log = CaseLogStore()
+    mail = ThunderbirdMailManager(cfg=cfg, llm_router=llm_router)
+    teams = TeamsChatManager(cfg=cfg, llm_router=llm_router, case_log=case_log)
 
     return NexusRuntime(
         coordinator=coordinator,
@@ -111,6 +118,9 @@ def build_runtime(cfg) -> NexusRuntime:
         cmdb=cmdb,
         vault=vault,
         access=access,
+        mail=mail,
+        teams=teams,
+        case_log=case_log,
     )
 
 
@@ -159,6 +169,8 @@ def get_agent_runtime(request: Request) -> AgentRuntimeService:
 def get_outreach_manager(request: Request) -> OutreachManager:
     """Fetch the outreach manager from FastAPI application state."""
     return get_runtime(request).outreach
+
+
 def get_crm_manager(request: Request) -> CRMBridgeService:
     """Fetch the Assets CRM bridge from FastAPI application state."""
     return get_runtime(request).crm
@@ -197,3 +209,18 @@ def get_vault(request: Request) -> VaultService:
 def get_access_service(request: Request) -> AgentAccessService:
     """Fetch the AgentAccessService from FastAPI application state."""
     return get_runtime(request).access
+
+
+def get_mail_manager(request: Request) -> ThunderbirdMailManager:
+    """Fetch the Thunderbird mail manager from FastAPI application state."""
+    return get_runtime(request).mail
+
+
+def get_teams_manager(request: Request) -> TeamsChatManager:
+    """Fetch the Teams chat manager from FastAPI application state."""
+    return get_runtime(request).teams
+
+
+def get_case_log_store(request: Request) -> CaseLogStore:
+    """Fetch the PEPO per-case log store from FastAPI application state."""
+    return get_runtime(request).case_log

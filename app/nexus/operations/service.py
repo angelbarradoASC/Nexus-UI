@@ -112,6 +112,28 @@ class AssetsOperationsService:
     async def delete_ticket(self, task_id: int) -> dict[str, Any]:
         return await self._connector.delete_task(task_id)
 
+    async def append_log_to_ticket(self, task_id: int, log_text: str) -> dict[str, Any]:
+        """Adjunta un log (p.ej. de PEPO) a la descripcion del ticket.
+
+        Assets no soporta adjuntar ficheros ni notas independientes a un
+        ticket hoy, asi que el texto se concatena a la descripcion
+        existente sin pisarla. Cuando cambie el sistema de ticketing esto
+        deberia sustituirse por un adjunto o nota real.
+        """
+        listing = await self.list_tickets()
+        task = next(
+            (t for t in listing["tasks"] if int(t.get("id") or 0) == int(task_id)),
+            None,
+        )
+        if task is None:
+            return {"status": "error", "reason": f"ticket {task_id} no encontrado"}
+
+        existing_description = str(task.get("description") or "").strip()
+        separator = "\n\n" if existing_description else ""
+        combined = f"{existing_description}{separator}{log_text}"
+
+        return await self.update_ticket(task_id, {"description": combined})
+
     async def create_ticket_from_message(
         self,
         message: str,

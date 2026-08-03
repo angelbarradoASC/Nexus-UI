@@ -85,23 +85,24 @@ def build_runtime(cfg) -> NexusRuntime:
     )
     operations = AssetsOperationsService(cfg=cfg, llm_router=llm_router)
     jira_connector = JiraConnector(cfg)
+    prospecting = ProspectingAgentService(cfg=cfg)
     coordinator = NexusCoordinator(
         alertmanager=alertmanager,
         grafana=grafana,
         prometheus=prometheus,
         operations=operations,
         jira=jira_connector,
+        prospecting=prospecting,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
         runbooks=RunbookRegistry(),
         llm_router=llm_router,
         docker_diagnostics=DockerPreDiagnosticService(),
     )
-    assistant_core = AssistantRuntimeCore(coordinator)
+    assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router)
     agent_runtime = AgentRuntimeService()
     outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
     crm = CRMBridgeService(cfg=cfg)
-    prospecting = ProspectingAgentService(cfg=cfg)
     cmdb  = FileCMDB()
     vault = VaultService()
     access = AgentAccessService(cmdb=cmdb, vault=vault)

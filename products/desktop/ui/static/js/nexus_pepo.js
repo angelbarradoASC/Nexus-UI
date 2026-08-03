@@ -2,6 +2,10 @@
 
 let _pepoContextId = null;
 let _pepoBusy = false;
+let _pepoRunPollTimer = null;
+let _pepoRunSeenCount = 0;
+
+const PEPO_RUN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'timeout', 'budget_exceeded', 'not_found']);
 
 function escHtml(v) {
     return String(v ?? '')
@@ -72,6 +76,7 @@ async function sendToChat(message) {
         });
         thinkEl?.remove();
         appendMsg('pepo', data.response || '(sin respuesta)');
+        if (data.run_id) startRunTrace(data.run_id);
     } catch (err) {
         thinkEl?.remove();
         appendMsg('pepo', `Error al conectar: ${err.message}`);
@@ -80,6 +85,73 @@ async function sendToChat(message) {
         if (sendBtn) sendBtn.disabled = false;
         if (input) input.focus();
     }
+}
+
+// ── Traza de ejecución del run (panel derecho) ────────────────────────────────
+
+async function loadSkillSource() {
+    const el = document.getElementById('pepoRunCode');
+    if (!el) return;
+    try {
+        const data = await apiJson('/api/nexus/prospecting/skill-source');
+        el.textContent = data.source || '(sin código)';
+    } catch (err) {
+        el.textContent = `No se pudo cargar el código: ${err.message}`;
+    }
+}
+
+function startRunTrace(runId) {
+    if (_pepoRunPollTimer) clearInterval(_pepoRunPollTimer);
+    _pepoRunSeenCount = 0;
+
+    const console_ = document.getElementById('pepoRunConsole');
+    const statusBadge = document.getElementById('pepoRunStatus');
+    if (console_) console_.innerHTML = '';
+    if (statusBadge) statusBadge.textContent = runId;
+
+    const poll = async () => {
+        try {
+            const data = await apiJson(`/api/nexus/prospecting/runs/${runId}/logs`);
+            if (statusBadge) statusBadge.textContent = `${runId} — ${data.status || '?'}`;
+
+            const logs = data.logs || [];
+            for (let i = _pepoRunSeenCount; i < logs.length; i++) {
+                appendRunLine(logs[i]);
+            }
+            _pepoRunSeenCount = logs.length;
+
+            if (PEPO_RUN_TERMINAL_STATUSES.has(data.status)) {
+                clearInterval(_pepoRunPollTimer);
+                _pepoRunPollTimer = null;
+            }
+        } catch (err) {
+            appendRunLine({ level: 'error', msg: `Error consultando el run: ${err.message}` });
+            clearInterval(_pepoRunPollTimer);
+            _pepoRunPollTimer = null;
+        }
+    };
+
+    poll();
+    _pepoRunPollTimer = setInterval(poll, 2000);
+}
+
+function appendRunLine(entry) {
+    const console_ = document.getElementById('pepoRunConsole');
+    if (!console_) return;
+
+    const empty = console_.querySelector('.pepo-run-console-empty');
+    if (empty) empty.remove();
+
+    const line = document.createElement('div');
+    const level = entry.level || 'info';
+    line.className = `pepo-run-console-line level-${level}`;
+
+    const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '';
+    const dataStr = entry.data ? ` ${JSON.stringify(entry.data)}` : '';
+    line.innerHTML = `${ts ? `<span class="ts">${escHtml(ts)}</span>` : ''}${escHtml(entry.msg || '')}${escHtml(dataStr)}`;
+
+    console_.appendChild(line);
+    console_.scrollTop = console_.scrollHeight;
 }
 
 // ── Skill result helpers ──────────────────────────────────────────────────────
@@ -310,4 +382,7 @@ function initPepo() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', initPepo);
+document.addEventListener('DOMContentLoaded', () => {
+    initPepo();
+    loadSkillSource();
+});

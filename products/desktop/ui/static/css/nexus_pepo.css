@@ -338,4 +338,65 @@ html { zoom: 1; }
     text-underline-offset: 2px;
 }
 
+/* ── Código real del bucle ─────────────────────────────────────────────────── */
+.pepo-run-code-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin: 4px 0 6px;
+}
+
+.pepo-run-code-label code {
+    color: var(--forest-2);
+}
+
+.pepo-run-code {
+    max-height: 320px;
+    overflow: auto;
+    background: #14170f;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 12px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: #c9d6b8;
+    white-space: pre;
+    margin: 0 0 12px;
+}
+
+/* ── Traza del run (consola de ejecución) ─────────────────────────────────── */
+.pepo-run-console {
+    flex: 1;
+    min-height: 160px;
+    overflow-y: auto;
+    background: #14170f;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 12px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.74rem;
+    line-height: 1.5;
+    color: #c9d6b8;
+}
+
+.pepo-run-console-empty {
+    color: var(--muted);
+    font-family: inherit;
+}
+
+.pepo-run-console-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-bottom: 2px;
+}
+
+.pepo-run-console-line .ts {
+    color: #6d7a5c;
+    margin-right: 6px;
+}
+
+.pepo-run-console-line.level-warning { color: #e8c96a; }
+.pepo-run-console-line.level-error { color: #e88686; }
+
 .send-to-pepo:hover { color: var(--forest); }

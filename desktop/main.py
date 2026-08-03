@@ -11,8 +11,14 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from path_setup import ensure_desktop_import_paths  # noqa: E402
+
+ensure_desktop_import_paths()
 
 
 def _bootstrap_trace(message: str) -> None:

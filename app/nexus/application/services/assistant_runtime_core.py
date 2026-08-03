@@ -33,6 +33,7 @@ class AssistantExecutionResponse:
     audit_id: str
     resolution: dict[str, Any]
     source_surface: str
+    run_id: str | None = None
 
     @classmethod
     def from_chat_response(
@@ -51,6 +52,7 @@ class AssistantExecutionResponse:
                 audit_id=response["audit_id"],
                 resolution=resolution,
                 source_surface=source_surface,
+                run_id=response.get("run_id"),
             )
         return cls(
             status=response.status,
@@ -60,6 +62,7 @@ class AssistantExecutionResponse:
             audit_id=response.audit_id,
             resolution=resolution,
             source_surface=source_surface,
+            run_id=getattr(response, "run_id", None),
         )
 
 
@@ -71,12 +74,19 @@ class AssistantRuntimeCore:
         coordinator: NexusCoordinator,
         *,
         skill_router: DesktopSkillRouter | None = None,
+        llm_router: Any | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._skill_router = skill_router or DesktopSkillRouter()
+        self._llm_router = llm_router
 
     async def execute(self, request: AssistantExecutionRequest) -> AssistantExecutionResponse:
-        resolution = request.resolution or self._skill_router.resolve(request.message).to_dict()
+        if request.resolution:
+            resolution = request.resolution
+        elif self._llm_router is not None:
+            resolution = (await self._skill_router.resolve_llm(request.message, self._llm_router)).to_dict()
+        else:
+            resolution = self._skill_router.resolve(request.message).to_dict()
         chat_request = ChatRequest(
             message=request.message,
             user_id=request.user_id,

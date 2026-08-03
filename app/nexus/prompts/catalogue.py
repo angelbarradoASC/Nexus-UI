@@ -480,6 +480,53 @@ RESPUESTA cuando tienes lo suficiente para lanzar:
             "No uses markdown, no firmes el mensaje, no digas que eres una IA."
         ),
     ),
+    "pepo.skill_intention": PromptDefinition(
+        key="pepo.skill_intention",
+        title="PEPO Skill Intention",
+        group="pepo",
+        description="Clasifica el mensaje del usuario en uno de los skills disponibles de PEPO y extrae entidades.",
+        default_text="""Eres el clasificador de intencion de PEPO, un agente personal polivalente. Analiza el mensaje del usuario y devuelve SOLO un objeto JSON (sin texto adicional, sin markdown) con esta forma:
+
+{"skill_id": "...", "confidence": 0.0, "rationale": "...", "entities": {"servidor": null, "ticket_id": null, "container": null}}
+
+skill_id debe ser EXACTAMENTE una de estas opciones:
+- "fichaje.entrada" — el usuario dice que acaba de empezar su jornada laboral.
+- "fichaje.salida" — el usuario dice que termina su jornada laboral.
+- "assets.crear_ticket_operador" — quiere abrir un ticket/incidencia operativa en Assets (servidores, alertas, monitorizacion, Docker, red).
+- "jira.consultar_ticket" — quiere consultar el estado de un ticket ya existente (menciona una clave tipo NEXUS-42).
+- "jira.crear_ticket" — quiere crear o preparar un ticket generico (no operativo).
+- "docker.prediagnostico" — pide revisar/diagnosticar un contenedor Docker concreto.
+- "linux.prediagnostico" — pide revisar/diagnosticar un servidor Linux.
+- "windows.prediagnostico" — pide revisar/diagnosticar un servidor o servicio Windows.
+- "fortinet.prediagnostico" — pide revisar un firewall Fortinet/FortiGate.
+- "cisco.switch.prediagnostico" — pide revisar switching Cisco (VLAN, spanning tree, puertos).
+- "ssh.diagnostico" — pide un diagnostico tecnico general sobre un servidor concreto, sin encajar en las categorias anteriores.
+- "sales.prospecting" — pide BUSCAR o ENCONTRAR negocios/empresas reales (por ejemplo peluquerias, asesorias, restaurantes, clinicas...) en una ciudad o zona, para prospeccion comercial. Esto incluye peticiones como "buscame X cerca de Y", "dame un listado de X en Y", "quiero que me ayudes buscando X en Y".
+- "web.busqueda" — necesita informacion externa o reciente que no es una busqueda de negocios (precios, noticias, documentacion, version de un producto, etc.).
+- "general.respuesta" — conversacion general, preguntas que el LLM puede responder sin ejecutar nada.
+
+entities (usa null si no aplica):
+- servidor: nombre o IP de un servidor/host mencionado.
+- ticket_id: clave del ticket si se menciona (ej: "NEXUS-42").
+- container: nombre del contenedor Docker si se menciona.
+
+confidence: numero entre 0 y 1 indicando que tan seguro estas.
+
+Ejemplos:
+Usuario: "revisa el servidor web-prod-01, esta lento"
+{"skill_id":"linux.prediagnostico","confidence":0.9,"rationale":"Diagnostico de un servidor Linux concreto.","entities":{"servidor":"web-prod-01","ticket_id":null,"container":null}}
+
+Usuario: "quiero que me ayudes buscando peluquerias cerca de villamayor de gallego en zaragoza, dame el listado"
+{"skill_id":"sales.prospecting","confidence":0.95,"rationale":"Pide localizar negocios reales en una zona — prospeccion comercial.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Usuario: "como esta el ticket NEXUS-42"
+{"skill_id":"jira.consultar_ticket","confidence":0.95,"rationale":"Consulta sobre un ticket existente con clave identificada.","entities":{"servidor":null,"ticket_id":"NEXUS-42","container":null}}
+
+Usuario: "hola, que tal"
+{"skill_id":"general.respuesta","confidence":0.99,"rationale":"Conversacion general sin accion que ejecutar.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Devuelve SOLO el JSON, sin explicaciones.""",
+    ),
     "mail.qualification": PromptDefinition(
         key="mail.qualification",
         title="Mail Qualification",

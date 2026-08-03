@@ -39,6 +39,7 @@ from nexus.monitoring.runbooks import RunbookRegistry
 from nexus.operations import AssetsOperationsService
 from nexus.policy.guardrails import can_auto_execute, should_create_ticket
 from nexus.prompts import resolve_prompt_sync
+from nexus.prospecting import ProspectingAgentService
 from nexus.targets.classifier import TechnologyClassifier
 from nexus.workers.registry import list_workers
 
@@ -58,12 +59,14 @@ class NexusCoordinator:
         docker_diagnostics: DockerPreDiagnosticService | None = None,
         operations: AssetsOperationsService | None = None,
         jira: JiraConnector | None = None,
+        prospecting: ProspectingAgentService | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
         self._prometheus = prometheus
         self._operations = operations
         self._jira = jira
+        self._prospecting = prospecting
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -105,6 +108,8 @@ class NexusCoordinator:
             return await self._handle_assets_ticket_chat(payload, resolution, audit_id)
         if skill_id == "docker.prediagnostico":
             return await self._handle_docker_prediagnostic_chat(payload, resolution, audit_id)
+        if skill_id == "sales.prospecting" and self._prospecting is not None:
+            return await self._handle_sales_prospecting_chat(payload, audit_id)
         if skill_id in {
             "linux.prediagnostico",
             "windows.prediagnostico",
@@ -237,6 +242,70 @@ class NexusCoordinator:
             agent=agent_name,
             flow="chat",
             audit_id=audit_id,
+        )
+
+    async def _handle_sales_prospecting_chat(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+    ) -> ChatResponse:
+        from nexus.api.routes.prospecting import ProspectingChatRequest, prospecting_chat
+        from nexus.api.schemas.prospecting import ProspectingRunRequest
+
+        result = await prospecting_chat(
+            ProspectingChatRequest(message=payload.message, history=[]),
+            prospecting=self._prospecting,
+        )
+        prospecting_status = result.get("status", "clarifying")
+        reply = result.get("reply", "")
+        brief = result.get("brief")
+
+        run_id = None
+        if prospecting_status == "ready" and brief:
+            run_request = ProspectingRunRequest(
+                vertical=brief.get("vertical", "custom"),
+                target_description=brief.get("target_description", ""),
+                city=brief.get("city", ""),
+                province=brief.get("province", ""),
+                region=brief.get("region", ""),
+                desired_count=brief.get("desired_count", 20),
+                must_have=brief.get("must_have", []),
+                minimum_score=brief.get("minimum_score", 40),
+                represented_by=brief.get("represented_by", "assets"),
+                min_employees=brief.get("min_employees"),
+                max_employees=brief.get("max_employees"),
+                industrial_zone=brief.get("industrial_zone", ""),
+                dry_run=False,
+                async_mode=True,
+            )
+            run_result = await self._prospecting.run(run_request)
+            run_id = run_result.get("run_id")
+            if run_id:
+                reply = f"{reply}\n\nBúsqueda lanzada en Sales (run {run_id}). Los resultados aparecerán en la pestaña Sales cuando termine."
+
+        status = "accepted" if prospecting_status == "ready" else "degraded"
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "sales.prospecting",
+                "prospecting_status": prospecting_status,
+                "run_id": run_id,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status=status,
+            response=reply or "¿En qué ciudad quieres buscar y qué tipo de negocio?",
+            agent="sales-prospecting",
+            flow="chat",
+            audit_id=audit_id,
+            run_id=run_id,
         )
 
     async def _handle_docker_prediagnostic_chat(

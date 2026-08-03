@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -155,6 +156,17 @@ def _fallback_parse(text: str) -> dict:
         "industrial_zone": industrial_zone,
         "target_description": text[:120],
         "_fallback": True,
+    }
+
+
+@router.get("/prospecting/skill-source")
+async def get_skill_source() -> dict:
+    """Devuelve el código real del bucle que ejecuta la búsqueda de negocios (_execute_run)."""
+    source = inspect.getsource(ProspectingAgentService._execute_run)
+    return {
+        "qualname": "ProspectingAgentService._execute_run",
+        "file": inspect.getsourcefile(ProspectingAgentService._execute_run),
+        "source": source,
     }
 
 

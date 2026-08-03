@@ -28,13 +28,11 @@ def _resolve_session_user(request: Request) -> tuple[str | None, bool]:
 
 
 def _auth_guard(request: Request) -> RedirectResponse | None:
-    """Redirect to /login if no valid session cookie is present."""
-    auth = getattr(request.app.state, "session_auth", None)
-    if auth is None:
-        return RedirectResponse(url="/login", status_code=302)
-    token = request.cookies.get("session_token")
-    if not token or not auth.verificar_sesion(token):
-        return RedirectResponse(url="/login", status_code=302)
+    """Redirect to /login if no valid session cookie is present.
+
+    DESACTIVADO temporalmente a petición del usuario (login roto en WebView2,
+    la petición POST /login nunca llega al servidor - pendiente de arreglar).
+    """
     return None
 
 

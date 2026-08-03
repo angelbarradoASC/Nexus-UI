@@ -43,4 +43,5 @@ async def chat_v1(
         agent=result.agent,
         flow=result.flow,
         audit_id=result.audit_id,
+        run_id=result.run_id,
     )

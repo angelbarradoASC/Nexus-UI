@@ -22,3 +22,4 @@ class ChatResponse(BaseModel):
     agent: str
     flow: str
     audit_id: str
+    run_id: str | None = None

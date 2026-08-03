@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 
 from desktop.runtime.capabilities import PermissionLevel
 from desktop.runtime.skills import DesktopSkill, DesktopSkillCatalogue
+from nexus.prompts import resolve_prompt_sync
+from nexus.utils.llm_json import parse_llm_json
 
 _HOST_PATTERN = re.compile(r"\b(?:\d{1,3}(?:\.\d{1,3}){3}|[a-zA-Z0-9][\w.-]*\d+[\w.-]*)\b")
 _TICKET_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
@@ -58,6 +61,7 @@ class DesktopSkillRouter:
         "fortinet.prediagnostico": ["infra.fortinet.observe"],
         "cisco.switch.prediagnostico": ["infra.cisco.observe"],
         "web.busqueda": [],
+        "sales.prospecting": [],
         "general.respuesta": [],
     }
 
@@ -74,6 +78,7 @@ class DesktopSkillRouter:
         "fortinet.prediagnostico": PermissionLevel.ASSIST,
         "cisco.switch.prediagnostico": PermissionLevel.ASSIST,
         "web.busqueda": PermissionLevel.ASSIST,
+        "sales.prospecting": PermissionLevel.ASSIST,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -95,6 +100,43 @@ class DesktopSkillRouter:
                 confidence = 0.35
                 rationale = "No hay una coincidencia operativa clara; se trata como asistencia general."
 
+        return self._build_resolution(skill_id, confidence, rationale, entities)
+
+    async def resolve_llm(self, user_input: str, llm_router) -> SkillResolution:
+        """Resolve intent via LLM classification (pepo.skill_intention).
+
+        Falls back to the heuristic resolve() on any LLM failure, invalid
+        skill_id, or timeout — never raises.
+        """
+        text = user_input.strip()
+        entities = self._extract_entities(text)
+        try:
+            response = await asyncio.wait_for(
+                llm_router.call(
+                    messages=[
+                        {"role": "system", "content": resolve_prompt_sync("pepo.skill_intention")},
+                        {"role": "user", "content": text},
+                    ],
+                    preferred_level=1,
+                    temperature=0.0,
+                    max_tokens=300,
+                    timeout=6.0,
+                ),
+                timeout=10.0,
+            )
+        except Exception:
+            return self.resolve(user_input)
+
+        if getattr(response, "error", None):
+            return self.resolve(user_input)
+
+        parsed = parse_llm_json(response.content or "")
+        skill_id = (parsed or {}).get("skill_id")
+        if not skill_id or skill_id not in self._SKILL_PERMISSION:
+            return self.resolve(user_input)
+
+        confidence = float(parsed.get("confidence", 0.5))
+        rationale = parsed.get("rationale", "Clasificado por LLM (pepo.skill_intention).")
         return self._build_resolution(skill_id, confidence, rationale, entities)
 
     def _heuristic_match(
@@ -161,6 +203,20 @@ class DesktopSkillRouter:
             return "ssh.diagnostico", 0.93, "La peticion parece un diagnostico tecnico sobre un activo concreto."
         if any(term in lowered for term in ("cpu", "memoria", "disco", "red", "logs", "alerta", "incidencia")) and entities.get("servidor"):
             return "ssh.diagnostico", 0.88, "Hay senales de diagnostico operativo con objetivo identificado."
+        if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
+            "cerca de" in lowered
+            or any(
+                term in lowered
+                for term in (
+                    "asesor", "gestor", "fiscal", "laboral", "contable", "clinica",
+                    "dentista", "odont", "inmobiliaria", "pisos", "alquiler",
+                    "restaurante", "hosteleria", "peluquer", "taller", "gimnasio",
+                    "empresas", "negocios", "leads", "clientes potenciales",
+                    "prospeccion", "prospección",
+                )
+            )
+        ):
+            return "sales.prospecting", 0.9, "La peticion busca localizar empresas/negocios — encaja con prospeccion comercial (Sales)."
         if any(term in lowered for term in ("busca", "precio", "noticias", "documentacion", "version reciente", "ultima version", "hoy")):
             return "web.busqueda", 0.84, "La peticion requiere informacion externa o potencialmente reciente."
         return None, 0.0, ""

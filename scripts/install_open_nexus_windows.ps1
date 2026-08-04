@@ -33,7 +33,7 @@ function Stop-OpenNexusProcesses {
         $_.Name -eq "OpenNexus.exe" -or
         (
             $_.Name -like "python*" -and
-            $_.CommandLine -match "run_preview.py|desktop\.main|desktop\.open_nexus_main"
+            $_.CommandLine -match "run_preview.py|desktop.main"
         )
     }
 

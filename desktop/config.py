@@ -50,10 +50,6 @@ class DesktopSettings:
         return self.resolved_local_data_root / "history"
 
     @property
-    def shell_history_path(self) -> Path:
-        return self.history_dir / "shell_history.jsonl"
-
-    @property
     def llm_provider_config_path(self) -> Path:
         return self.config_dir / "llm_provider.json"
 

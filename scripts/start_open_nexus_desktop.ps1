@@ -41,7 +41,7 @@ function Test-DesktopHealth {
 
 function Get-DesktopProcesses {
     Get-CimInstance Win32_Process | Where-Object {
-        ($_.Name -like "python*" -and $_.CommandLine -match "run_preview.py|desktop\.main|desktop\.open_nexus_main") -or
+        ($_.Name -like "python*" -and $_.CommandLine -match "run_preview.py|desktop.main") -or
         ($_.Name -eq "OpenNexus.exe")
     }
 }
@@ -75,7 +75,7 @@ function Get-PortOwnerDetails {
     }
 
     $isDesktopCandidate =
-        (($process.Name -like "python*") -and ($process.CommandLine -match "run_preview.py|desktop\.main|desktop\.open_nexus_main")) -or
+        (($process.Name -like "python*") -and ($process.CommandLine -match "run_preview.py|desktop.main")) -or
         ($process.Name -eq "OpenNexus.exe")
 
     return [PSCustomObject]@{

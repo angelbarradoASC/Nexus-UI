@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from desktop.config import DesktopSettings
 from desktop.local_agents.monitoring_agent import MonitoringAgent
-from desktop.opennexus.models import OpenNexusResult
 from desktop.runtime.assistant_runtime import DesktopAssistantRuntime
 from desktop.runtime.capabilities import PermissionLevel
 from desktop.runtime.skill_router import DesktopSkillRouter
@@ -57,7 +56,6 @@ def test_desktop_settings_from_env_lee_overrides():
     assert settings.startup_url == "http://127.0.0.2:12000/open-nexus"
     assert settings.open_operator_on_start is True
     assert settings.resolved_local_data_root == Path("C:/temp/open-nexus-test").resolve()
-    assert settings.shell_history_path == settings.history_dir / "shell_history.jsonl"
 
 
 def test_monitoring_agent_push_metrics_usa_token_si_existe():
@@ -156,28 +154,15 @@ def test_desktop_runtime_resuelve_y_actualiza_sesion():
     assert runtime.session.active_skill == "jira.consultar_ticket"
 
 
-def test_desktop_local_state_crea_layout_y_persiste_historial(tmp_path):
+def test_desktop_local_state_crea_layout(tmp_path):
     settings = DesktopSettings(local_data_root=str(tmp_path))
     state = DesktopLocalState(settings)
 
-    item = OpenNexusResult(
-        user_input="hola",
-        resolution={"skill_id": "general.respuesta", "confidence": 0.4, "execution_mode": "assist"},
-        response="ok",
-        agent="fake-agent",
-        status="accepted",
-        created_at="2026-05-29T11:00:00+00:00",
-    )
-
     state.ensure_layout()
-    state.append_shell_history(item)
-    loaded = state.load_shell_history(limit=10)
 
     assert state.config_dir.exists()
     assert state.logs_dir.exists()
     assert state.history_dir.exists()
-    assert state.shell_history_path.exists()
-    assert loaded[0].user_input == "hola"
 
 
 def test_desktop_local_state_guarda_llm_provider_config(tmp_path):

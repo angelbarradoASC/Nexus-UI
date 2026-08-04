@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
 
 from nexus.security.desktop_secret_store import (
     DesktopProviderSecretStore,
@@ -15,9 +14,6 @@ from desktop.config import DesktopSettings
 from desktop.storage.atomic_io import atomic_write_text
 from desktop.storage.provider_config import DesktopLLMProviderConfig
 from desktop.storage.router_config import DesktopLLMRouterConfig
-
-if TYPE_CHECKING:
-    from desktop.opennexus.models import OpenNexusResult
 
 
 class DesktopLocalState:
@@ -33,7 +29,6 @@ class DesktopLocalState:
         self.config_dir = settings.config_dir
         self.logs_dir = settings.logs_dir
         self.history_dir = settings.history_dir
-        self.shell_history_path = settings.shell_history_path
         self.llm_provider_config_path = settings.llm_provider_config_path
         self.llm_router_config_path = settings.llm_router_config_path
         self._provider_secret_store = provider_secret_store
@@ -41,37 +36,6 @@ class DesktopLocalState:
     def ensure_layout(self) -> None:
         for path in (self.root, self.config_dir, self.logs_dir, self.history_dir):
             path.mkdir(parents=True, exist_ok=True)
-
-    def load_shell_history(self, *, limit: int = 40) -> list[OpenNexusResult]:
-        self.ensure_layout()
-        if not self.shell_history_path.exists():
-            return []
-
-        from desktop.opennexus.models import OpenNexusResult
-
-        items: list[OpenNexusResult] = []
-        lines = self.shell_history_path.read_text(encoding="utf-8").splitlines()
-        for line in lines[-limit:]:
-            if not line.strip():
-                continue
-            payload = json.loads(line)
-            items.append(OpenNexusResult(**payload))
-        items.reverse()
-        return items
-
-    def append_shell_history(self, result: OpenNexusResult) -> None:
-        self.ensure_layout()
-        existing = ""
-        if self.shell_history_path.exists():
-            existing = self.shell_history_path.read_text(encoding="utf-8")
-        line = json.dumps(result.to_dict(), ensure_ascii=False) + "\n"
-        atomic_write_text(self.shell_history_path, existing + line, encoding="utf-8")
-
-    def rewrite_shell_history(self, items: Iterable[OpenNexusResult]) -> None:
-        self.ensure_layout()
-        lines = [json.dumps(item.to_dict(), ensure_ascii=False) for item in items]
-        content = ("\n".join(lines) + "\n") if lines else ""
-        atomic_write_text(self.shell_history_path, content, encoding="utf-8")
 
     def load_llm_router_config(self) -> DesktopLLMRouterConfig | None:
         self.ensure_layout()

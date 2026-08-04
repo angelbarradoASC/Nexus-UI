@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from desktop.config import DesktopSettings
-from desktop.opennexus.models import OpenNexusResult
 from desktop.storage.local_state import DesktopLocalState
 from desktop.storage.provider_config import DesktopLLMProviderConfig
 from nexus.security.desktop_secret_store import DesktopProviderSecretStore
@@ -21,7 +20,7 @@ class _FakeSecretBackend:
         self.values.pop((service_name, username), None)
 
 
-def test_local_state_reinicio_conserva_provider_e_historial(tmp_path):
+def test_local_state_reinicio_conserva_provider(tmp_path):
     settings = DesktopSettings(local_data_root=str(tmp_path))
     secret_store = DesktopProviderSecretStore(_FakeSecretBackend())
     state = DesktopLocalState(settings, provider_secret_store=secret_store)
@@ -35,33 +34,11 @@ def test_local_state_reinicio_conserva_provider_e_historial(tmp_path):
             enabled=True,
         )
     )
-    state.append_shell_history(
-        OpenNexusResult(
-            user_input="comando uno",
-            resolution={"skill_id": "general.respuesta", "confidence": 0.7, "execution_mode": "assist"},
-            response="ok",
-            agent="audit-agent",
-            status="accepted",
-            created_at="2026-06-21T18:30:00+00:00",
-        )
-    )
-    state.append_shell_history(
-        OpenNexusResult(
-            user_input="comando dos",
-            resolution={"skill_id": "general.respuesta", "confidence": 0.8, "execution_mode": "assist"},
-            response="ok",
-            agent="audit-agent",
-            status="accepted",
-            created_at="2026-06-21T18:31:00+00:00",
-        )
-    )
 
     reloaded = DesktopLocalState(DesktopSettings(local_data_root=str(tmp_path)), provider_secret_store=secret_store)
     provider = reloaded.load_llm_provider_config()
-    history = reloaded.load_shell_history(limit=10)
 
     assert provider.provider_label == "Seguro"
     assert provider.api_base_url == "https://audit.example/v1"
     assert provider.model == "audit-model"
     assert provider.api_key == "secret-local-1234"
-    assert [item.user_input for item in history] == ["comando dos", "comando uno"]

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from desktop.config import DesktopSettings
 from desktop.storage.local_state import DesktopLocalState
-from desktop.storage.provider_config import DesktopLLMProviderConfig
 from nexus.security.desktop_secret_store import DesktopProviderSecretStore
 
 
@@ -158,42 +157,4 @@ def test_provider_config_no_devuelve_secreto_completo_ni_rompe_claves_publicas(t
     assert loaded["provider"]["api_key"] != "sk-audit-secret-1234567890"
 
 
-def test_desktop_local_state_guarda_y_recupera_historial_y_provider_tras_reinicializar(tmp_path):
-    from desktop.opennexus.models import OpenNexusResult
 
-    settings = DesktopSettings(local_data_root=str(tmp_path))
-    secret_store = DesktopProviderSecretStore(_FakeSecretBackend())
-    state = DesktopLocalState(settings, provider_secret_store=secret_store)
-    state.save_llm_provider_config(
-        DesktopLLMProviderConfig(
-            provider_label="Persistido",
-            api_base_url="https://persist.example/v1",
-            api_key="persist-secret-1234",
-            model="persist-model",
-            enabled=True,
-        )
-    )
-    state.append_shell_history(
-        OpenNexusResult(
-            user_input="consulta de auditoria",
-            resolution={"skill_id": "general.respuesta", "confidence": 0.9, "execution_mode": "assist"},
-            response="ok",
-            agent="audit-agent",
-            status="accepted",
-            created_at="2026-06-21T18:00:00+00:00",
-        )
-    )
-
-    reloaded = DesktopLocalState(
-        DesktopSettings(local_data_root=str(tmp_path)),
-        provider_secret_store=secret_store,
-    )
-    provider = reloaded.load_llm_provider_config()
-    history = reloaded.load_shell_history(limit=10)
-
-    assert provider.provider_label == "Persistido"
-    assert provider.api_base_url == "https://persist.example/v1"
-    assert provider.model == "persist-model"
-    assert provider.enabled is True
-    assert provider.api_key == "persist-secret-1234"
-    assert history[0].user_input == "consulta de auditoria"

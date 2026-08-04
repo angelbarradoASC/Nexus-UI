@@ -60,6 +60,7 @@ class NexusCoordinator:
         operations: AssetsOperationsService | None = None,
         jira: JiraConnector | None = None,
         prospecting: ProspectingAgentService | None = None,
+        mouse_agent: Any | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
@@ -67,6 +68,7 @@ class NexusCoordinator:
         self._operations = operations
         self._jira = jira
         self._prospecting = prospecting
+        self._mouse_agent = mouse_agent
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -99,8 +101,13 @@ class NexusCoordinator:
         resolution_override: dict[str, Any] | None = None,
     ) -> ChatResponse:
         audit_id = f"audit-{uuid.uuid4().hex[:12]}"
+        context_key = payload.context_id or payload.user_id
+        if self._mouse_agent is not None and self._mouse_agent.has_pending(context_key):
+            return await self._handle_mouse_speed_pending(payload, audit_id, context_key)
         resolution = resolution_override or self._skill_router.resolve(payload.message).to_dict()
         skill_id = resolution.get("skill_id", "general.respuesta")
+        if skill_id == "desktop.mouse_speed" and self._mouse_agent is not None:
+            return await self._handle_mouse_speed_propose(payload, resolution, audit_id, context_key)
         if skill_id == "assets.crear_ticket_operador" or (
             skill_id == "jira.crear_ticket"
             and payload.mode in {"operator", "monitoring", "incident"}
@@ -306,6 +313,79 @@ class NexusCoordinator:
             flow="chat",
             audit_id=audit_id,
             run_id=run_id,
+        )
+
+    async def _handle_mouse_speed_propose(
+        self,
+        payload: ChatRequest,
+        resolution: dict[str, Any],
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        direction = (resolution.get("entities") or {}).get("direction") or "down"
+        proposal = self._mouse_agent.propose_change(context_key, direction)
+        response = (
+            f"La velocidad actual del ratón es {proposal['current']} (escala 1-20). "
+            f"Voy a ponerla en {proposal['target']}. ¿Confirmas?"
+        )
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status="accepted",
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "desktop.mouse_speed",
+                "proposal": proposal,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted",
+            response=response,
+            agent="desktop-mouse-agent",
+            flow="chat",
+            audit_id=audit_id,
+        )
+
+    async def _handle_mouse_speed_pending(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        lowered = payload.message.strip().lower()
+        if any(w in lowered for w in ("si", "sí", "confirmo", "adelante", "dale", "hazlo", "vale", "ok")):
+            result = self._mouse_agent.confirm(context_key)
+            response = f"Hecho — velocidad del ratón cambiada de {result['previous']} a {result['applied']}."
+        elif any(w in lowered for w in ("no", "cancela", "cancelar", "olvidalo", "olvídalo", "déjalo", "dejalo")):
+            self._mouse_agent.cancel(context_key)
+            response = "Vale, no toco nada."
+        else:
+            response = "¿Confirmas el cambio de velocidad del ratón que te propuse? (sí/no)"
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status="accepted",
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "desktop.mouse_speed",
+                "pending_resolution": response,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted",
+            response=response,
+            agent="desktop-mouse-agent",
+            flow="chat",
+            audit_id=audit_id,
         )
 
     async def _handle_docker_prediagnostic_chat(

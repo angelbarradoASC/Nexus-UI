@@ -65,11 +65,15 @@ def build_runtime(cfg) -> NexusRuntime:
     set_default_prompt_manager(prompt_manager)
     llm_router = get_router()
     monitoring_store = None
+    mouse_agent = None
     if getattr(cfg, "is_desktop", False):
         desktop_settings = DesktopSettings.from_env()
         monitoring_store = DesktopMonitoringIntegrationStore(
             desktop_settings.monitoring_config_db_path
         )
+        from desktop.local_agents.mouse_agent import MouseAgent
+
+        mouse_agent = MouseAgent()
     monitoring_urls = resolve_monitoring_base_urls(cfg, monitoring_store)
     alertmanager = AlertmanagerConnector(
         monitoring_urls["alertmanager"],
@@ -93,6 +97,7 @@ def build_runtime(cfg) -> NexusRuntime:
         operations=operations,
         jira=jira_connector,
         prospecting=prospecting,
+        mouse_agent=mouse_agent,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
         runbooks=RunbookRegistry(),

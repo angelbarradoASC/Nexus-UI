@@ -502,6 +502,7 @@ skill_id debe ser EXACTAMENTE una de estas opciones:
 - "cisco.switch.prediagnostico" — pide revisar switching Cisco (VLAN, spanning tree, puertos).
 - "ssh.diagnostico" — pide un diagnostico tecnico general sobre un servidor concreto, sin encajar en las categorias anteriores.
 - "sales.prospecting" — pide BUSCAR o ENCONTRAR negocios/empresas reales (por ejemplo peluquerias, asesorias, restaurantes, clinicas...) en una ciudad o zona, para prospeccion comercial. Esto incluye peticiones como "buscame X cerca de Y", "dame un listado de X en Y", "quiero que me ayudes buscando X en Y".
+- "desktop.mouse_speed" — pide subir, bajar, maximizar, minimizar o resetear la velocidad del puntero del raton/mouse de ESTE ordenador. Ejemplos: "baja la velocidad de mi raton", "el cursor va muy lento", "sube un poco la sensibilidad del mouse".
 - "web.busqueda" — necesita informacion externa o reciente que no es una busqueda de negocios (precios, noticias, documentacion, version de un producto, etc.).
 - "general.respuesta" — conversacion general, preguntas que el LLM puede responder sin ejecutar nada.
 
@@ -509,6 +510,7 @@ entities (usa null si no aplica):
 - servidor: nombre o IP de un servidor/host mencionado.
 - ticket_id: clave del ticket si se menciona (ej: "NEXUS-42").
 - container: nombre del contenedor Docker si se menciona.
+- direction: SOLO para desktop.mouse_speed — una de "up", "down", "max", "min", "reset" segun lo que pida el usuario.
 
 confidence: numero entre 0 y 1 indicando que tan seguro estas.
 
@@ -524,6 +526,9 @@ Usuario: "como esta el ticket NEXUS-42"
 
 Usuario: "hola, que tal"
 {"skill_id":"general.respuesta","confidence":0.99,"rationale":"Conversacion general sin accion que ejecutar.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Usuario: "puedes bajar un poco la velocidad de mi raton?"
+{"skill_id":"desktop.mouse_speed","confidence":0.95,"rationale":"Pide reducir la velocidad del puntero de este ordenador.","entities":{"servidor":null,"ticket_id":null,"container":null,"direction":"down"}}
 
 Devuelve SOLO el JSON, sin explicaciones.""",
     ),

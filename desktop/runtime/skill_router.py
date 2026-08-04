@@ -62,6 +62,7 @@ class DesktopSkillRouter:
         "cisco.switch.prediagnostico": ["infra.cisco.observe"],
         "web.busqueda": [],
         "sales.prospecting": [],
+        "desktop.mouse_speed": ["desktop.system.control"],
         "general.respuesta": [],
     }
 
@@ -79,6 +80,7 @@ class DesktopSkillRouter:
         "cisco.switch.prediagnostico": PermissionLevel.ASSIST,
         "web.busqueda": PermissionLevel.ASSIST,
         "sales.prospecting": PermissionLevel.ASSIST,
+        "desktop.mouse_speed": PermissionLevel.OPERATE,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -137,6 +139,9 @@ class DesktopSkillRouter:
 
         confidence = float(parsed.get("confidence", 0.5))
         rationale = parsed.get("rationale", "Clasificado por LLM (pepo.skill_intention).")
+        llm_entities = parsed.get("entities")
+        if isinstance(llm_entities, dict):
+            entities = {**entities, **{k: v for k, v in llm_entities.items() if v}}
         return self._build_resolution(skill_id, confidence, rationale, entities)
 
     def _heuristic_match(
@@ -203,6 +208,10 @@ class DesktopSkillRouter:
             return "ssh.diagnostico", 0.93, "La peticion parece un diagnostico tecnico sobre un activo concreto."
         if any(term in lowered for term in ("cpu", "memoria", "disco", "red", "logs", "alerta", "incidencia")) and entities.get("servidor"):
             return "ssh.diagnostico", 0.88, "Hay senales de diagnostico operativo con objetivo identificado."
+        if any(term in lowered for term in ("raton", "ratón", "mouse", "cursor", "puntero")) and any(
+            term in lowered for term in ("velocidad", "sensibilidad", "rapido", "rápido", "lento", "va lento", "va rapido")
+        ):
+            return "desktop.mouse_speed", 0.85, "La peticion pide ajustar la velocidad del raton de este ordenador."
         if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
             "cerca de" in lowered
             or any(
@@ -251,6 +260,7 @@ class DesktopSkillRouter:
             "servidor": None,
             "ticket_id": None,
             "container": None,
+            "direction": None,
         }
         host_match = _HOST_PATTERN.search(text)
         if host_match:
@@ -263,7 +273,22 @@ class DesktopSkillRouter:
         ticket_match = _TICKET_PATTERN.search(text.upper())
         if ticket_match:
             entities["ticket_id"] = ticket_match.group(0)
+        entities["direction"] = self._detect_direction(text.lower())
         return entities
+
+    @staticmethod
+    def _detect_direction(lowered: str) -> str | None:
+        if any(term in lowered for term in ("al maximo", "al máximo", "lo mas rapido", "lo más rápido")):
+            return "max"
+        if any(term in lowered for term in ("al minimo", "al mínimo", "lo mas lento", "lo más lento")):
+            return "min"
+        if any(term in lowered for term in ("por defecto", "valor normal", "resetea", "restablece")):
+            return "reset"
+        if any(term in lowered for term in ("sube", "aumenta", "mas rapido", "más rápido", "va lento")):
+            return "up"
+        if any(term in lowered for term in ("baja", "reduce", "disminuye", "mas lento", "más lento", "va rapido", "va rápido")):
+            return "down"
+        return None
 
     def _build_resolution(
         self,

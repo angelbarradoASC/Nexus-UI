@@ -63,6 +63,7 @@ class DesktopSkillRouter:
         "web.busqueda": [],
         "sales.prospecting": [],
         "desktop.mouse_speed": ["desktop.system.control"],
+        "desktop.system_task": ["desktop.system.control"],
         "general.respuesta": [],
     }
 
@@ -81,6 +82,7 @@ class DesktopSkillRouter:
         "web.busqueda": PermissionLevel.ASSIST,
         "sales.prospecting": PermissionLevel.ASSIST,
         "desktop.mouse_speed": PermissionLevel.OPERATE,
+        "desktop.system_task": PermissionLevel.OPERATE,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -104,27 +106,44 @@ class DesktopSkillRouter:
 
         return self._build_resolution(skill_id, confidence, rationale, entities)
 
-    async def resolve_llm(self, user_input: str, llm_router) -> SkillResolution:
+    async def resolve_llm(
+        self,
+        user_input: str,
+        llm_router,
+        *,
+        history: list[dict[str, str]] | None = None,
+    ) -> SkillResolution:
         """Resolve intent via LLM classification (pepo.skill_intention).
+
+        `history` (formato OpenAI, ultimos turnos) se incluye para poder
+        resolver referencias como "hazlo", "bajala a la mitad", que solo
+        tienen sentido en el contexto del turno anterior.
 
         Falls back to the heuristic resolve() on any LLM failure, invalid
         skill_id, or timeout — never raises.
         """
         text = user_input.strip()
         entities = self._extract_entities(text)
+        messages = [{"role": "system", "content": resolve_prompt_sync("pepo.skill_intention")}]
+        if history:
+            messages.extend(history[-6:])
+        messages.append({"role": "user", "content": text})
         try:
             response = await asyncio.wait_for(
                 llm_router.call(
-                    messages=[
-                        {"role": "system", "content": resolve_prompt_sync("pepo.skill_intention")},
-                        {"role": "user", "content": text},
-                    ],
-                    preferred_level=1,
+                    messages=messages,
+                    # L1 tiene un modelo gratuito que OpenRouter retiro (404 en cada
+                    # intento) — el router escala igualmente, pero el retry se come
+                    # el timeout de 10s de aqui abajo y se acaba cayendo al heuristico.
+                    preferred_level=2,
                     temperature=0.0,
-                    max_tokens=300,
-                    timeout=6.0,
+                    # El modelo de L2 (nvidia/nemotron-nano-9b-v2:free) es "reasoning":
+                    # gasta ~600 tokens pensando antes de escribir el JSON. Con 300 se
+                    # cortaba a mitad de razonamiento y nunca llegaba a emitir el JSON.
+                    max_tokens=900,
+                    timeout=14.0,
                 ),
-                timeout=10.0,
+                timeout=18.0,
             )
         except Exception:
             return self.resolve(user_input)

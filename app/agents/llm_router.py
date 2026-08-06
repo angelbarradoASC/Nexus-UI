@@ -65,6 +65,7 @@ class LLMResponse(BaseModel):
     error: str | None = None
     retries_used: int = 0
     retry_after: float | None = None   # segundos sugeridos por el proveedor en 429
+    tool_calls: list[dict[str, Any]] | None = None  # tool calls devueltos por el modelo (formato OpenAI)
 
 
 # ── Configuración de reintentos ───────────────────────────────────────────────
@@ -230,6 +231,8 @@ class LLMRouter:
         temperature: float = 0.45,
         max_tokens: int = 1200,
         timeout: float = 120.0,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
     ) -> LLMResponse:
         """
         Llama al LLM con la estrategia configurada + fallback automático.
@@ -242,6 +245,8 @@ class LLMRouter:
             temperature:     Temperatura del modelo (0=determinista).
             max_tokens:      Tokens máximos de respuesta.
             timeout:         Timeout por intento en segundos.
+            tools:           Definiciones de funciones (formato OpenAI tools) para tool calling.
+            tool_choice:     "auto" | "required" | {"type":"function",...} — ver docs OpenRouter.
 
         Returns:
             LLMResponse con content y metadatos. error!=None si todo falló.
@@ -264,6 +269,8 @@ class LLMRouter:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                tools=tools,
+                tool_choice=tool_choice,
             )
             if result.error is None:
                 if lv_num > start_level:
@@ -398,6 +405,8 @@ class LLMRouter:
         temperature: float,
         max_tokens: int,
         timeout: float,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
     ) -> LLMResponse:
         """
         Intenta llamar a un nivel con backoff exponencial.
@@ -415,7 +424,10 @@ class LLMRouter:
                 )
                 await asyncio.sleep(espera)
 
-            result = await self._llamar_nivel(nivel, messages, temperature, max_tokens, timeout)
+            result = await self._llamar_nivel(
+                nivel, messages, temperature, max_tokens, timeout,
+                tools=tools, tool_choice=tool_choice,
+            )
 
             if result.error is None:
                 result = result.model_copy(update={"retries_used": intento})
@@ -449,6 +461,8 @@ class LLMRouter:
         temperature: float,
         max_tokens: int,
         timeout: float,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
     ) -> LLMResponse:
         """Llamada HTTP a un nivel concreto (sin reintento)."""
         payload = {
@@ -457,6 +471,9 @@ class LLMRouter:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice or "auto"
 
         t0 = time.monotonic()
         try:
@@ -480,14 +497,16 @@ class LLMRouter:
                 raw_content = message.get("content") or message.get("reasoning") or ""
                 usage = data.get("usage", {})
             content = raw_content.strip()
+            tool_calls = message.get("tool_calls") if not self._is_braingel(nivel) else None
 
             self.metrics.record_success(nivel.name, latency_ms)
             logger.debug(
-                "LLMRouter OK | nivel={} | tokens={}/{} | latencia={}ms",
+                "LLMRouter OK | nivel={} | tokens={}/{} | latencia={}ms | tool_calls={}",
                 nivel.name,
                 usage.get("prompt_tokens", 0),
                 usage.get("completion_tokens", 0),
                 latency_ms,
+                len(tool_calls) if tool_calls else 0,
             )
 
             return LLMResponse(
@@ -498,6 +517,7 @@ class LLMRouter:
                 tokens_input=usage.get("prompt_tokens", 0),
                 tokens_output=usage.get("completion_tokens", 0),
                 latency_ms=latency_ms,
+                tool_calls=tool_calls or None,
             )
 
         except httpx.TimeoutException:

@@ -1,10 +1,13 @@
 /* ── PEPO — layout + componentes propios ─────────────────────────────────── */
-/* Anula el zoom 0.75 de nexus_v1.css: PEPO es chat puro, escala nativa. */
-html { zoom: 1; }
-:root { --ui-zoom: 1; }
+/* Mismo nivel que el resto de pantallas de Desktop (2026-08-05) — antes PEPO
+   tenia un zoom propio (1, luego 0.85) que lo dejaba desalineado del resto. */
+html { zoom: 0.75; }
+:root { --ui-zoom: 0.75; }
 
 .workspace-pepo {
-    height: 100dvh;
+    /* Misma formula de compensacion de zoom que .workspace en nexus_v1.css —
+       100dvh a secas se quedaba corto y el contenido no llenaba la ventana. */
+    height: calc(100dvh / var(--ui-zoom));
     overflow: hidden;
     grid-template-rows: auto minmax(0, 1fr);
 }

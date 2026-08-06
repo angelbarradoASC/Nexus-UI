@@ -7,7 +7,7 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-_N8N_BASE = "http://192.168.1.150:5678"
+_N8N_BASE = "http://192.168.68.150:5678"
 _N8N_AUTH = ("angel", "angel")
 
 # Catálogo estático de automatizaciones expuestas al panel.

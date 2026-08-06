@@ -34,6 +34,9 @@ def _bootstrap_trace(message: str) -> None:
 os.environ.setdefault("NEXUS_CONTEXT", "desktop_app")
 os.environ.setdefault("APP_PORT", "11430")
 os.environ.setdefault("DEBUG", "false")
+# windows-use manda telemetria a PostHog por defecto — la desactivamos aqui
+# tambien, por si acaso el .env no se localiza antes de que el paquete la lea.
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 _bootstrap_trace(
     "desktop.main bootstrap env "
     f"context={os.environ.get('NEXUS_CONTEXT')} "

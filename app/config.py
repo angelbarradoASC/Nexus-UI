@@ -109,9 +109,9 @@ class AppConfig(BaseSettings):
     # Assets ITSM (ticketing via private API — same as operations but explicit flag)
     assets_itsm_enabled: bool = True
 
-    alertmanager_url: str = "http://192.168.1.150:9094"
-    prometheus_url: str = "http://192.168.1.150:9090"
-    grafana_url: str = "http://192.168.1.150:3000"
+    alertmanager_url: str = "http://192.168.68.150:9094"
+    prometheus_url: str = "http://192.168.68.150:9090"
+    grafana_url: str = "http://192.168.68.150:3000"
     loki_url: str = "http://192.168.1.150:3100"
     loki_enabled: bool = False
     connector_timeout_seconds: int = Field(default=10, ge=1, le=120)

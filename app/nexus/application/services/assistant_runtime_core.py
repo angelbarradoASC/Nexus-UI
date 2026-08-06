@@ -66,6 +66,9 @@ class AssistantExecutionResponse:
         )
 
 
+_HISTORY_MAX_MESSAGES = 20  # 10 turnos usuario+asistente por conversacion
+
+
 class AssistantRuntimeCore:
     """Executes assistant requests without coupling callers to FastAPI routes."""
 
@@ -79,12 +82,18 @@ class AssistantRuntimeCore:
         self._coordinator = coordinator
         self._skill_router = skill_router or DesktopSkillRouter()
         self._llm_router = llm_router
+        self._history: dict[str, list[dict[str, str]]] = {}
 
     async def execute(self, request: AssistantExecutionRequest) -> AssistantExecutionResponse:
+        context_key = request.context_id or request.user_id
+        history = self._history.get(context_key, [])
+
         if request.resolution:
             resolution = request.resolution
         elif self._llm_router is not None:
-            resolution = (await self._skill_router.resolve_llm(request.message, self._llm_router)).to_dict()
+            resolution = (
+                await self._skill_router.resolve_llm(request.message, self._llm_router, history=history)
+            ).to_dict()
         else:
             resolution = self._skill_router.resolve(request.message).to_dict()
         chat_request = ChatRequest(
@@ -97,13 +106,23 @@ class AssistantRuntimeCore:
             response = await self._coordinator.handle_chat(
                 chat_request,
                 resolution_override=resolution,
+                history=history,
             )
         except TypeError as exc:
-            if "resolution_override" not in str(exc):
+            if "resolution_override" not in str(exc) and "history" not in str(exc):
                 raise
             response = await self._coordinator.handle_chat(chat_request)
-        return AssistantExecutionResponse.from_chat_response(
+
+        result = AssistantExecutionResponse.from_chat_response(
             response,
             resolution=resolution,
             source_surface=request.source_surface,
         )
+        self._remember(context_key, request.message, result.response)
+        return result
+
+    def _remember(self, context_key: str, user_message: str, assistant_response: str) -> None:
+        turns = self._history.setdefault(context_key, [])
+        turns.append({"role": "user", "content": user_message})
+        turns.append({"role": "assistant", "content": assistant_response})
+        del turns[:-_HISTORY_MAX_MESSAGES]

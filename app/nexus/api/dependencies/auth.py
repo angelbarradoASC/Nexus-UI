@@ -64,16 +64,22 @@ def build_runtime(cfg) -> NexusRuntime:
     prompt_manager = PromptManager(getattr(cfg, "prompt_data_dir", "data/prompts"))
     set_default_prompt_manager(prompt_manager)
     llm_router = get_router()
+    cmdb = FileCMDB()
     monitoring_store = None
     mouse_agent = None
+    system_task_agent = None
     if getattr(cfg, "is_desktop", False):
         desktop_settings = DesktopSettings.from_env()
         monitoring_store = DesktopMonitoringIntegrationStore(
             desktop_settings.monitoring_config_db_path
         )
         from desktop.local_agents.mouse_agent import MouseAgent
+        from desktop.local_agents.skill_library import SkillLibrary
+        from desktop.local_agents.system_task_agent import SystemTaskAgent
 
         mouse_agent = MouseAgent()
+        skill_library = SkillLibrary(desktop_settings.skill_library_db_path)
+        system_task_agent = SystemTaskAgent(cfg, llm_router=llm_router, skill_library=skill_library, cmdb=cmdb)
     monitoring_urls = resolve_monitoring_base_urls(cfg, monitoring_store)
     alertmanager = AlertmanagerConnector(
         monitoring_urls["alertmanager"],
@@ -98,6 +104,7 @@ def build_runtime(cfg) -> NexusRuntime:
         jira=jira_connector,
         prospecting=prospecting,
         mouse_agent=mouse_agent,
+        system_task_agent=system_task_agent,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
         runbooks=RunbookRegistry(),
@@ -108,7 +115,6 @@ def build_runtime(cfg) -> NexusRuntime:
     agent_runtime = AgentRuntimeService()
     outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
     crm = CRMBridgeService(cfg=cfg)
-    cmdb  = FileCMDB()
     vault = VaultService()
     access = AgentAccessService(cmdb=cmdb, vault=vault)
     case_log = CaseLogStore()

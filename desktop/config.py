@@ -58,6 +58,10 @@ class DesktopSettings:
         return self.config_dir / "monitoring_integrations.db"
 
     @property
+    def skill_library_db_path(self) -> Path:
+        return self.config_dir / "skill_library.db"
+
+    @property
     def llm_router_config_path(self) -> Path:
         return self.config_dir / "llm_router.json"
 

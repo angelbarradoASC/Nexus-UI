@@ -162,7 +162,12 @@ class ProspectingAgentService:
         return self._run_summary(run)
 
     async def orchestrate_brief(self, payload: dict[str, Any], *, original_text: str = "") -> dict[str, Any]:
-        brief = self._normalize_brief(payload)
+        # _normalize_brief espera un objeto con atributos (ProspectingRunRequest), no un
+        # dict — pasarle el dict tal cual rompia con AttributeError y el refinamiento/
+        # guardrails se saltaban en silencio (capturado como excepcion generica arriba).
+        known_fields = ProspectingRunRequest.model_fields
+        request = ProspectingRunRequest(**{k: v for k, v in payload.items() if k in known_fields})
+        brief = self._normalize_brief(request)
         return await self._orchestrator.orchestrate(brief, original_text=original_text)
 
     async def resume_run(self, run_id: str) -> dict[str, Any]:

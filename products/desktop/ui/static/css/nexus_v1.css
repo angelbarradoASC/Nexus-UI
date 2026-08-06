@@ -1029,7 +1029,11 @@ input[aria-invalid="true"] {
     min-height: 0;
     height: 100%;
     display: grid;
-    grid-template-rows: 152px minmax(0, 1fr);
+    /* Antes 152px fijos — se quedaba corto y el desglose (8 campos) entraba
+       siempre con scrollbar propio aunque hubiera espacio de sobra. Ahora
+       crece segun su contenido; .ai-interp-output conserva overflow-y:auto
+       como red de seguridad si algun dia el contenido es excepcionalmente largo. */
+    grid-template-rows: auto minmax(0, 1fr);
     gap: var(--shell-gap);
     align-content: start;
     overflow: hidden;
@@ -1745,7 +1749,8 @@ input[aria-invalid="true"] {
 /* ── Panel interpretación IA ─────────────────────────────────────────────── */
 .ai-interpretation-panel {
     min-height: 0;
-    height: 100%;
+    height: auto;
+    max-height: 45vh;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
@@ -1949,9 +1954,11 @@ input[aria-invalid="true"] {
 }
 
 .results-table-shell .prospecting-table-wrap {
+    /* Antes max-height:206px fijo — la tabla se quedaba pequeña y dejaba
+       hueco vacio debajo aunque .results-table-shell (flex:1 1 auto) tuviera
+       mucho mas espacio asignado. Ahora ocupa todo lo que le de el flex. */
     flex: 1 1 auto;
     min-height: 206px;
-    max-height: 206px;
     overflow: auto;
     height: auto;
 }

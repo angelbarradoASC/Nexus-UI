@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +37,59 @@ router = APIRouter()
 
 class InterpretRequest(BaseModel):
     text: str
+
+
+# Mismo mecanismo que el bucle de PEPO (desktop/local_agents/system_task_agent.py):
+# tool calling forzado en vez de "pedir JSON en texto y esperar" — mas robusto con
+# modelos de razonamiento (el contenido de razonamiento no puede corromper el JSON
+# si la respuesta estructurada va en tool_calls, no en content).
+_INTERPRET_BRIEF_TOOL = [
+    {
+        "type": "function",
+        "function": {
+            "name": "set_prospecting_brief",
+            "description": "Estructura los parametros de prospeccion B2B extraidos del texto libre del usuario.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vertical": {
+                        "type": "string",
+                        "description": "asesoria | salud | inmobiliaria | public_administration | restaurants | un snake_case corto si no encaja ninguno",
+                    },
+                    "target_description": {
+                        "type": "string",
+                        "description": (
+                            "SOLO el sintagma nominal que describe el tipo de negocio, "
+                            "ej. 'restaurantes de lujo', 'asesorias fiscales'. NUNCA copies la frase completa "
+                            "del usuario ni incluyas verbos de instruccion (quiero que, busca, dame...) "
+                            "ni la geografia ni la marca representada."
+                        ),
+                    },
+                    "city": {
+                        "type": "string",
+                        "description": (
+                            "SOLO el nombre propio de la ciudad/localidad, capitalizado (ej. 'Salamanca', 'Toledo'). "
+                            "Si el texto dice 'la zona de X' o 'cerca de X', la ciudad es X, nunca la palabra 'zona'."
+                        ),
+                    },
+                    "province": {
+                        "type": "string",
+                        "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
+                    },
+                    "region": {"type": "string"},
+                    "desired_count": {"type": "integer"},
+                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
+                    "must_have": {"type": "array", "items": {"type": "string"}},
+                    "min_employees": {"type": "integer"},
+                    "max_employees": {"type": "integer"},
+                    "industrial_zone": {"type": "string"},
+                    "dry_run": {"type": "boolean"},
+                },
+                "required": ["vertical", "target_description", "city"],
+            },
+        },
+    }
+]
 
 
 class ChatMessage(BaseModel):
@@ -188,22 +242,30 @@ async def interpret_brief(
                     {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret")},
                     {"role": "user", "content": payload.text.strip()},
                 ],
-                preferred_level=1,   # L1 con few-shot; fallback por reglas si falla
+                tools=_INTERPRET_BRIEF_TOOL,
+                tool_choice={"type": "function", "function": {"name": "set_prospecting_brief"}},
+                # L1 tenia un modelo gratuito retirado por OpenRouter (404 siempre) — esto
+                # hacia que TODA interpretacion cayera al fallback heuristico en silencio.
+                # L2 es el mismo nivel "reasoning" que ya usa PEPO, con el mismo margen.
+                preferred_level=2,
                 temperature=0.1,
-                max_tokens=600,
-                timeout=6.0,         # per-level timeout — escala rápido si un nivel es lento
+                max_tokens=900,
+                timeout=14.0,
             ),
-            timeout=10.0,            # cap global — fallback heurístico si todos los niveles son lentos
+            timeout=18.0,            # cap global — fallback heurístico si todos los niveles son lentos
         )
     except asyncio.TimeoutError:
-        logger.warning("interpret | llm.call timeout global (10s) — usando fallback heurístico")
+        logger.warning("interpret | llm.call timeout global (18s) — usando fallback heurístico")
 
     brief = None
 
-    if response is not None and not response.error:
-        brief = parse_llm_json(response.content or "")
+    if response is not None and not response.error and response.tool_calls:
+        try:
+            brief = json.loads(response.tool_calls[0]["function"]["arguments"] or "{}")
+        except (KeyError, TypeError, json.JSONDecodeError):
+            brief = None
 
-    # Fallback por reglas si el LLM falla o devuelve basura
+    # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura
     if brief is None:
         brief = _fallback_parse(payload.text)
 

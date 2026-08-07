@@ -224,6 +224,25 @@ async def get_skill_source() -> dict:
     }
 
 
+async def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
+    """Bloque de contexto con las verticales REALES del CRM ahora mismo — nunca
+    una lista fija en el prompt, para no volver a generar duplicados tipo
+    "talleres"/"talleres_coches" para la misma idea de negocio.
+    """
+    verticals = await prospecting.list_crm_verticals()
+    if not verticals:
+        return (
+            "VERTICALES EXISTENTES EN EL CRM: no se pudo consultar el CRM ahora mismo. "
+            "No inventes un vertical — usa 'otros'."
+        )
+    lines = "\n".join(f"- {v['slug']} ({v['count']} empresas)" for v in verticals)
+    return (
+        "VERTICALES EXISTENTES EN EL CRM (elige EXACTAMENTE uno de estos si alguno encaja "
+        "semanticamente, aunque el usuario lo redacte distinto — NUNCA inventes un slug nuevo; "
+        "usa 'otros' solo si de verdad no encaja ninguno):\n" + lines
+    )
+
+
 @router.post("/prospecting/interpret")
 async def interpret_brief(
     payload: InterpretRequest,
@@ -234,12 +253,13 @@ async def interpret_brief(
         raise HTTPException(status_code=400, detail="text is required")
 
     llm = get_router()
+    verticals_block = await _verticals_context_block(prospecting)
     response = None
     try:
         response = await asyncio.wait_for(
             llm.call(
                 messages=[
-                    {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret")},
+                    {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret") + "\n\n" + verticals_block},
                     {"role": "user", "content": payload.text.strip()},
                 ],
                 tools=_INTERPRET_BRIEF_TOOL,
@@ -265,12 +285,14 @@ async def interpret_brief(
         except (KeyError, TypeError, json.JSONDecodeError):
             brief = None
 
-    # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura
+    # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura.
+    # SOLO en este caso degradado se normaliza el vertical contra la lista de
+    # emergencia — si el LLM SI respondio, ya eligio de la lista real del CRM
+    # (inyectada en el prompt) y no hay que revalidarlo contra nada fijo.
     if brief is None:
         brief = _fallback_parse(payload.text)
-
-    from nexus.prospecting.models import normalize_vertical
-    brief["vertical"] = normalize_vertical(brief.get("vertical", ""), fallback_text=payload.text)
+        from nexus.prospecting.models import normalize_vertical
+        brief["vertical"] = normalize_vertical(brief.get("vertical", ""), fallback_text=payload.text)
     brief["vertical_created"] = False
     # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
     if "location" in brief and not brief.get("city"):
@@ -359,7 +381,7 @@ _PROSPECTING_CHAT_TOOLS = [
 _PROSPECTING_CHAT_MAX_STEPS = 4
 
 
-async def _run_prospecting_chat_loop(history: list[dict]) -> dict | None:
+async def _run_prospecting_chat_loop(history: list[dict], prospecting: ProspectingAgentService) -> dict | None:
     """Bucle con tool calling: resuelve geografia real antes de dar el brief por bueno.
 
     Mismo mecanismo que el bucle generico de PEPO (system_task_agent) — el LLM
@@ -367,7 +389,11 @@ async def _run_prospecting_chat_loop(history: list[dict]) -> dict | None:
     (lectura, sin efectos), y el bucle continua hasta ask_user o finish_brief.
     """
     llm = get_router()
-    messages = [{"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat")}, *history]
+    verticals_block = await _verticals_context_block(prospecting)
+    messages = [
+        {"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat") + "\n\n" + verticals_block},
+        *history,
+    ]
 
     for _ in range(_PROSPECTING_CHAT_MAX_STEPS):
         try:
@@ -451,7 +477,7 @@ async def prospecting_chat(
     history = [{"role": m.role, "content": m.content} for m in payload.history]
     history.append({"role": "user", "content": payload.message})
 
-    parsed = await _run_prospecting_chat_loop(history)
+    parsed = await _run_prospecting_chat_loop(history, prospecting)
 
     if not parsed:
         # Fallback heurístico — combina todos los mensajes del usuario e intenta extraer parámetros

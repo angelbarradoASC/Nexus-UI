@@ -27,7 +27,7 @@ function humanizeVertical(value) {
         inmobiliaria: 'Inmobiliarias',
         public_administration: 'Adm. publica',
         restaurants: 'Restaurantes',
-        custom: 'Custom',
+        otros: 'Otros',
     };
     if (labels[raw]) return labels[raw];
     return raw
@@ -35,7 +35,7 @@ function humanizeVertical(value) {
         .replaceAll('-', ' ')
         .replace(/\s+/g, ' ')
         .trim()
-        .replace(/\b\w/g, (char) => char.toUpperCase()) || 'Custom';
+        .replace(/\b\w/g, (char) => char.toUpperCase()) || 'Otros';
 }
 
 function ensureSelectOption(selectId, value, label = null) {
@@ -59,7 +59,7 @@ const MUST_HAVE_SUGGESTIONS = {
     inmobiliaria:         ["Email directo", "Web propia", "Portal propio", "Direccion fisica", "Horario publicado"],
     restaurants:          ["Web propia", "Carta online", "Reservas online", "Telefono", "Google Maps"],
     public_administration:["Email institucional", "Web .gob/.es", "Nombre responsable", "Telefono", "Direccion"],
-    custom:               ["Email directo", "Web propia", "Telefono", "Direccion", "Redes sociales"],
+    otros:                ["Email directo", "Web propia", "Telefono", "Direccion", "Redes sociales"],
 };
 
 const NICE_TO_HAVE_SUGGESTIONS = {
@@ -68,7 +68,7 @@ const NICE_TO_HAVE_SUGGESTIONS = {
     inmobiliaria:         ["Gestion vacacional", "CRM visible", "App movil", "Virtual tours", "Buenas resenas Google"],
     restaurants:          ["Grupos / eventos", "Terraza exterior", "Delivery propio", "Menu del dia online", "Buenas resenas"],
     public_administration:["Convocatorias TIC recientes", "Plan digital visible", "Contacto IT directo", "Sede electronica", "Presupuesto digital"],
-    custom:               ["Redes sociales activas", "Blog / noticias", "App movil", "Resenas positivas", "Equipo visible"],
+    otros:                ["Redes sociales activas", "Blog / noticias", "App movil", "Resenas positivas", "Equipo visible"],
 };
 
 const CRM_TAG_OPTIONS = ["nexus-lead", "premium", "cold", "seguimiento", "automato", "assets", "q3-2026", "toledo", "madrid"];
@@ -99,8 +99,8 @@ function getSelectedChips(containerId) {
 }
 
 function initChips(vertical = "asesoria") {
-    renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.custom);
-    renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom);
+    renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.otros);
+    renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.otros);
     renderChips("crmTagsChips", CRM_TAG_OPTIONS);
 }
 
@@ -111,7 +111,7 @@ function showSearchSummary(brief) {
     if (!summary) return;
     const verticalLabels = {
         asesoria: "Asesorias", salud: "Salud / Clinicas", inmobiliaria: "Inmobiliarias",
-        public_administration: "Admon. publica", restaurants: "Restaurantes", custom: "Custom",
+        public_administration: "Admon. publica", restaurants: "Restaurantes", otros: "Otros",
     };
     const parts = [
         humanizeVertical(brief.vertical),
@@ -139,7 +139,7 @@ function renderInterpretation(brief, orchestration = null) {
     if (!output) return;
     const verticalLabels = {
         asesoria: "Asesorías / Gestorías", salud: "Clínicas / Salud", inmobiliaria: "Inmobiliarias",
-        public_administration: "Adm. pública", restaurants: "Restaurantes", custom: "Custom",
+        public_administration: "Adm. pública", restaurants: "Restaurantes", otros: "Otros",
     };
     const brandLabels = { assets: "Assets Consultores", automato: "Automato", other: "Otra" };
     const joinOrDash = (value) => {
@@ -529,8 +529,8 @@ function fillFormFromBrief(brief) {
     document.getElementById("prospectingParamsBlock")?.classList.add("hidden-btn");
 
     const vertical = brief.vertical || "asesoria";
-    renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.custom, brief.must_have || []);
-    renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom, brief.nice_to_have || []);
+    renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.otros, brief.must_have || []);
+    renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.otros, brief.nice_to_have || []);
     renderChips("crmTagsChips", CRM_TAG_OPTIONS, brief.crm_tags || []);
 }
 
@@ -1062,8 +1062,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Cambio de vertical recarga los chips
     document.getElementById("prospectingVertical")?.addEventListener("change", (e) => {
         const vertical = e.target.value;
-        renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.custom);
-        renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.custom);
+        renderChips("mustHaveChips", MUST_HAVE_SUGGESTIONS[vertical] || MUST_HAVE_SUGGESTIONS.otros);
+        renderChips("niceToHaveChips", NICE_TO_HAVE_SUGGESTIONS[vertical] || NICE_TO_HAVE_SUGGESTIONS.otros);
     });
 
     document.getElementById("interpretBriefBtn")?.addEventListener("click", sendChatMessage);

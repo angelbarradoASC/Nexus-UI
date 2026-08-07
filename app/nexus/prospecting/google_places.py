@@ -48,6 +48,10 @@ VERTICAL_QUERIES: dict[str, list[tuple[str, str | None]]] = {
         ("restaurante gourmet {geo}", "restaurant"),
     ],
 }
+# No se anaden mas entradas aqui por vertical nuevo — la busqueda tiene que
+# funcionar igual de bien para CUALQUIER vertical a partir de lo que el
+# usuario pidio (target_description), no solo para los que alguien cure a
+# mano. Ver el fallback generico en search_by_brief() mas abajo.
 
 
 @dataclass(slots=True)
@@ -77,6 +81,7 @@ class GooglePlacesClient:
         geography: str,
         max_results: int = 20,
         language: str = "es",
+        target_description: str = "",
     ) -> tuple[list[dict[str, Any]], int]:
         """Search Places for all query templates of a vertical and deduplicate.
 
@@ -85,7 +90,12 @@ class GooglePlacesClient:
         if not self.enabled or not geography:
             return [], 0
 
-        templates = VERTICAL_QUERIES.get(vertical, [(f"{{geo}} {vertical}", None)])
+        # Sin plantilla curada para este vertical: la busqueda usa lo que el
+        # usuario pidio de verdad (target_description), no la etiqueta de
+        # clasificacion ("otros", un slug feo, etc.) — clasificar y buscar
+        # son cosas distintas.
+        fallback_term = target_description.strip() or vertical
+        templates = VERTICAL_QUERIES.get(vertical, [(f"{{geo}} {fallback_term}", None)])
         collected: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
         api_calls = 0

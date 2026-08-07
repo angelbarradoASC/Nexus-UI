@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,47 @@ class ProspectingAgentService:
         )
         self._autonomy = SalesAutonomousSystem()
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._verticals_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+    # ── Verticales reales del CRM (sin hardcodear) ──────────────────────────────
+
+    _VERTICALS_CACHE_TTL_SECONDS = 600  # 10 min — evita golpear el CRM en cada mensaje
+
+    async def list_crm_verticals(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
+        """Verticales que existen AHORA MISMO en el CRM, extraidas de los leads
+        ya registrados ("Vertical: X" en las notas) — nunca una lista fija en
+        codigo. El LLM de interpretacion recibe esta lista real para clasificar,
+        en vez de un catalogo hardcodeado que se queda desactualizado.
+        """
+        now = time.monotonic()
+        if not force_refresh and self._verticals_cache is not None:
+            cached_at, cached = self._verticals_cache
+            if now - cached_at < self._VERTICALS_CACHE_TTL_SECONDS:
+                return cached
+
+        if not self._connector.configured:
+            return self._verticals_cache[1] if self._verticals_cache else []
+
+        try:
+            data = await self._connector.list_pipeline()
+        except Exception:
+            _logger.exception("list_crm_verticals | fallo consultando el CRM")
+            return self._verticals_cache[1] if self._verticals_cache else []
+
+        counts: dict[str, int] = {}
+        for company in data.get("companies", []):
+            match = re.search(r"Vertical:\s*([^\n]+)", company.get("notes") or "")
+            if match:
+                slug = match.group(1).strip()
+                if slug:
+                    counts[slug] = counts.get(slug, 0) + 1
+
+        verticals = [
+            {"slug": slug, "count": count}
+            for slug, count in sorted(counts.items(), key=lambda kv: -kv[1])
+        ]
+        self._verticals_cache = (now, verticals)
+        return verticals
 
     # ── Logging ──────────────────────────────────────────────────────────────
 
@@ -836,6 +878,7 @@ class ProspectingAgentService:
             geography=geography,
             max_results=brief.desired_count * 2,
             language=brief.language,
+            target_description=brief.target_description,
         )
         new_total = await self._budget.increment(api_calls_made)
         run["places_api_calls"] = run.get("places_api_calls", 0) + api_calls_made
@@ -1145,7 +1188,7 @@ class ProspectingAgentService:
             official_signals = ("ayuntamiento", "sede electrónica", "administración", "concejal", "secretar")
             relevant = any(token in text for token in official_signals) or ".es" in extracted.get("domain", "")
             reason = "organismo público con señales oficiales" if relevant else "no parece organismo oficial"
-        elif brief.vertical not in KNOWN_VERTICALS and brief.vertical != "custom":
+        elif brief.vertical not in KNOWN_VERTICALS and brief.vertical != "otros":
             relevant = True
             reason = "vertical creada dinámicamente; clasificación heurística genérica"
         else:
@@ -1270,7 +1313,7 @@ class ProspectingAgentService:
     def _build_crm_payload(self, result: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
         followup = datetime.now(timezone.utc).date().isoformat()
         geography = ", ".join(filter(None, [result.get("city"), result.get("province")]))
-        vertical = result.get("vertical") or brief.get("vertical", "custom")
+        vertical = result.get("vertical") or brief.get("vertical", "otros")
         represented_by = brief.get("represented_by", "assets")
 
         source_note = f"[Google Places]" if result.get("source") == "google_places" else f"[Brave]"
@@ -1359,7 +1402,15 @@ class ProspectingAgentService:
         return ' '.join(words)
 
     def _normalize_brief(self, payload: ProspectingRunRequest) -> ProspectingBrief:
-        vertical = normalize_vertical(payload.vertical or "custom", fallback_text=payload.target_description)
+        # Si ya viene un vertical decidido (por el LLM contra la lista real del
+        # CRM, o escrito a mano en el formulario), se respeta tal cual — no se
+        # revalida contra la lista cerrada de KNOWN_VERTICALS, o cualquier
+        # vertical real del CRM que no este en esos 7 curados a mano acabaria
+        # cayendo a "otros" aqui, pisando lo que ya se habia clasificado bien.
+        # normalize_vertical() (con su heuristica de palabras clave y su
+        # default a "otros") solo hace falta cuando de verdad no llega nada.
+        raw_vertical = (payload.vertical or "").strip()
+        vertical = raw_vertical or normalize_vertical("", fallback_text=payload.target_description)
         return ProspectingBrief(
             vertical=vertical,
             target_description=payload.target_description.strip(),

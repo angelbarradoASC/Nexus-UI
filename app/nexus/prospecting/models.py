@@ -93,6 +93,8 @@ KNOWN_VERTICALS = {
     "public_administration",
     "restaurants",
     "salud",
+    "zapaterias",
+    "talleres",
 }
 
 
@@ -147,6 +149,8 @@ _VERTICAL_HINTS: dict[str, tuple[str, ...]] = {
     "inmobiliaria": ("inmobiliaria", "inmobiliarias", "inmob", "pisos", "alquiler", "vivienda"),
     "public_administration": ("ayuntamiento", "municipio", "administracion", "concejal"),
     "salud": ("clinic", "dentist", "odont", "salud", "medic"),
+    "zapaterias": ("zapater", "calzado", "zapato"),
+    "talleres": ("taller", "mecanico", "automocion", "neumatico", "coches", "chapa y pintura"),
 }
 
 
@@ -173,10 +177,14 @@ def normalize_vertical(vertical: str | None, *, fallback_text: str = "") -> str:
         canonical = _slug_to_canonical(fallback_slug)
         if canonical:
             return canonical
-    # Conserva el slug original solo si es significativo y no es ruido del prompt
-    if raw and raw != "custom":
-        return raw
-    return "custom"
+    # Lista cerrada: si no coincide con ningun vertical conocido ni sus
+    # sinonimos, NO se inventa uno nuevo (asi se generaban duplicados
+    # tipo "talleres" / "talleres_coches" para la misma idea de negocio,
+    # cada vez que un prompt distinto lo redactaba de forma distinta).
+    # target_description sigue guardando el texto libre igualmente — esto
+    # es solo la etiqueta de clasificacion, no afecta a que se busca.
+    # "otros" (no "custom") porque es el termino que ya usa el CRM real.
+    return "otros"
 
 
 def vertical_label(vertical: str) -> str:
@@ -186,7 +194,9 @@ def vertical_label(vertical: str) -> str:
         "public_administration": "Adm. publica",
         "restaurants": "Restaurantes",
         "salud": "Clinicas / Salud",
-        "custom": "Custom",
+        "zapaterias": "Zapaterias",
+        "talleres": "Talleres / Automocion",
+        "otros": "Otros",
     }
     if vertical in mapping:
         return mapping[vertical]

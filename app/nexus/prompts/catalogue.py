@@ -183,11 +183,11 @@ Ejemplo de entrada: "Quiero que me busques restaurantes de lujo en la zona de Sa
 Ejemplo de salida: {"vertical":"restaurants","target_description":"restaurantes de lujo","city":"Salamanca","province":"Salamanca","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":[],"dry_run":true,"min_employees":null,"max_employees":null,"industrial_zone":""}
 
 Ejemplo de entrada: "empresas en el poligono de Malpica en Zaragoza, de 30 a 50 empleados con correo electronico"
-Ejemplo de salida: {"vertical":"custom","target_description":"empresas en poligono industrial","city":"Malpica","province":"Zaragoza","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["email"],"dry_run":true,"min_employees":30,"max_employees":50,"industrial_zone":"Malpica"}
+Ejemplo de salida: {"vertical":"otros","target_description":"empresas en poligono industrial","city":"Malpica","province":"Zaragoza","region":"","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["email"],"dry_run":true,"min_employees":30,"max_employees":50,"industrial_zone":"Malpica"}
 
 Reglas:
 - PRIMERO: ignora los verbos de instruccion al inicio (quiero que, necesito que, busca, dame, encuentra, me puedes buscar, que me busques, etc.) — extrae solo el sintagma nominal que describe el tipo de negocio
-- vertical: "asesoria" para asesor/gestor/fiscal/laboral/contable; "salud" para clinica/dentista/odontologia/salud; "inmobiliaria" para pisos/alquiler/agencia/vivienda; "public_administration" para ayuntamiento/municipio; "restaurants" para restaurante/hosteleria/bar/cafeteria; si ninguno encaja, crea un sustantivo corto en snake_case
+- vertical: usa EXACTAMENTE uno de los slugs de la lista "VERTICALES EXISTENTES EN EL CRM" que se te da junto a este prompt (son los verticales reales que ya se usan, no una lista fija aqui). Elige el que mejor encaje semanticamente aunque el usuario lo redacte distinto. Si de verdad no encaja ninguno, usa "otros" — nunca inventes un slug nuevo.
 - target_description: el SINTAGMA NOMINAL que describe el tipo de negocio (ej. "restaurantes de lujo", "asesorias fiscales") — nunca una frase verbal
 - represented_by: "automato" si el texto menciona automato/Automato, si no "assets"
 - desired_count: extrae el numero si se menciona, si no 20
@@ -439,7 +439,7 @@ Reglas estrictas:
         default_text="""Eres un asistente de prospección B2B en español. Ayudas al usuario a especificar qué quiere buscar para lanzar una búsqueda automatizada.
 
 CAMPOS NECESARIOS:
-- vertical: "asesoria" (asesor/gestor/fiscal/laboral/contable), "salud" (clinica/dentista), "inmobiliaria" (pisos/agencia), "restaurants" (restaurante/hosteleria/bar), "public_administration" (ayuntamiento/municipio), o slug snake_case custom
+- vertical: usa EXACTAMENTE uno de los slugs de la lista "VERTICALES EXISTENTES EN EL CRM" que se te da junto a este prompt. Elige el que mejor encaje aunque el usuario lo redacte distinto. Si no encaja ninguno, usa "otros" — nunca inventes un slug nuevo.
 - city: ciudad concreta (OBLIGATORIO — pregunta esto primero si falta)
 - province: provincia (igual que city si no se menciona)
 - region: comunidad autónoma (puede quedar vacío)

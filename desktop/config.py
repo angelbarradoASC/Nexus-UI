@@ -43,7 +43,14 @@ class DesktopSettings:
 
     @property
     def logs_dir(self) -> Path:
-        return self.resolved_local_data_root / "logs"
+        # ProgramData, NO LOCALAPPDATA — Windows redirige en silencio los
+        # escritos a LOCALAPPDATA de builds de Python empaquetados por la
+        # Microsoft Store (App Execution Alias / virtualizacion UWP) a una
+        # carpeta virtual invisible para todo lo demas (Explorador, otros
+        # procesos). ProgramData no tiene esa virtualizacion. Confirmado
+        # empiricamente 2026-08-07: mismo codigo, LOCALAPPDATA invisible
+        # fuera del proceso, ProgramData visible en todos lados.
+        return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Open-Nexus" / "logs"
 
     @property
     def history_dir(self) -> Path:

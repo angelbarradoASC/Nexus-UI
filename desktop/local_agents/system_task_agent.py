@@ -225,11 +225,19 @@ class SystemTaskAgent:
             except json.JSONDecodeError:
                 args = {}
 
+            # El modelo a veces pide varias herramientas a la vez en un mismo turno.
+            # Solo actuamos sobre la primera, pero la API exige una respuesta "tool"
+            # por CADA tool_call_id del turno o el siguiente request devuelve 400.
             messages.append({
                 "role": "assistant",
                 "content": response.content or None,
-                "tool_calls": [call],
+                "tool_calls": response.tool_calls,
             })
+            for extra_call in response.tool_calls[1:]:
+                messages.append({
+                    "role": "tool", "tool_call_id": extra_call.get("id", ""),
+                    "content": "Ignorada — ya se proceso otra herramienta en este turno.",
+                })
 
             if name == "lookup_cmdb":
                 result_text = await self._lookup_cmdb(args.get("query", ""))
@@ -355,6 +363,12 @@ class SystemTaskAgent:
         if verify_output:
             content_parts.append(f"Verificacion: {verify_output}")
         error = None if success else ((result.stderr or "").strip() or f"El script devolvio codigo {result.returncode}.")
+
+        from utils.logger import hito
+        hito(
+            "pepo.system_task | tarea=\"{tarea}\" | modo={modo} | resultado={resultado}",
+            tarea=pending.task[:120], modo=pending.kind, resultado="OK" if success else f"FALLO: {error}",
+        )
 
         return {"task": pending.task, "is_done": success, "content": "\n".join(content_parts), "error": error}
 

@@ -143,26 +143,27 @@ class LLMRouter:
                 cost_per_1k_tokens=0.0, timeout=120,
             )
 
-        # L1 — OpenRouter/Venice (llama-3.3-70b)
+        # L1 — Groq (llama-3.1-8b-instant) — OpenRouter free (50/dia) se agoto
+        # probando esta noche; Groq da 1000-14400/dia gratis, sin tarjeta.
         if cfg.l1_url and cfg.l1_key:
             self._levels[1] = LLMLevel(
-                level=1, name="L1-OpenRouter-Venice",
+                level=1, name="L1-Groq-Llama8B",
                 url=cfg.l1_url, api_key=cfg.l1_key, model=cfg.l1_model,
                 cost_per_1k_tokens=0.0, timeout=30,
             )
 
-        # L2 — OpenRouter/Nvidia (nemotron-nano-9b)
+        # L2 — Groq (llama-3.3-70b-versatile)
         if cfg.llm_l2_url and cfg.llm_l2_key:
             self._levels[2] = LLMLevel(
-                level=2, name="L2-OpenRouter-Nvidia",
+                level=2, name="L2-Groq-Llama70B",
                 url=cfg.llm_l2_url, api_key=cfg.llm_l2_key, model=cfg.llm_l2_model,
                 cost_per_1k_tokens=0.0, timeout=30,
             )
 
-        # L3 — OpenRouter/Darkbloom (gpt-oss-20b)
+        # L3 — Groq (gpt-oss-120b)
         if cfg.llm_l3_url and cfg.llm_l3_key:
             self._levels[3] = LLMLevel(
-                level=3, name="L3-OpenRouter-Darkbloom",
+                level=3, name="L3-Groq-GptOss120B",
                 url=cfg.llm_l3_url, api_key=cfg.llm_l3_key, model=cfg.llm_l3_model,
                 cost_per_1k_tokens=0.0, timeout=30,
             )

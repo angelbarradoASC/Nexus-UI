@@ -8,6 +8,7 @@ from typing import Any
 from desktop.runtime.skill_router import DesktopSkillRouter, SkillResolution
 from nexus.api.schemas.chat import ChatRequest, ChatResponse
 from nexus.orchestration.coordinator import NexusCoordinator
+from utils.logger import hito
 
 
 @dataclass(slots=True)
@@ -117,6 +118,15 @@ class AssistantRuntimeCore:
             response,
             resolution=resolution,
             source_surface=request.source_surface,
+        )
+        hito(
+            "chat | surface={surface} | skill={skill} | status={status} | agente={agente} | pregunta=\"{pregunta}\" | respuesta=\"{respuesta}\"",
+            surface=request.source_surface,
+            skill=resolution.get("skill_id", "?"),
+            status=result.status,
+            agente=result.agent,
+            pregunta=request.message[:120],
+            respuesta=result.response[:160],
         )
         self._remember(context_key, request.message, result.response)
         return result

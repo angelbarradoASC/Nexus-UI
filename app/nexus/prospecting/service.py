@@ -116,8 +116,12 @@ class ProspectingAgentService:
     # ── Logging ──────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _log(run: dict[str, Any], message: str, level: str = "info", **extra: Any) -> None:
-        """Append a structured event to run['logs'] and emit to loguru."""
+    def _log(run: dict[str, Any], message: str, level: str = "info", *, hito: bool = False, **extra: Any) -> None:
+        """Append a structured event to run['logs'] and emit to loguru.
+
+        hito=True ademas manda el mensaje a hitos.log (arranque/fin de run,
+        no el ruido de cada query intermedia).
+        """
         event: dict[str, Any] = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "level": level,
@@ -126,8 +130,12 @@ class ProspectingAgentService:
         if extra:
             event["data"] = extra
         run.setdefault("logs", []).append(event)
+        full_message = f"[{run.get('run_id', '?')}] {message}" + (f" | {extra}" if extra else "")
+        if hito:
+            from utils.logger import hito as _hito
+            _hito(full_message)
         log_fn = getattr(_logger, level, _logger.info)
-        log_fn(f"[{run.get('run_id', '?')}] {message}" + (f" | {extra}" if extra else ""))
+        log_fn(full_message)
 
     async def run(self, payload: ProspectingRunRequest) -> dict[str, Any]:
         brief = self._normalize_brief(payload)
@@ -400,7 +408,7 @@ class ProspectingAgentService:
         try:
             run["status"] = "searching"
             geography = brief.geography_label or f"{brief.city} {brief.province}".strip()
-            self._log(run, "Run iniciado", vertical=brief.vertical, geography=geography, desired=brief.desired_count, dry_run=brief.dry_run)
+            self._log(run, "Run iniciado", hito=True, vertical=brief.vertical, geography=geography, desired=brief.desired_count, dry_run=brief.dry_run)
 
             source_plan = (run.get("orchestration") or {}).get("source_plan") or self._orchestrator.plan_sources(brief)
             self._log(run, "Plan de orquestacion resuelto", strategy=source_plan.get("strategy"), summary=source_plan.get("summary"))
@@ -684,7 +692,7 @@ class ProspectingAgentService:
                 },
             )
             run["status"] = "completed"
-            self._log(run, f"Run completado | útiles={run['summary']['usable_results']} | descartados={run['summary']['discarded']} | duplicados={run['summary']['duplicates']}")
+            self._log(run, f"Run completado | útiles={run['summary']['usable_results']} | descartados={run['summary']['discarded']} | duplicados={run['summary']['duplicates']}", hito=True)
         except Exception as exc:  # pragma: no cover - operational fallback
             run["status"] = "failed"
             run["error"] = str(exc)

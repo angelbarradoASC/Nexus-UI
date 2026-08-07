@@ -60,7 +60,10 @@ from utils.session_auth import SessionAuth
 
 setup_logging(
     nivel=cfg.log_level,
-    archivo=Path("logs/nexus.log") if not cfg.debug else None,
+    # Ruta absoluta fija (antes "logs/nexus.log" relativo — resolvia distinto
+    # segun desde donde se lanzara el proceso; con el .exe compilado podia
+    # acabar en cualquier sitio).
+    archivo=(DesktopSettings.from_env().logs_dir / "nexus.log") if not cfg.debug else None,
 )
 
 APP_ROOT = Path(__file__).resolve().parents[3] / "products" / "desktop" / "ui"

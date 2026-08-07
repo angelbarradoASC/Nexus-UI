@@ -451,17 +451,21 @@ CAMPOS NECESARIOS:
 - dry_run: true por defecto; false solo si el usuario dice explícitamente "real" o "lanzar de verdad"
 
 REGLAS:
-1. Si no tienes city, PREGÚNTALA primero. Es el campo más crítico.
-2. Haz solo UNA pregunta a la vez.
-3. Cuando tengas city y vertical, ya puedes confirmar con status=ready.
-4. Sé natural y directo. Sin listas en el reply.
-5. SIEMPRE responde con JSON válido, sin texto fuera del JSON.
+1. El UNICO campo que de verdad bloquea el lanzamiento es city. Si falta, usa ask_user — es la unica pregunta que tiene sentido hacer primero.
+2. Si el usuario menciona un pueblo, pedania o ciudad pequeña y NO estas 100% seguro de su provincia/comunidad autonoma real, llama a lookup_geography ANTES de responder — no inventes ni supongas la provincia de memoria. Para ciudades grandes y muy conocidas (Madrid, Barcelona, Zaragoza capital...) no hace falta.
+3. En cuanto tengas city Y vertical (aunque sea lo unico que ha dicho el usuario) y la geografia este resuelta, llama a finish_brief. NO seguir preguntando.
+4. TODO lo demas (target_description, must_have, desired_count, minimum_score...) son RELLENOS CON VALOR POR DEFECTO, nunca motivo para preguntar: si el usuario no especifico un subtipo, un requisito o una cantidad, usa el default y sigue. Preguntar por matices opcionales ("que tipo de clinica", "que buscas exactamente", "cuantos quieres") esta PROHIBIDO si ya hay city+vertical — el usuario ya dijo todo lo que le importaba, no lo interrogues.
+5. Como mucho UNA pregunta con ask_user, y solo si de verdad falta la ciudad.
+6. Sé natural y directo en el reply. Sin listas.
 
-RESPUESTA cuando necesitas más información:
-{"status": "clarifying", "reply": "Pregunta natural y breve."}
+Ejemplo — pueblo pequeño, hay que comprobar la provincia real:
+Usuario: "Quiero encontrar clinicas dentales en villamayor de gallego en zaragoza"
+-> llamas a lookup_geography(place="Villamayor de Gallego") -> te devuelve provincia=Zaragoza, region=Aragon
+-> llamas a finish_brief(reply="Voy a buscar clinicas dentales en Villamayor de Gallego, Zaragoza.", vertical="salud", city="Villamayor de Gallego", province="Zaragoza", region="Aragon", target_description="clinicas dentales", desired_count=20, minimum_score=40, represented_by="assets", must_have=[])
 
-RESPUESTA cuando tienes lo suficiente para lanzar:
-{"status": "ready", "reply": "Resumen breve de lo que vas a buscar.", "brief": {"vertical":"asesoria","city":"Toledo","province":"Toledo","region":"","target_description":"asesorias fiscales con email","desired_count":20,"minimum_score":40,"represented_by":"assets","must_have":["Email directo"],"dry_run":true}}""",
+Ejemplo — falta la ciudad, esa SI se pregunta:
+Usuario: "busca asesorias fiscales"
+-> llamas a ask_user(question="¿En que ciudad busco las asesorias fiscales?")""",
     ),
     "pepo.teams_holding_reply": PromptDefinition(
         key="pepo.teams_holding_reply",

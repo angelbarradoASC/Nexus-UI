@@ -301,32 +301,157 @@ async def interpret_brief(
 
 
 
+_PROSPECTING_CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_geography",
+            "description": (
+                "Resuelve un topónimo real (ciudad, pueblo, pedanía) a su provincia y comunidad "
+                "autónoma reales usando datos geográficos, no memoria. Úsalo SIEMPRE que el usuario "
+                "mencione un lugar del que no estés 100% seguro de su provincia — especialmente "
+                "pueblos pequeños o pedanías. No inventes la provincia sin comprobarla."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"place": {"type": "string"}},
+                "required": ["place"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "Pregunta al usuario UN dato imprescindible que de verdad falta (normalmente solo la ciudad).",
+            "parameters": {
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finish_brief",
+            "description": "Entrega el brief final de prospección, con la geografía ya resuelta (llama a lookup_geography antes si hacía falta).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reply": {"type": "string", "description": "Resumen breve y natural de lo que se va a buscar."},
+                    "vertical": {"type": "string"},
+                    "city": {"type": "string"},
+                    "province": {"type": "string"},
+                    "region": {"type": "string"},
+                    "target_description": {"type": "string"},
+                    "desired_count": {"type": "integer"},
+                    "minimum_score": {"type": "integer"},
+                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
+                    "must_have": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["reply", "vertical", "city"],
+            },
+        },
+    },
+]
+
+_PROSPECTING_CHAT_MAX_STEPS = 4
+
+
+async def _run_prospecting_chat_loop(history: list[dict]) -> dict | None:
+    """Bucle con tool calling: resuelve geografia real antes de dar el brief por bueno.
+
+    Mismo mecanismo que el bucle generico de PEPO (system_task_agent) — el LLM
+    decide que herramienta llamar, lookup_geography se ejecuta sin confirmacion
+    (lectura, sin efectos), y el bucle continua hasta ask_user o finish_brief.
+    """
+    llm = get_router()
+    messages = [{"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat")}, *history]
+
+    for _ in range(_PROSPECTING_CHAT_MAX_STEPS):
+        try:
+            response = await asyncio.wait_for(
+                llm.call(
+                    messages=messages,
+                    tools=_PROSPECTING_CHAT_TOOLS,
+                    tool_choice="auto",
+                    preferred_level=1,
+                    temperature=0.2,
+                    max_tokens=700,
+                    timeout=8.0,
+                ),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("prospecting/chat | llm timeout")
+            return None
+
+        if response.error:
+            return None
+
+        if not response.tool_calls:
+            return None
+
+        call = response.tool_calls[0]
+        fn = call.get("function", {})
+        name = fn.get("name", "")
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            args = {}
+
+        # El modelo a veces pide varias herramientas a la vez en un mismo turno.
+        # Solo actuamos sobre la primera, pero la API exige una respuesta "tool"
+        # por CADA tool_call_id del turno — si falta alguna, el siguiente request
+        # devuelve 400 (mensajes invalidos). Se registran las demas como ignoradas.
+        messages.append({"role": "assistant", "content": response.content or None, "tool_calls": response.tool_calls})
+        for extra_call in response.tool_calls[1:]:
+            messages.append({
+                "role": "tool", "tool_call_id": extra_call.get("id", ""),
+                "content": "Ignorada — ya se proceso otra herramienta en este turno.",
+            })
+
+        if name == "lookup_geography":
+            from nexus.utils.geocoding import geocode_place
+
+            place_queried = args.get("place", "")
+            geo = await geocode_place(place_queried)
+            if not geo:
+                # No confiamos en que el modelo redacte bien la pregunta de fallo — el
+                # nombre exacto que fallo ya lo tenemos en codigo, lo devolvemos
+                # deterministicamente en vez de esperar a que el LLM lo mencione.
+                return {
+                    "status": "clarifying",
+                    "reply": f"No encuentro '{place_queried}' en el mapa — ¿lo has escrito bien? Dime la ciudad o pueblo exacto.",
+                    "brief": None,
+                }
+            result_text = f"provincia={geo['province']}, region={geo['region']}, ciudad={geo['city']}"
+            messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
+            continue
+
+        if name == "ask_user":
+            return {"status": "clarifying", "reply": args.get("question", "¿Puedes darme mas detalles?"), "brief": None}
+
+        if name == "finish_brief":
+            brief = {k: v for k, v in args.items() if k != "reply"}
+            return {"status": "ready", "reply": args.get("reply", ""), "brief": brief}
+
+        return None
+
+    return None
+
+
 @router.post("/prospecting/chat")
 async def prospecting_chat(
     payload: ProspectingChatRequest,
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> dict:
-    """Motor conversacional: extrae intención, aclara dudas y valida empíricamente antes de confirmar."""
+    """Motor conversacional: extrae intención, resuelve geografía real y valida empíricamente antes de confirmar."""
     history = [{"role": m.role, "content": m.content} for m in payload.history]
     history.append({"role": "user", "content": payload.message})
 
-    llm = get_router()
-    parsed = None
-    try:
-        response = await asyncio.wait_for(
-            llm.call(
-                messages=[{"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat")}, *history],
-                preferred_level=1,
-                temperature=0.2,
-                max_tokens=700,
-                timeout=8.0,
-            ),
-            timeout=20.0,
-        )
-        if not response.error:
-            parsed = parse_llm_json(response.content or "")
-    except asyncio.TimeoutError:
-        logger.warning("prospecting/chat | llm timeout")
+    parsed = await _run_prospecting_chat_loop(history)
 
     if not parsed:
         # Fallback heurístico — combina todos los mensajes del usuario e intenta extraer parámetros
@@ -381,6 +506,15 @@ async def prospecting_chat(
         brief.setdefault("represented_by", "assets")
         brief.setdefault("must_have", [])
         brief.setdefault("dry_run", True)
+
+    from utils.logger import hito
+    if status == "ready" and brief:
+        hito(
+            "sales.chat | pregunta=\"{pregunta}\" | ready | {vertical} en {city}, {province}",
+            pregunta=payload.message[:120], vertical=brief.get("vertical"), city=brief.get("city"), province=brief.get("province"),
+        )
+    else:
+        hito("sales.chat | pregunta=\"{pregunta}\" | clarifying | \"{reply}\"", pregunta=payload.message[:120], reply=reply[:120])
 
     return {"status": status, "reply": reply, "brief": brief}
 

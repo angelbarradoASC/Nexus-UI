@@ -609,7 +609,19 @@ async function sendChatMessage() {
             renderInterpretation(brief);
             if (btn) { btn.textContent = "Interpretar con IA"; btn.classList.remove("btn-secondary"); }
             if (textarea) textarea.placeholder = "Ej: busca asesorias fiscales en Toledo, unas 20, para Automato";
-            if (statusEl) { statusEl.textContent = "Listo — revisa y lanza"; statusEl.className = "interpret-status ok"; }
+            if (statusEl) { statusEl.textContent = "Buscando..."; statusEl.className = "interpret-status loading"; }
+            // Mismo comportamiento que PEPO en el chat general (coordinator.py
+            // _handle_sales_prospecting_chat): decompone Y lanza, sin esperar un
+            // segundo clic — dry_run=false, igual que hace PEPO explicitamente.
+            const dryRunEl = document.getElementById("prospectingDryRun");
+            if (dryRunEl) dryRunEl.checked = false;
+            await runProspecting();
+            if (statusEl) { statusEl.textContent = "Listo"; statusEl.className = "interpret-status ok"; }
+            // Busqueda lanzada = conversacion terminada. Sin esto, el historial se
+            // acumula para siempre y la siguiente busqueda (aunque no tenga nada
+            // que ver) se interpreta mezclada con el texto de esta.
+            _chatHistory = [];
+            document.getElementById("chatResetBtn")?.classList.add("hidden-btn");
         } else {
             _chatActive = true;
             if (btn) { btn.textContent = "Responder"; btn.classList.add("btn-secondary"); }

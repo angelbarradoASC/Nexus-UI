@@ -24,7 +24,11 @@ from nexus.api.schemas.prospecting import (
 )
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting import ProspectingAgentService
-from nexus.prospecting.models import normalize_vertical
+from nexus.prospecting.sales_verticals import (
+    DuplicateVerticalError,
+    ProtectedVerticalError,
+    VerticalNotFoundError,
+)
 from nexus.utils.llm_json import parse_llm_json
 from nexus.utils.text import normalize_text
 
@@ -54,7 +58,11 @@ _INTERPRET_BRIEF_TOOL = [
                 "properties": {
                     "vertical": {
                         "type": "string",
-                        "description": "asesoria | salud | inmobiliaria | public_administration | restaurants | un snake_case corto si no encaja ninguno",
+                        "description": (
+                            "Usa EXACTAMENTE uno de los slugs listados en 'VERTICALES DISPONIBLES' "
+                            "del contexto de este mensaje. Nunca inventes un slug nuevo — si ninguno "
+                            "encaja de verdad, usa 'custom'."
+                        ),
                     },
                     "target_description": {
                         "type": "string",
@@ -77,6 +85,14 @@ _INTERPRET_BRIEF_TOOL = [
                         "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
                     },
                     "region": {"type": "string"},
+                    "radius_km": {
+                        "type": "integer",
+                        "description": (
+                            "SOLO si el usuario menciona explicitamente un radio o distancia "
+                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
+                            "entre 1 y 250. Si no lo menciona, omite este campo."
+                        ),
+                    },
                     "desired_count": {"type": "integer"},
                     "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
                     "must_have": {"type": "array", "items": {"type": "string"}},
@@ -102,22 +118,13 @@ class ProspectingChatRequest(BaseModel):
     history: list[ChatMessage] = []
 
 
-def _fallback_parse(text: str) -> dict:
+def _fallback_parse(text: str, verticals) -> dict:
     """Reglas heurísticas si el LLM no devuelve JSON válido."""
     t = normalize_text(text)
 
-    if any(w in t for w in ("asesor", "gestor", "fiscal", "laboral", "contable")):
-        vertical = "asesoria"
-    elif any(w in t for w in ("clinica", "dentista", "odont", "odontologia", "salud")):
-        vertical = "salud"
-    elif any(w in t for w in ("inmobiliaria", "agencia inmob", "pisos", "alquiler", "vivienda")):
-        vertical = "inmobiliaria"
-    elif any(w in t for w in ("ayuntamiento", "municipio", "administracion", "concejal")):
-        vertical = "public_administration"
-    elif any(w in t for w in ("restaurante", "hosteleria", "bar ", "cafeteria")):
-        vertical = "restaurants"
-    else:
-        vertical = normalize_vertical("custom", fallback_text=text)
+    # Resuelve el vertical contra nombre+aliases de las verticales ACTIVAS en
+    # BBDD — nunca un catalogo hardcodeado. Cae a 'custom' si nada encaja.
+    vertical = verticals.resolve(fallback_text=text).slug
 
     represented_by = "automato" if "automato" in t else "assets"
 
@@ -139,6 +146,12 @@ def _fallback_parse(text: str) -> dict:
         single_emp = re.search(r"(\d+)\s+empleados?", t)
         if single_emp:
             max_employees = int(single_emp.group(1))
+
+    # Radio: "en un radio de 20km", "a menos de 15 km", "20km a la redonda"
+    radius_match = re.search(r"radio\s+de\s+(\d+)\s*km|(?:a\s+)?(\d+)\s*km(?:\s+a\s+la\s+redonda)?", t)
+    radius_km: int | None = None
+    if radius_match:
+        radius_km = int(radius_match.group(1) or radius_match.group(2))
 
     # Zona industrial: "polígono de Malpica", "polígono Malpica", "pol. industrial Malpica"
     poligono_match = re.search(
@@ -208,6 +221,7 @@ def _fallback_parse(text: str) -> dict:
         "min_employees": min_employees,
         "max_employees": max_employees,
         "industrial_zone": industrial_zone,
+        "radius_km": radius_km,
         "target_description": text[:120],
         "_fallback": True,
     }
@@ -224,22 +238,23 @@ async def get_skill_source() -> dict:
     }
 
 
-async def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
-    """Bloque de contexto con las verticales REALES del CRM ahora mismo — nunca
-    una lista fija en el prompt, para no volver a generar duplicados tipo
-    "talleres"/"talleres_coches" para la misma idea de negocio.
+def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
+    """Bloque de contexto con las verticales ACTIVAS configuradas en BBDD — nunca
+    una lista fija en el prompt. sales_verticals es la unica fuente de verdad
+    para clasificar (antes se consultaba el CRM en vivo; ahora el CRM se
+    alimenta de aqui, no al reves).
     """
-    verticals = await prospecting.list_crm_verticals()
-    if not verticals:
-        return (
-            "VERTICALES EXISTENTES EN EL CRM: no se pudo consultar el CRM ahora mismo. "
-            "No inventes un vertical — usa 'otros'."
-        )
-    lines = "\n".join(f"- {v['slug']} ({v['count']} empresas)" for v in verticals)
+    active = prospecting.verticals.list_active()
+    if not active:
+        return "VERTICALES DISPONIBLES: ninguna configurada. Usa 'custom'."
+    lines = "\n".join(
+        f"- {v.slug} ({v.nombre})" + (f" — alias: {', '.join(v.aliases)}" if v.aliases else "")
+        for v in active
+    )
     return (
-        "VERTICALES EXISTENTES EN EL CRM (elige EXACTAMENTE uno de estos si alguno encaja "
+        "VERTICALES DISPONIBLES (elige EXACTAMENTE uno de estos slugs si alguno encaja "
         "semanticamente, aunque el usuario lo redacte distinto — NUNCA inventes un slug nuevo; "
-        "usa 'otros' solo si de verdad no encaja ninguno):\n" + lines
+        "usa 'custom' solo si de verdad no encaja ninguno):\n" + lines
     )
 
 
@@ -253,7 +268,7 @@ async def interpret_brief(
         raise HTTPException(status_code=400, detail="text is required")
 
     llm = get_router()
-    verticals_block = await _verticals_context_block(prospecting)
+    verticals_block = _verticals_context_block(prospecting)
     response = None
     try:
         response = await asyncio.wait_for(
@@ -286,13 +301,13 @@ async def interpret_brief(
             brief = None
 
     # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura.
-    # SOLO en este caso degradado se normaliza el vertical contra la lista de
-    # emergencia — si el LLM SI respondio, ya eligio de la lista real del CRM
-    # (inyectada en el prompt) y no hay que revalidarlo contra nada fijo.
     if brief is None:
-        brief = _fallback_parse(payload.text)
-        from nexus.prospecting.models import normalize_vertical
-        brief["vertical"] = normalize_vertical(brief.get("vertical", ""), fallback_text=payload.text)
+        brief = _fallback_parse(payload.text, prospecting.verticals)
+    # Puerta unica: aunque el LLM SI haya respondido, su slug se resuelve contra
+    # BBDD igualmente — asi nunca puede colar un vertical inventado que no
+    # exista en sales_verticals (resolve() respeta el slug tal cual si ya es
+    # exacto, asi que esto no cambia nada cuando el LLM elige bien).
+    brief["vertical"] = prospecting.verticals.resolve(brief.get("vertical", ""), fallback_text=payload.text).slug
     brief["vertical_created"] = False
     # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
     if "location" in brief and not brief.get("city"):
@@ -367,6 +382,14 @@ _PROSPECTING_CHAT_TOOLS = [
                     "province": {"type": "string"},
                     "region": {"type": "string"},
                     "target_description": {"type": "string"},
+                    "radius_km": {
+                        "type": "integer",
+                        "description": (
+                            "SOLO si el usuario menciona explicitamente un radio o distancia "
+                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
+                            "entre 1 y 250. Si no lo menciona, omite este campo."
+                        ),
+                    },
                     "desired_count": {"type": "integer"},
                     "minimum_score": {"type": "integer"},
                     "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
@@ -389,7 +412,7 @@ async def _run_prospecting_chat_loop(history: list[dict], prospecting: Prospecti
     (lectura, sin efectos), y el bucle continua hasta ask_user o finish_brief.
     """
     llm = get_router()
-    verticals_block = await _verticals_context_block(prospecting)
+    verticals_block = _verticals_context_block(prospecting)
     messages = [
         {"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat") + "\n\n" + verticals_block},
         *history,
@@ -484,7 +507,7 @@ async def prospecting_chat(
         all_user_text = " ".join(
             m["content"] for m in history if m["role"] == "user"
         )
-        fb = _fallback_parse(all_user_text)
+        fb = _fallback_parse(all_user_text, prospecting.verticals)
         if fb.get("city"):
             # Sanear artefactos del parser heurístico
             fb["province"] = fb["city"]
@@ -673,3 +696,116 @@ async def decompose_search(payload: DecomposeRequest) -> dict:
     agent = SearchDecomposerAgent()
     result = await agent.decompose(payload.text, requested_by=payload.requested_by)
     return {"status": "ok", **result}
+
+
+# ── Verticales comerciales (CRUD) ─────────────────────────────────────────────
+# Fuente de verdad para clasificacion/scoring/discovery — ver
+# nexus/prospecting/sales_verticals.py. Efecto inmediato: no hay cache, cada
+# lectura va a BBDD, asi que una vertical creada aqui esta disponible en la
+# siguiente peticion sin reiniciar Nexus.
+
+
+class SalesVerticalBody(BaseModel):
+    slug: str = ""
+    nombre: str
+    aliases: list[str] = []
+    scoring_rules: dict = {}
+    discovery_config: dict = {}
+    crm_tags: list[str] = []
+    crm_sector: str = "otros"
+    activo: bool = True
+
+
+class SalesVerticalUpdateBody(BaseModel):
+    nombre: str | None = None
+    aliases: list[str] | None = None
+    scoring_rules: dict | None = None
+    discovery_config: dict | None = None
+    crm_tags: list[str] | None = None
+    crm_sector: str | None = None
+
+
+@router.get("/prospecting/verticals")
+async def list_sales_verticals(
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    return {"verticals": [v.to_dict() for v in prospecting.verticals.list_all()]}
+
+
+@router.post("/prospecting/verticals")
+async def create_sales_vertical(
+    payload: SalesVerticalBody,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    try:
+        vertical = prospecting.verticals.create(
+            slug=payload.slug or payload.nombre,
+            nombre=payload.nombre,
+            aliases=payload.aliases,
+            scoring_rules=payload.scoring_rules,
+            discovery_config=payload.discovery_config,
+            crm_tags=payload.crm_tags,
+            crm_sector=payload.crm_sector,
+            activo=payload.activo,
+        )
+    except DuplicateVerticalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return vertical.to_dict()
+
+
+@router.put("/prospecting/verticals/{slug}")
+async def update_sales_vertical(
+    slug: str,
+    payload: SalesVerticalUpdateBody,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    try:
+        vertical = prospecting.verticals.update(
+            slug,
+            nombre=payload.nombre,
+            aliases=payload.aliases,
+            scoring_rules=payload.scoring_rules,
+            discovery_config=payload.discovery_config,
+            crm_tags=payload.crm_tags,
+            crm_sector=payload.crm_sector,
+        )
+    except VerticalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DuplicateVerticalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return vertical.to_dict()
+
+
+class SalesVerticalActiveBody(BaseModel):
+    activo: bool
+
+
+@router.put("/prospecting/verticals/{slug}/activo")
+async def set_sales_vertical_active(
+    slug: str,
+    payload: SalesVerticalActiveBody,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    try:
+        vertical = prospecting.verticals.set_active(slug, payload.activo)
+    except VerticalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProtectedVerticalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return vertical.to_dict()
+
+
+@router.delete("/prospecting/verticals/{slug}")
+async def delete_sales_vertical(
+    slug: str,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    try:
+        prospecting.verticals.delete(slug)
+    except VerticalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProtectedVerticalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "deleted", "slug": slug}

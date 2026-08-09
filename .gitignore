@@ -13,6 +13,10 @@ coverage.xml
 venv/
 env/
 
+# Binarios de terceros descargados en local (no son codigo fuente propio ni
+# submodulo — cada plataforma/despliegue descarga el suyo, ver extractors.py)
+vendor/obscura/
+
 # Local environment
 .env
 .env.*

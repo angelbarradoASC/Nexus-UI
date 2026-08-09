@@ -51,6 +51,26 @@ function ensureSelectOption(selectId, value, label = null) {
     el.value = value;
 }
 
+// Carga las verticales activas desde BBDD (sales_verticals) — una vertical
+// creada desde Configuracion aparece aqui sin tocar codigo ni reiniciar Nexus.
+async function loadVerticalOptions() {
+    const select = document.getElementById("prospectingVertical");
+    if (!select) return;
+    try {
+        const payload = await requestJson("/api/nexus/prospecting/verticals");
+        const active = (payload.verticals || []).filter((item) => item.activo);
+        if (!active.length) return;
+        const previous = select.value;
+        select.innerHTML = active.map((item) => `<option value="${item.slug}">${item.nombre}</option>`).join("");
+        if (active.some((item) => item.slug === previous)) {
+            select.value = previous;
+        }
+    } catch (error) {
+        // Si falla, se conserva el <option> estatico del HTML como fallback.
+        console.warn("No se pudieron cargar las verticales desde BBDD", error);
+    }
+}
+
 // ── Sugerencias de chips por vertical ────────────────────────────────────────
 
 const MUST_HAVE_SUGGESTIONS = {
@@ -714,7 +734,7 @@ async function runProspecting(event) {
         exclude:             splitCsvList(document.getElementById("prospectingExclude")?.value || ""),
         crm_tags:            getSelectedChips("crmTagsChips"),
         dry_run:             document.getElementById("prospectingDryRun")?.checked !== false,
-        async_mode:          false,
+        async_mode:          true,
         represented_by:      document.getElementById("prospectingRepresentedBy")?.value || "assets",
     };
     const message = document.getElementById("prospectingResultMessage");
@@ -744,28 +764,50 @@ async function runProspecting(event) {
     if (btn) { btn.disabled = true; btn.textContent = "Prospectando..."; }
     if (message) { message.textContent = "Buscando empresas..."; message.classList.remove("run-error"); }
 
-    // Contador de tiempo visible mientras el run corre (el endpoint es síncrono)
-    let elapsed = 0;
-    const ticker = setInterval(() => {
-        elapsed++;
-        if (message) message.textContent = `Buscando empresas... ${elapsed}s`;
-    }, 1000);
-
     try {
+        // Lanzamiento asincrono: el POST vuelve al instante (run corriendo en
+        // segundo plano) y la UI hace polling hasta que termina. Antes el POST
+        // bloqueaba hasta 10 minutos esperando la respuesta — cualquier corte de
+        // conexion en ese rato dejaba la pantalla en "0 resultados" aunque el
+        // run hubiera terminado bien en el backend.
         const response = await requestJson("/api/nexus/prospecting/run", {
             method: "POST",
             body: JSON.stringify(payload),
         });
-        clearInterval(ticker);
         _saveRunId(response.run_id);
-        await loadProspecting(response.run_id);
+        await pollProspectingRun(response.run_id);
         await checkApiBudget();
     } catch (error) {
-        clearInterval(ticker);
         _setBadge("error", "down");
         _showError(message, `Error al prospectar: ${error.message}`);
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = "Lanzar prospeccion"; }
+    }
+}
+
+const _PROSPECTING_TERMINAL_STATUSES = new Set(["completed", "failed", "budget_exceeded", "timeout"]);
+const _PROSPECTING_POLL_INTERVAL_MS = 3000;
+const _PROSPECTING_POLL_MAX_MINUTES = 15;
+
+async function pollProspectingRun(runId) {
+    const message = document.getElementById("prospectingResultMessage");
+    const startedAt = Date.now();
+    for (;;) {
+        const run = await requestJson(`/api/nexus/prospecting/runs/${encodeURIComponent(runId)}`);
+        renderProspectingSummary(run);
+        renderProspectingResults(run.results || []);
+        renderDiscardedResults(run.discarded || []);
+        if (_PROSPECTING_TERMINAL_STATUSES.has(run.status)) {
+            await loadProspecting(runId);
+            return run;
+        }
+        const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+        if (message) message.textContent = `Buscando empresas... ${elapsedSeconds}s (${run.status || "en curso"})`;
+        if (Date.now() - startedAt > _PROSPECTING_POLL_MAX_MINUTES * 60 * 1000) {
+            if (message) message.textContent = `Sigue corriendo en segundo plano (>${_PROSPECTING_POLL_MAX_MINUTES} min) — vuelve a abrir este run mas tarde para ver el resultado final.`;
+            return run;
+        }
+        await new Promise((resolve) => setTimeout(resolve, _PROSPECTING_POLL_INTERVAL_MS));
     }
 }
 
@@ -780,7 +822,7 @@ async function resumeProspecting() {
             method: "POST",
         });
         _saveRunId(response.run_id);
-        await loadProspecting(response.run_id);
+        await pollProspectingRun(response.run_id);
     } catch (error) {
         if (message) message.textContent = `No se pudo reanudar el run: ${error.message}`;
     }
@@ -1103,5 +1145,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         loadProspecting(),
         checkApiBudget(),
         loadAutomations(),
+        loadVerticalOptions(),
     ]);
 });

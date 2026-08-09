@@ -51,6 +51,7 @@ function esc(value) {
 const settingsState = {
     prompts: [],
     integrations: [],
+    verticals: [],
 };
 
 const SUPPORTED_INTEGRATION_KINDS = ["prometheus", "alertmanager", "grafana"];
@@ -502,6 +503,187 @@ async function saveSalesConfig() {
     await loadSalesConfig();
 }
 
+// ── Verticales comerciales (CRUD contra sales_verticals) ─────────────────────
+
+function slugifyVerticalName(value) {
+    return String(value || "")
+        .normalize("NFKD").replace(/[̀-ͯ]/g, "")
+        .toLowerCase().trim()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+}
+
+function resetVerticalForm() {
+    document.getElementById("verticalFormTitle").textContent = "Nueva vertical";
+    document.getElementById("verticalOriginalSlug").value = "";
+    document.getElementById("verticalNombre").value = "";
+    document.getElementById("verticalSlug").value = "";
+    document.getElementById("verticalAliases").value = "";
+    document.getElementById("verticalCrmSector").value = "otros";
+    document.getElementById("verticalCrmTags").value = "";
+    document.getElementById("verticalActivo").checked = true;
+    document.getElementById("verticalScoringRules").value = "";
+    document.getElementById("verticalDiscoveryConfig").value = "";
+    document.getElementById("verticalSlug").disabled = false;
+    document.getElementById("verticalActivo").disabled = false;
+}
+
+function fillVerticalForm(item) {
+    document.getElementById("verticalFormTitle").textContent = `Editar ${item.nombre}`;
+    document.getElementById("verticalOriginalSlug").value = item.slug;
+    document.getElementById("verticalNombre").value = item.nombre || "";
+    document.getElementById("verticalSlug").value = item.slug || "";
+    document.getElementById("verticalAliases").value = (item.aliases || []).join(", ");
+    document.getElementById("verticalCrmSector").value = item.crm_sector || "otros";
+    document.getElementById("verticalCrmTags").value = (item.crm_tags || []).join(", ");
+    document.getElementById("verticalActivo").checked = Boolean(item.activo);
+    document.getElementById("verticalScoringRules").value = Object.keys(item.scoring_rules || {}).length
+        ? JSON.stringify(item.scoring_rules, null, 2) : "";
+    document.getElementById("verticalDiscoveryConfig").value = Object.keys(item.discovery_config || {}).length
+        ? JSON.stringify(item.discovery_config, null, 2) : "";
+    // El slug es la clave primaria — no se renombra tras creado (evita romper
+    // referencias en runs/leads ya guardados con ese slug). El estado activo/
+    // inactivo se cambia con el boton de la lista, no desde este formulario.
+    document.getElementById("verticalSlug").disabled = true;
+    document.getElementById("verticalActivo").disabled = true;
+}
+
+function parseCommaList(value) {
+    return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function parseJsonFieldOrEmpty(elementId) {
+    const raw = document.getElementById(elementId).value.trim();
+    if (!raw) { return {}; }
+    return JSON.parse(raw);
+}
+
+function renderVerticals() {
+    const container = document.getElementById("verticalGroups");
+    if (!settingsState.verticals.length) {
+        container.innerHTML = '<div class="empty-state-sm">No hay verticales todavia.</div>';
+        return;
+    }
+    container.innerHTML = settingsState.verticals.map((item) => `
+        <article class="integration-card">
+            <div class="integration-card-head">
+                <div>
+                    <div class="integration-title">${esc(item.nombre)}</div>
+                    <div class="integration-meta">${esc(item.slug)}${item.aliases.length ? " · alias: " + esc(item.aliases.join(", ")) : ""}</div>
+                </div>
+                <div class="integration-card-actions">
+                    ${item.is_fallback ? '<span class="default-pill">fallback</span>' : ""}
+                    ${!item.activo ? '<span class="disabled-pill">inactiva</span>' : ""}
+                    <button type="button" data-edit-vertical="${esc(item.slug)}">Editar</button>
+                    ${item.is_fallback ? "" : `<button type="button" data-toggle-vertical="${esc(item.slug)}">${item.activo ? "Desactivar" : "Activar"}</button>`}
+                </div>
+            </div>
+        </article>
+    `).join("");
+
+    container.querySelectorAll("[data-edit-vertical]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const item = settingsState.verticals.find((entry) => entry.slug === button.dataset.editVertical);
+            if (item) { fillVerticalForm(item); }
+        });
+    });
+    container.querySelectorAll("[data-toggle-vertical]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const item = settingsState.verticals.find((entry) => entry.slug === button.dataset.toggleVertical);
+            if (item) {
+                toggleVerticalActive(item).catch((error) => {
+                    document.getElementById("verticalFormResult").innerHTML = `<p>${esc(error.message)}</p>`;
+                });
+            }
+        });
+    });
+}
+
+async function loadVerticals() {
+    const payload = await api.get("/api/nexus/prospecting/verticals");
+    settingsState.verticals = payload.verticals || [];
+    renderVerticals();
+    const el = document.getElementById("verticalsStatus");
+    if (el) {
+        const active = settingsState.verticals.filter((item) => item.activo).length;
+        el.textContent = `${settingsState.verticals.length} vertical(es) · ${active} activa(s)`;
+        el.className = "info-badge";
+    }
+}
+
+async function saveVertical(event) {
+    event.preventDefault();
+    const result = document.getElementById("verticalFormResult");
+    const originalSlug = document.getElementById("verticalOriginalSlug").value.trim();
+    const nombre = document.getElementById("verticalNombre").value.trim();
+    if (!nombre) {
+        result.innerHTML = "<p>El nombre es obligatorio.</p>";
+        return;
+    }
+
+    let scoringRules;
+    let discoveryConfig;
+    try {
+        scoringRules = parseJsonFieldOrEmpty("verticalScoringRules");
+        discoveryConfig = parseJsonFieldOrEmpty("verticalDiscoveryConfig");
+    } catch (error) {
+        result.innerHTML = `<p>JSON invalido en señales de scoring o config de discovery: ${esc(error.message)}</p>`;
+        return;
+    }
+
+    const body = {
+        nombre,
+        aliases: parseCommaList(document.getElementById("verticalAliases").value),
+        crm_sector: document.getElementById("verticalCrmSector").value.trim() || "otros",
+        crm_tags: parseCommaList(document.getElementById("verticalCrmTags").value),
+        scoring_rules: scoringRules,
+        discovery_config: discoveryConfig,
+    };
+
+    try {
+        if (originalSlug) {
+            await api.put(`/api/nexus/prospecting/verticals/${encodeURIComponent(originalSlug)}`, body);
+            result.innerHTML = `<p>Vertical <strong>${esc(nombre)}</strong> actualizada.</p>`;
+        } else {
+            body.slug = document.getElementById("verticalSlug").value.trim() || slugifyVerticalName(nombre);
+            body.activo = document.getElementById("verticalActivo").checked;
+            await api.post("/api/nexus/prospecting/verticals", body);
+            result.innerHTML = `<p>Vertical <strong>${esc(nombre)}</strong> creada — ya disponible sin reiniciar Nexus.</p>`;
+        }
+    } catch (error) {
+        result.innerHTML = `<p>${esc(error.message)}</p>`;
+        return;
+    }
+    resetVerticalForm();
+    await loadVerticals();
+}
+
+async function toggleVerticalActive(item) {
+    await api.put(`/api/nexus/prospecting/verticals/${encodeURIComponent(item.slug)}/activo`, { activo: !item.activo });
+    await loadVerticals();
+}
+
+async function deleteVertical() {
+    const slug = document.getElementById("verticalOriginalSlug").value.trim();
+    const result = document.getElementById("verticalFormResult");
+    if (!slug) {
+        result.innerHTML = "<p>Selecciona una vertical existente para eliminarla.</p>";
+        return;
+    }
+    if (!window.confirm(`Vas a eliminar la vertical "${slug}". Los leads ya prospectados con ese slug no se ven afectados.`)) {
+        return;
+    }
+    try {
+        await api.del(`/api/nexus/prospecting/verticals/${encodeURIComponent(slug)}`);
+        result.innerHTML = "<p>Vertical eliminada.</p>";
+    } catch (error) {
+        result.innerHTML = `<p>${esc(error.message)}</p>`;
+        return;
+    }
+    resetVerticalForm();
+    await loadVerticals();
+}
+
 async function loadCampaignConfig() {
     const payload = await api.get("/api/desktop/settings/campaign");
     document.getElementById("outreachEnabled").checked = Boolean(payload.outreach.enabled);
@@ -631,6 +813,17 @@ function wireEvents() {
             document.getElementById("salesSaveNote").textContent = error.message;
         });
     });
+    document.getElementById("verticalForm").addEventListener("submit", (event) => {
+        saveVertical(event).catch((error) => {
+            document.getElementById("verticalFormResult").innerHTML = `<p>${esc(error.message)}</p>`;
+        });
+    });
+    document.getElementById("deleteVerticalBtn").addEventListener("click", () => {
+        deleteVertical().catch((error) => {
+            document.getElementById("verticalFormResult").innerHTML = `<p>${esc(error.message)}</p>`;
+        });
+    });
+    document.getElementById("newVerticalBtn").addEventListener("click", resetVerticalForm);
     document.getElementById("saveCampanaBtn").addEventListener("click", () => {
         saveCampaignConfig().catch((error) => {
             document.getElementById("campanaSaveNote").textContent = error.message;
@@ -647,6 +840,7 @@ async function bootstrap() {
     setupSectionNav();
     wireEvents();
     resetIntegrationForm();
+    resetVerticalForm();
     await Promise.all([
         loadGeneralSummary(),
         loadPrompts(),
@@ -654,6 +848,10 @@ async function bootstrap() {
         loadIntegrations(),
         loadSalesConfig().catch(() => {
             const el = document.getElementById("salesStatus");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadVerticals().catch(() => {
+            const el = document.getElementById("verticalsStatus");
             if (el) { el.textContent = "no disponible"; }
         }),
         loadCampaignConfig().catch(() => {

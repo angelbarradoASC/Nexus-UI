@@ -39,3 +39,20 @@ def ensure_prospecting_schema(store: SQLiteStore) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sales_verticals(
+              slug TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              aliases_json TEXT NOT NULL DEFAULT '[]',
+              activo INTEGER NOT NULL DEFAULT 1,
+              is_fallback INTEGER NOT NULL DEFAULT 0,
+              scoring_rules_json TEXT NOT NULL DEFAULT '{}',
+              discovery_config_json TEXT NOT NULL DEFAULT '{}',
+              crm_tags_json TEXT NOT NULL DEFAULT '[]',
+              crm_sector TEXT NOT NULL DEFAULT 'otros',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )

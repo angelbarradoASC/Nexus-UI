@@ -137,6 +137,10 @@ class AppConfig(BaseSettings):
     prospecting_user_agent: str = "Open-Nexus MunicipalProspector/1.0 (+https://assetsconsultores.es)"
     prospecting_max_pages_per_site: int = Field(default=4, ge=1, le=10)
     prospecting_enable_smtp_probe: bool = False
+    # Binario local de Obscura (vendor/obscura/) para renderizar paginas con JS
+    # real cuando el HTML estatico (httpx) no trae contenido util. Vacio =
+    # autodetectar segun plataforma (obscura.exe en Windows, obscura en Linux/Mac).
+    obscura_binary_path: str = ""
     local_llm_enabled: bool = False
     local_llm_base_url: str | None = None
     local_llm_model: str = ""

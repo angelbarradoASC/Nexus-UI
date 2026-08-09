@@ -496,6 +496,80 @@
                             <span id="salesSaveNote" class="assets-form-note"></span>
                         </div>
                         </div><!-- /module-form-body -->
+
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Clasificacion y discovery</p>
+                                <h3>Verticales comerciales</h3>
+                                <span id="verticalsStatus" class="info-badge info-badge-muted">Cargando...</span>
+                            </div>
+                            <div class="settings-two-column">
+                                <section class="operator-list-shell">
+                                    <div class="operator-toolbar">
+                                        <div>
+                                            <p class="eyebrow eyebrow-tight">Verticales</p>
+                                            <h3>Configuradas en BBDD</h3>
+                                        </div>
+                                        <button id="newVerticalBtn" type="button">Nueva vertical</button>
+                                    </div>
+                                    <div id="verticalGroups" class="integration-groups">
+                                        <div class="empty-state-sm">Cargando verticales...</div>
+                                    </div>
+                                </section>
+
+                                <form id="verticalForm" class="operator-form">
+                                    <input id="verticalOriginalSlug" type="hidden" />
+                                    <div class="operator-form-head">
+                                        <div>
+                                            <p class="eyebrow eyebrow-tight">Edicion</p>
+                                            <h3 id="verticalFormTitle">Nueva vertical</h3>
+                                        </div>
+                                    </div>
+                                    <div class="provider-form">
+                                        <label class="field">
+                                            <span>Nombre</span>
+                                            <input id="verticalNombre" type="text" placeholder="Peluquerias" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Slug</span>
+                                            <input id="verticalSlug" type="text" placeholder="peluquerias (se genera del nombre si se deja vacio)" />
+                                        </label>
+                                        <label class="field field-wide">
+                                            <span>Aliases (separados por coma)</span>
+                                            <input id="verticalAliases" type="text" placeholder="peluqueria, peluquero, salon de belleza" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Sector CRM</span>
+                                            <input id="verticalCrmSector" type="text" placeholder="otros" />
+                                        </label>
+                                        <label class="field field-wide">
+                                            <span>Tags CRM (separados por coma)</span>
+                                            <input id="verticalCrmTags" type="text" placeholder="peluquerias, prospeccion-nexus" />
+                                        </label>
+                                        <label class="toggle-row">
+                                            <input id="verticalActivo" type="checkbox" checked />
+                                            <span>Vertical activa</span>
+                                        </label>
+                                        <label class="field field-wide">
+                                            <span>Señales de scoring (JSON, opcional)</span>
+                                            <textarea id="verticalScoringRules" class="prompt-textarea" rows="4" spellcheck="false" placeholder='{"relevance_signals": ["señal1", "señal2"]}'></textarea>
+                                        </label>
+                                        <label class="field field-wide">
+                                            <span>Config de discovery (JSON, opcional)</span>
+                                            <textarea id="verticalDiscoveryConfig" class="prompt-textarea" rows="4" spellcheck="false" placeholder='{"ddg_templates": ["{target} {geo} contacto"]}'></textarea>
+                                        </label>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button id="saveVerticalBtn" type="submit">Guardar vertical</button>
+                                        <button id="deleteVerticalBtn" type="button">Eliminar</button>
+                                    </div>
+                                    <div id="verticalFormResult" class="settings-note-block settings-note-inline">
+                                        <p>El slug "custom" es el fallback del sistema — no se puede eliminar ni desactivar. Los cambios aplican al instante, sin reiniciar Nexus.</p>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
                         <div class="module-section module-prompt-block">
                             <div class="module-section-head">
                                 <p class="eyebrow eyebrow-tight">Agentes</p>

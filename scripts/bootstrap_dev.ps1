@@ -69,6 +69,21 @@ if ($LASTEXITCODE -ne 0) {
     throw "Fallaron los imports minimos (fastapi, pytest, bson, paramiko)."
 }
 
+$ObscuraVersion = "v0.2.0"
+$ObscuraDir = Join-Path $RepoRoot "vendor\obscura"
+$ObscuraExe = Join-Path $ObscuraDir "obscura.exe"
+if (-not (Test-Path $ObscuraExe)) {
+    Write-Host "Descargando Obscura $ObscuraVersion (renderizado JS local para prospeccion)..."
+    New-Item -ItemType Directory -Force -Path $ObscuraDir | Out-Null
+    $ObscuraZip = Join-Path $env:TEMP "obscura-x86_64-windows-stealth.zip"
+    $ObscuraUrl = "https://github.com/h4ckf0r0day/obscura/releases/download/$ObscuraVersion/obscura-x86_64-windows-stealth.zip"
+    Invoke-WebRequest -Uri $ObscuraUrl -OutFile $ObscuraZip
+    Expand-Archive -Path $ObscuraZip -DestinationPath $ObscuraDir -Force
+    Remove-Item $ObscuraZip
+} else {
+    Write-Host "Obscura ya presente en $ObscuraExe"
+}
+
 Write-Host ""
 Write-Host "Bootstrap completado."
 Write-Host "Python canonico: $VenvPython"

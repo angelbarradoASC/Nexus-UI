@@ -4,13 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.brave import BraveSearchClient, BraveSearchSettings
 from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.prospecting.repository import ProspectingRepository
+from nexus.prospecting.sales_verticals import SalesVerticalsRepository
 from nexus.prospecting.scoring import ProspectScorer
 from nexus.prospecting.service import ProspectingAgentService
 from nexus.prospecting.validators import EmailValidator
-from nexus.api.routes.prospecting import _fallback_parse, _sanitize_vertical_from_text
+from nexus.api.routes.prospecting import _fallback_parse
 
 
 class _FakeConnector:
@@ -50,13 +52,32 @@ class _FakeConnector:
 
 
 class _FakeBrave:
+    """Fake Brave client used both for round-3 discovery escalation and for
+    per-candidate enrichment (see service._enrich_candidate_with_brave).
+
+    Only "discovers" a hit when the query names one of the known sample
+    businesses used across this test file — i.e. it behaves like enrichment
+    (query built from an already-known candidate title), never like a blind
+    discovery query built from generic vertical/geography terms. This keeps
+    round-3 Brave discovery a genuine no-op in tests unless a candidate with
+    a matching name is already known, matching how the fixture data is used.
+    """
+
     enabled = True
+    _KNOWN_CANDIDATE_NAMES = ("Fuego", "MR House")
 
     def __init__(self) -> None:
         self.calls = []
 
     async def search(self, *, run_id: str, query: str, country: str = "es", language: str = "es", count: int = 10, offset: int = 0):
         self.calls.append({"run_id": run_id, "query": query, "count": count})
+        if not any(name in query for name in self._KNOWN_CANDIDATE_NAMES):
+            return {
+                "provider": "brave",
+                "query": query,
+                "timestamp": "2026-06-04T10:00:00+00:00",
+                "results": [],
+            }
         return {
             "provider": "brave",
             "query": query,
@@ -78,7 +99,16 @@ class _FakePlaces:
         self._results = list(results or [])
         self._api_calls = api_calls
 
-    async def search_by_brief(self, *, vertical: str, geography: str, max_results: int, language: str):
+    async def search_by_brief(
+        self,
+        *,
+        vertical: str,
+        geography: str,
+        max_results: int,
+        language: str,
+        target_description: str = "",
+        places_queries: list[dict] | None = None,
+    ):
         return list(self._results), self._api_calls
 
 
@@ -98,7 +128,7 @@ def _sample_places_result() -> dict:
 
 
 class _FakeExtractor:
-    async def extract(self, *, url: str, vertical: str):
+    async def extract(self, *, url: str, link_hints: list[str] | None = None, quality_signal_tokens: list[str] | None = None):
         return {
             "name": "Restaurante Fuego",
             "website": url,
@@ -175,6 +205,154 @@ def prospecting_cfg(tmp_path):
     )
 
 
+def test_zapaterias_zaragoza_actur_resolves_and_scores_from_bbdd(prospecting_cfg):
+    """Prueba explicita del ticket de refactor: 'busqueme zapaterias en Zaragoza,
+    barrio del Actur' debe resolver el vertical 'zapaterias' desde BBDD (no de un
+    catalogo hardcodeado) y usar sus reglas configuradas para discovery/scoring —
+    zapaterias no aparece en ningun if/elif de service.py tras el refactor.
+    """
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+
+    text = "búscame zapaterías en Zaragoza, barrio del Actur"
+    parsed = _fallback_parse(text, service.verticals)
+    assert parsed["vertical"] == "zapaterias"
+
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical=parsed["vertical"], city="Zaragoza", target_description="zapaterías")
+    )
+    assert brief.vertical == "zapaterias"
+
+    # generate_queries usa el discovery_config de la fila 'zapaterias' (fallback
+    # generico con {target}/{geo}), no una plantilla curada a mano en Python.
+    queries = service.generate_queries(brief)
+    assert any("zapatería" in q.lower() or "zapaterias" in q.lower() for q in queries)
+
+    # El scoring tambien viene de la vertical (zapaterias no define
+    # relevance_signals propios, asi que cae al genérico: siempre relevante).
+    heuristic = service._heuristic_classification(
+        {"title": "Zapatería El Actur", "description": ""},
+        {"name": "Zapatería El Actur", "quality_signals": []},
+        brief,
+    )
+    assert heuristic["relevant"] is True
+    assert heuristic["reason"] == "clasificación heurística genérica"
+
+
+@pytest.mark.asyncio
+async def test_geography_guardrail_accepts_pedania_within_radius_via_real_distance(prospecting_cfg):
+    """Antes: un candidato en Zaragoza capital se descartaba si brief.city era una
+    pedania (ej. Villamayor de Gallego) porque el nombre exacto no aparecia en el
+    texto. Ahora, si el usuario pidio un radio explicito, se comprueba la
+    distancia real geocodificada en vez de exigir coincidencia literal de texto.
+    """
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    # Villamayor de Gallego (pedania) vs. una direccion real en Zaragoza capital, ~9km.
+    geo_center = {"lat": 41.6907, "lon": -0.7658}
+    candidate_geo = {"lat": 41.6561, "lon": -0.8773}
+
+    async def fake_resolve(query):
+        return candidate_geo
+
+    service._geocode_cache.resolve = fake_resolve
+
+    brief = service._normalize_brief(
+        ProspectingRunRequest(
+            vertical="asesoria",
+            city="Villamayor de Gállego",
+            province="Zaragoza",
+            radius_km=20,
+        )
+    )
+    candidate = {"title": "Asesoría Laboral Ascaso"}
+    extracted = {"address": "C. de San Ignacio de Loyola, 6, 50008 Zaragoza, España", "city": "", "province": ""}
+
+    matches = await service._matches_requested_geography(candidate, extracted, brief, geo_center=geo_center)
+    assert matches is True
+
+
+@pytest.mark.asyncio
+async def test_geography_guardrail_rejects_outside_requested_radius(prospecting_cfg):
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    geo_center = {"lat": 41.6907, "lon": -0.7658}  # Villamayor de Gallego
+    candidate_geo = {"lat": 40.4168, "lon": -3.7038}  # Madrid, ~275km
+
+    async def fake_resolve(query):
+        return candidate_geo
+
+    service._geocode_cache.resolve = fake_resolve
+
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical="asesoria", city="Villamayor de Gállego", province="Zaragoza", radius_km=20)
+    )
+    matches = await service._matches_requested_geography(
+        {"title": "Asesoria Madrid"},
+        {"address": "Gran Vía, Madrid"},
+        brief,
+        geo_center=geo_center,
+    )
+    assert matches is False
+
+
+@pytest.mark.asyncio
+async def test_geography_guardrail_without_radius_keeps_strict_text_match(prospecting_cfg):
+    """Sin radio explicito no se geocodifica nada — se conserva el comportamiento
+    de texto exacto de siempre (ningun cambio de comportamiento para el caso comun).
+    """
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    called = False
+
+    async def fake_resolve(query):
+        nonlocal called
+        called = True
+        return {"lat": 0, "lon": 0}
+
+    service._geocode_cache.resolve = fake_resolve
+
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical="asesoria", city="Villamayor de Gállego", province="Zaragoza")
+    )
+    matches = await service._matches_requested_geography(
+        {"title": "Asesoria Zaragoza"},
+        {"address": "C. de San Ignacio de Loyola, 6, 50008 Zaragoza"},
+        brief,
+        geo_center=None,
+    )
+    assert matches is False
+    assert called is False  # nunca se geocodifica si no hay radio pedido
+
+
 def test_query_generation_for_public_administration(prospecting_cfg):
     service = ProspectingAgentService(
         cfg=prospecting_cfg,
@@ -187,43 +365,44 @@ def test_query_generation_for_public_administration(prospecting_cfg):
     )
     queries = service.generate_queries(
         service._normalize_brief(
-            {
-                "vertical": "public_administration",
-                "city": "Torrejón de la Calzada",
-                "province": "Madrid",
-                "must_have": ["web oficial", "telefono"],
-            }
+            ProspectingRunRequest(
+                vertical="public_administration",
+                city="Torrejón de la Calzada",
+                province="Madrid",
+                must_have=["web oficial", "telefono"],
+            )
         )
     )
     assert any("ayuntamiento" in query.lower() for query in queries)
     assert any("sede electrónica" in query.lower() or "sede electronica" in query.lower() for query in queries)
 
 
-def test_interpret_helpers_map_dental_clinics_to_salud():
-    parsed = _fallback_parse("Quiero que me busques clinicas dentales en la zona de madrid sur cerca de parla")
+def test_interpret_helpers_map_dental_clinics_to_salud(prospecting_cfg):
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
+    parsed = _fallback_parse(
+        "Quiero que me busques clinicas dentales en la zona de madrid sur cerca de parla",
+        verticals,
+    )
     assert parsed["vertical"] == "salud"
 
-    sanitized = _sanitize_vertical_from_text(
-        {"vertical": "inmobiliaria"},
-        "Quiero que me busques clinicas dentales en la zona de madrid sur cerca de parla",
-    )
-    assert sanitized["vertical"] == "custom"
-    assert sanitized["vertical_created"] is False
+    # Un slug explicito y ya valido se respeta tal cual, sin revalidar contra
+    # el texto libre — clasificar y buscar son cosas distintas.
+    resolved = verticals.resolve("inmobiliaria", fallback_text="clinicas dentales en Parla")
+    assert resolved.slug == "inmobiliaria"
 
 
-def test_interpret_helpers_create_a_new_vertical_when_unknown():
+def test_interpret_helpers_fall_back_to_custom_when_unknown(prospecting_cfg):
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
     text = "Quiero que me busques academias de baile en Toledo"
 
-    parsed = _fallback_parse(text)
-    assert parsed["vertical"] != "custom"
-    assert parsed["vertical"]
+    # El LLM no puede inventar verticales: si nada encaja en BBDD, cae siempre
+    # al fallback 'custom' — nunca crea un slug dinamico tipo "academias_de_baile".
+    parsed = _fallback_parse(text, verticals)
+    assert parsed["vertical"] == "custom"
 
-    sanitized = _sanitize_vertical_from_text(
-        {"vertical": "custom", "target_description": "academias de baile"},
-        text,
-    )
-    assert sanitized["vertical"] == "custom"
-    assert sanitized["vertical_created"] is False
+    resolved = verticals.resolve(fallback_text=text)
+    assert resolved.slug == "custom"
+    assert resolved.is_fallback is True
 
 
 def test_query_generation_for_restaurants(prospecting_cfg):
@@ -238,11 +417,11 @@ def test_query_generation_for_restaurants(prospecting_cfg):
     )
     queries = service.generate_queries(
         service._normalize_brief(
-            {
-                "vertical": "restaurants",
-                "city": "Zaragoza",
-                "desired_count": 30,
-            }
+            ProspectingRunRequest(
+                vertical="restaurants",
+                city="Zaragoza",
+                desired_count=30,
+            )
         )
     )
     assert any("restaurante" in query.lower() for query in queries)
@@ -320,13 +499,13 @@ async def test_push_valid_to_crm_previews_payloads(prospecting_cfg):
     )
 
     run = await service.run(
-        {
-            "vertical": "restaurants",
-            "city": "Zaragoza",
-            "desired_count": 1,
-            "minimum_score": 50,
-            "dry_run": True,
-        }
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            desired_count=1,
+            minimum_score=50,
+            dry_run=True,
+        )
     )
     pushed = await service.push_valid_to_crm(run["run_id"], dry_run=True)
 
@@ -352,13 +531,13 @@ async def test_push_to_crm_consolidates_all_tags_into_single_activity(prospectin
     )
 
     run = await service.run(
-        {
-            "vertical": "restaurants",
-            "city": "Zaragoza",
-            "desired_count": 1,
-            "minimum_score": 50,
-            "dry_run": True,
-        }
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            desired_count=1,
+            minimum_score=50,
+            dry_run=True,
+        )
     )
     pushed = await service.push_valid_to_crm(run["run_id"], dry_run=False)
 
@@ -385,13 +564,13 @@ async def test_full_run_persists_results_and_summary(prospecting_cfg):
     )
 
     result = await service.run(
-        {
-            "vertical": "restaurants",
-            "city": "Zaragoza",
-            "desired_count": 1,
-            "minimum_score": 40,
-            "dry_run": True,
-        }
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            desired_count=1,
+            minimum_score=40,
+            dry_run=True,
+        )
     )
     stored = await service.get_run(result["run_id"])
 
@@ -420,18 +599,59 @@ async def test_resume_run_reprocesses_failed_run(prospecting_cfg):
         mx_validator=_FakeMXValidator(),
     )
     run = await service.run(
-        {
-            "vertical": "restaurants",
-            "city": "Zaragoza",
-            "desired_count": 1,
-            "minimum_score": 40,
-            "dry_run": True,
-        }
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            desired_count=1,
+            minimum_score=40,
+            dry_run=True,
+        )
     )
     await service._repository.update_run(run["run_id"], lambda current: current | {"status": "failed", "error": "forced"})
     resumed = await service.resume_run(run["run_id"])
+    # resume_run ahora lanza la reejecucion en background (igual que run() con
+    # async_mode=True) para no bloquear la respuesta HTTP mientras dura el run.
+    assert resumed["status"] == "pending"
+    await service._tasks[run["run_id"]]
+    stored = await service.get_run(run["run_id"])
 
-    assert resumed["status"] == "completed"
+    assert stored["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_async_mode_run_returns_immediately_and_completes_in_background(prospecting_cfg):
+    """El lanzamiento manual desde la UI usa async_mode=True para no bloquear la
+    respuesta HTTP durante los minutos que puede tardar un run real — el POST
+    debe volver con status='pending' al instante y el run se completa aparte.
+    """
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        places_client=_FakePlaces([_sample_places_result()]),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    response = await service.run(
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            desired_count=1,
+            minimum_score=40,
+            dry_run=True,
+            async_mode=True,
+        )
+    )
+    assert response["status"] == "pending"
+    run_id = response["run_id"]
+    assert run_id in service._tasks
+
+    await service._tasks[run_id]
+    stored = await service.get_run(run_id)
+    assert stored["status"] == "completed"
+    assert stored["results"][0]["name"] == "Restaurante Fuego"
 
 
 @pytest.mark.asyncio
@@ -703,21 +923,26 @@ async def test_llm_classification_keeps_core_identity_fields_stable(prospecting_
             "phone": "914126937",
         },
         service._normalize_brief(
-            {
-                "vertical": "inmobiliaria",
-                "city": "Parla",
-                "province": "Madrid",
-                "desired_count": 1,
-                "minimum_score": 40,
-            }
+            ProspectingRunRequest(
+                vertical="inmobiliaria",
+                city="Parla",
+                province="Madrid",
+                desired_count=1,
+                minimum_score=40,
+            )
         ),
     )
 
     assert result["name"] == "Restaurante Fuego"
     assert result["city"] == "Zaragoza"
     assert result["province"] == "Zaragoza"
+    # contact_person/contact_role are never filled from the LLM classification
+    # response — only from real scraping or LinkedIn DDG snippets, see the
+    # comment in service._classify_candidate(). The fake LLM response above
+    # sets contact_role="Central comercial" specifically to prove it gets
+    # discarded, not adopted.
     assert result["contact_person"] == ""
-    assert result["contact_role"] == "Central comercial"
+    assert result["contact_role"] == ""
     assert "foo" in result["quality_signals"]
 
 
@@ -736,14 +961,14 @@ async def test_run_keeps_results_empty_when_places_returns_empty_and_brave_does_
     )
 
     result = await service.run(
-        {
-            "vertical": "restaurants",
-            "city": "Zaragoza",
-            "province": "Zaragoza",
-            "desired_count": 1,
-            "minimum_score": 40,
-            "dry_run": True,
-        }
+        ProspectingRunRequest(
+            vertical="restaurants",
+            city="Zaragoza",
+            province="Zaragoza",
+            desired_count=1,
+            minimum_score=40,
+            dry_run=True,
+        )
     )
     stored = await service.get_run(result["run_id"])
 
@@ -751,4 +976,8 @@ async def test_run_keeps_results_empty_when_places_returns_empty_and_brave_does_
     assert stored["results"] == []
     assert stored["orchestration"]["source_plan"]["sources"][0]["name"] == "google_places"
     assert any(str(query).startswith("[Places]") for query in stored["queries"])
-    assert brave.calls == []
+    # Brave is still tried as the last-resort round-3 escalation (the quality
+    # threshold isn't met with 0 real domains from Places), but it discovers
+    # nothing usable — the fake only "finds" known candidates by name, and
+    # here there are none, so no query surfaces a hit.
+    assert brave.calls

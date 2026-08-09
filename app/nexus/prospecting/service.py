@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,10 +21,12 @@ from nexus.prospecting.extractors import WebProspectExtractor
 from nexus.prospecting.google_places import GooglePlacesClient, GooglePlacesSettings
 from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.api.schemas.prospecting import ProspectingRunRequest
-from nexus.prospecting.models import KNOWN_VERTICALS, ProspectingBrief, default_tags_for_vertical, normalize_vertical
+from nexus.prospecting.models import ProspectingBrief
+from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
 from nexus.prospecting.api_budget import BudgetExceededError, PlacesApiBudget
-from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES, VERTICAL_BLOCKLIST
+from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES
+from nexus.utils.geocoding import GeocodeCache, haversine_km
 from nexus.utils.text import normalize_text as _normalize_text
 from nexus.prospecting.repository import ProspectingRepository
 from nexus.prospecting.scoring import ProspectScorer
@@ -99,6 +100,7 @@ class ProspectingAgentService:
             timeout_seconds=float(cfg.prospecting_http_timeout_seconds),
             user_agent=cfg.prospecting_user_agent,
             max_pages_per_site=int(cfg.prospecting_max_pages_per_site),
+            obscura_binary_path=getattr(cfg, "obscura_binary_path", "") or "",
         )
         self._email_validator = email_validator or EmailValidator()
         self._domain_validator = domain_validator or DomainValidator()
@@ -113,47 +115,16 @@ class ProspectingAgentService:
         )
         self._autonomy = SalesAutonomousSystem()
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        self._verticals_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._verticals = SalesVerticalsRepository(cfg.prospecting_data_dir)
+        self._geocode_cache = GeocodeCache()
 
-    # ── Verticales reales del CRM (sin hardcodear) ──────────────────────────────
-
-    _VERTICALS_CACHE_TTL_SECONDS = 600  # 10 min — evita golpear el CRM en cada mensaje
-
-    async def list_crm_verticals(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
-        """Verticales que existen AHORA MISMO en el CRM, extraidas de los leads
-        ya registrados ("Vertical: X" en las notas) — nunca una lista fija en
-        codigo. El LLM de interpretacion recibe esta lista real para clasificar,
-        en vez de un catalogo hardcodeado que se queda desactualizado.
+    @property
+    def verticals(self) -> SalesVerticalsRepository:
+        """Verticales comerciales configurables desde BBDD (CRUD + resolucion de
+        lenguaje natural) — sustituye el catalogo hardcodeado que antes vivia en
+        models.py y el listado en vivo contra el CRM.
         """
-        now = time.monotonic()
-        if not force_refresh and self._verticals_cache is not None:
-            cached_at, cached = self._verticals_cache
-            if now - cached_at < self._VERTICALS_CACHE_TTL_SECONDS:
-                return cached
-
-        if not self._connector.configured:
-            return self._verticals_cache[1] if self._verticals_cache else []
-
-        try:
-            data = await self._connector.list_pipeline()
-        except Exception:
-            _logger.exception("list_crm_verticals | fallo consultando el CRM")
-            return self._verticals_cache[1] if self._verticals_cache else []
-
-        counts: dict[str, int] = {}
-        for company in data.get("companies", []):
-            match = re.search(r"Vertical:\s*([^\n]+)", company.get("notes") or "")
-            if match:
-                slug = match.group(1).strip()
-                if slug:
-                    counts[slug] = counts.get(slug, 0) + 1
-
-        verticals = [
-            {"slug": slug, "count": count}
-            for slug, count in sorted(counts.items(), key=lambda kv: -kv[1])
-        ]
-        self._verticals_cache = (now, verticals)
-        return verticals
+        return self._verticals
 
     # ── Logging ──────────────────────────────────────────────────────────────
 
@@ -224,9 +195,20 @@ class ProspectingAgentService:
         run = await self._repository.get_run(run_id)
         if run is None:
             return {"status": "not_found", "run_id": run_id}
-        brief = self._normalize_brief(run.get("brief") or {})
-        resumed = await self._execute_run(run_id, brief, reset=True, resumed_from=run.get("status"))
-        return self._run_summary(resumed)
+        # brief llega como dict serializado (ProspectingBrief.to_dict() guardado en el
+        # run) — _normalize_brief espera un objeto con atributos (ProspectingRunRequest).
+        known_fields = ProspectingRunRequest.model_fields
+        stored_brief = run.get("brief") or {}
+        brief = self._normalize_brief(ProspectingRunRequest(**{k: v for k, v in stored_brief.items() if k in known_fields}))
+        resumed_from = run.get("status")
+        # Se marca "pending" en BBDD ANTES de lanzar la tarea — si no, el primer
+        # poll del frontend puede leer el status terminal antiguo (ej. "timeout")
+        # y parar el polling al instante, creyendo que el resume ya termino.
+        run = await self._repository.update_run(run_id, lambda r: {**r, "status": "pending"}) or run
+        # En background igual que run() con async_mode=True — reanudar puede tardar
+        # varios minutos y no debe bloquear la respuesta HTTP (la UI hace polling).
+        self._tasks[run_id] = asyncio.create_task(self._execute_run(run_id, brief, reset=True, resumed_from=resumed_from))
+        return self._run_summary(run)
 
     def get_budget(self) -> dict:
         """Return current month's API budget status (synchronous snapshot)."""
@@ -340,52 +322,16 @@ class ProspectingAgentService:
 
     def generate_queries(self, brief: ProspectingBrief) -> list[str]:
         geography = brief.geography_label or brief.target_description or "España"
-        if brief.vertical == "restaurants":
-            base = [
-                f"mejores restaurantes {geography} email contacto",
-                f"restaurante alta cocina {geography} reservas contacto",
-                f"restaurante eventos empresa {geography} contacto",
-                f"restaurante gourmet {geography} reservas email",
-                f"restaurante {geography} cenas empresa",
-                f"restaurante {geography} terraza reservas",
-                f"restaurante {geography} carta degustacion reservas",
-            ]
-        elif brief.vertical == "salud":
-            base = [
-                f"clinica dental {geography} contacto",
-                f"dentista {geography} email telefono",
-                f"odontologo {geography} contacto",
-                f"clinica odontologica {geography} contacto",
-                f"salud dental {geography} contacto",
-            ]
-        elif brief.vertical == "salud":
-            signals = ("clinica", "clínica", "dentista", "odont", "salud", "implante", "ortodon", "estetica dental")
-            relevant = any(token in text for token in signals)
-            reason = "salud/dental con seÃ±ales de clinica o consulta" if relevant else "no parece clinica dental"
-        elif brief.vertical == "public_administration":
-            focus = brief.target_description or "ayuntamiento administración electrónica contacto"
-            base = [
-                f"ayuntamiento {geography} contacto tecnología",
-                f"sede electrónica {geography} ayuntamiento contacto",
-                f"concejalía nuevas tecnologías {geography}",
-                f"secretaría ayuntamiento {geography} contacto",
-                f"{focus} {geography}",
-            ]
-        elif brief.vertical == "inmobiliaria":
-            geo = geography or "EspaÃ±a"
-            exclusions = (
-                "-site:idealista.com -site:fotocasa.es -site:pisos.com "
-                "-site:habitaclia.com -site:yaencontre.com -site:indomio.es "
-                "-site:globaliza.com -site:trovimap.com"
-            )
-            base = [
-                f"\"inmobiliaria\" \"{geo}\" contacto {exclusions}",
-                f"\"agencia inmobiliaria\" \"{geo}\" email telefono {exclusions}",
-                f"intitle:inmobiliaria \"{geo}\" nosotros contacto {exclusions}",
-                f"\"inmobiliaria\" \"{geo}\" \"aviso legal\" {exclusions}",
-                f"\"inmobiliaria\" \"{geo}\" \"equipo\" {exclusions}",
-            ]
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        templates = vertical.discovery_config.get("ddg_templates")
+        if templates:
+            default_target = vertical.discovery_config.get("default_target", "")
+            target = brief.target_description or default_target
+            base = [tpl.replace("{geo}", geography).replace("{target}", target) for tpl in templates]
         elif brief.industrial_zone:
+            # Solo aplica a verticales sin plantillas curadas (asesoria, zapaterias,
+            # talleres, custom...) — las curadas (restaurants, salud,
+            # public_administration, inmobiliaria) siempre usan su propia lista.
             zone = brief.industrial_zone
             prov = brief.province or brief.city or geography
             desc = brief.target_description or "empresa"
@@ -590,6 +536,22 @@ class ProspectingAgentService:
                 ],
                 inputs={"candidate_count": len(candidates), "minimum_score": brief.minimum_score},
             )
+            geo_center = None
+            if brief.radius_km:
+                geo_center = await self._geocode_cache.resolve(brief.geography_label or brief.city)
+                if not geo_center or geo_center.get("lat") is None:
+                    self._log(
+                        run,
+                        f"No se pudo geocodificar '{brief.geography_label or brief.city}' — el radio de {brief.radius_km}km no se aplicara, solo el match de texto",
+                        level="warning",
+                    )
+            async def _checkpoint() -> None:
+                # Persiste el progreso real del run mientras se ejecuta — sin esto,
+                # GET /runs/{id} devuelve el run vacio (status inicial, contadores a
+                # cero) hasta que termina, y cualquier polling en curso parece "cero
+                # resultados" aunque ya se hayan aceptado leads.
+                await self._repository.update_run(run_id, lambda r: {**r, **run})
+
             for candidate in candidates:
                 cname = candidate.get("title") or candidate.get("name") or candidate.get("url", "?")
                 self._log(run, f"Procesando: {cname[:60]}", url=candidate.get("url", ""))
@@ -601,9 +563,10 @@ class ProspectingAgentService:
                     run["discarded"].append(extracted)
                     run["summary"]["discarded"] += 1
                     self._log(run, f"Descartado sin web: {cname[:50]}", level="warning")
+                    await _checkpoint()
                     continue
 
-                strict_failures = self._evaluate_candidate_guardrails(candidate, extracted, brief)
+                strict_failures = await self._evaluate_candidate_guardrails(candidate, extracted, brief, geo_center=geo_center)
                 if strict_failures:
                     extracted["status"] = "discarded"
                     extracted["strict_guardrail_failures"] = strict_failures
@@ -618,6 +581,7 @@ class ProspectingAgentService:
                         reason=strict_failures[0],
                         reasons=strict_failures,
                     )
+                    await _checkpoint()
                     continue
 
                 run["status"] = "validating"
@@ -668,6 +632,7 @@ class ProspectingAgentService:
                     extracted["discard_reason_label"] = self._humanize_reason(extracted.get("discard_reason"))
                     self._log(run, f"Descartado: {extracted.get('name', cname)[:50]} | score={score} | motivo={extracted.get('discard_reason','baja_puntuacion')}", level="warning")
 
+                await _checkpoint()
                 if len(run["results"]) >= brief.desired_count:
                     self._log(run, f"Objetivo alcanzado: {len(run['results'])} resultados")
                     break
@@ -728,7 +693,7 @@ class ProspectingAgentService:
                 outputs={
                     "crm_ready_count": len(crm_ready),
                     "manual_tags": brief.crm_tags,
-                    "default_tags_preview": default_tags_for_vertical(brief.vertical, geography),
+                    "default_tags_preview": (self._verticals.get(brief.vertical) or self._verticals.get_fallback()).default_tags(geography),
                     "handoff_ready": crm_handoff.get("handoff_ready", bool(crm_ready)),
                     "next_step": crm_handoff.get("next_step", ""),
                 },
@@ -873,12 +838,14 @@ class ProspectingAgentService:
             budget_calls=budget_before["calls"],
             budget_remaining=budget_before["remaining"],
         )
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
         raw_hits, api_calls_made = await self._places.search_by_brief(
             vertical=brief.vertical,
             geography=geography,
             max_results=brief.desired_count * 2,
             language=brief.language,
             target_description=brief.target_description,
+            places_queries=vertical.discovery_config.get("places_queries"),
         )
         new_total = await self._budget.increment(api_calls_made)
         run["places_api_calls"] = run.get("places_api_calls", 0) + api_calls_made
@@ -1016,7 +983,12 @@ class ProspectingAgentService:
         brief: ProspectingBrief,
     ) -> dict[str, Any]:
         website = self._normalize_url(candidate.get("url", ""))
-        extracted = await self._extractor.extract(url=website, vertical=brief.vertical)
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        extracted = await self._extractor.extract(
+            url=website,
+            link_hints=vertical.discovery_config.get("link_hints"),
+            quality_signal_tokens=vertical.discovery_config.get("quality_signal_tokens"),
+        )
         brave_enrichment = await self._enrich_candidate_with_brave(run_id, run, candidate, brief)
         llm_classification = await self._classify_candidate(candidate, extracted, brave_enrichment, brief)
         name = extracted.get("name") or candidate.get("title", "") or llm_classification.get("name", "")
@@ -1030,19 +1002,19 @@ class ProspectingAgentService:
         # Dirección: Places la da limpia, extractor la infiere del texto
         address = extracted.get("address", "") or candidate.get("address", "")
 
+        # Precedencia preservada tal cual (and antes que or): para verticales sin
+        # official_website_if_relevant, cualquier ".es" en el dominio cuenta como
+        # "oficial" — comportamiento heredado, no se corrige aqui.
+        official_website_default = (
+            bool(vertical.scoring_rules.get("official_website_if_relevant")) and ".gov" in website or ".es" in website
+        )
         return {
             "result_id": f"prosr-{uuid4().hex[:10]}",
             "vertical": brief.vertical,
             "name": name,
-            "organization_type": (
-                "public_body" if brief.vertical == "public_administration"
-                else "restaurant" if brief.vertical == "restaurants"
-                else "asesoria" if brief.vertical == "asesoria"
-                else "inmobiliaria" if brief.vertical == "inmobiliaria"
-                else "custom"
-            ),
+            "organization_type": vertical.scoring_rules.get("organization_type", "custom"),
             "website": extracted.get("website") or website,
-            "official_website": bool(llm_classification.get("official_website", brief.vertical == "public_administration" and ".gov" in website or ".es" in website)),
+            "official_website": bool(llm_classification.get("official_website", official_website_default)),
             "domain": extracted.get("domain") or self._extract_domain(website),
             "email": extracted.get("emails", [""])[0] if extracted.get("emails") else "",
             "emails": extracted.get("emails", []),
@@ -1160,6 +1132,9 @@ class ProspectingAgentService:
         return merged
 
     def _heuristic_classification(self, candidate: dict[str, Any], extracted: dict[str, Any], brief: ProspectingBrief) -> dict[str, Any]:
+        """Scoring heuristico generico: las senales/plantillas vienen de
+        sales_verticals.scoring_rules (BBDD), no de if/elif por vertical.
+        """
         text = " ".join(
             [
                 candidate.get("title", ""),
@@ -1168,35 +1143,25 @@ class ProspectingAgentService:
                 " ".join(extracted.get("quality_signals", [])),
             ]
         ).lower()
-        relevant = True
-        is_premium = False
-        reason = ""
-        if brief.vertical == "restaurants":
-            premium_signals = ("degustacion", "gourmet", "estrella", "eventos", "reservas", "terraza")
-            is_premium = any(token in text for token in premium_signals)
-            relevant = "restaurante" in text or "cocina" in text or "reservas" in text
-            reason = "restaurante con señales de calidad" if relevant else "no parece restaurante objetivo"
-        elif brief.vertical == "asesoria":
-            signals = ("asesoría", "asesoria", "gestoría", "gestoria", "fiscal", "laboral", "contabilidad", "irpf", "renta", "impuesto", "autonomos")
-            relevant = any(token in text for token in signals)
-            reason = "asesoría/gestoría con señales fiscales o laborales" if relevant else "no parece asesoría objetivo"
-        elif brief.vertical == "inmobiliaria":
-            signals = ("inmobiliaria", "agencia", "pisos", "alquiler", "venta", "propiedades", "casas", "fincas", "chalets")
-            relevant = any(token in text for token in signals)
-            reason = "inmobiliaria con señales de ventas/alquiler" if relevant else "no parece inmobiliaria"
-        elif brief.vertical == "public_administration":
-            official_signals = ("ayuntamiento", "sede electrónica", "administración", "concejal", "secretar")
-            relevant = any(token in text for token in official_signals) or ".es" in extracted.get("domain", "")
-            reason = "organismo público con señales oficiales" if relevant else "no parece organismo oficial"
-        elif brief.vertical not in KNOWN_VERTICALS and brief.vertical != "otros":
-            relevant = True
-            reason = "vertical creada dinámicamente; clasificación heurística genérica"
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        rules = vertical.scoring_rules
+        signals = rules.get("relevance_signals") or []
+        domain_suffix = rules.get("domain_suffix_relevant", "")
+        if signals or domain_suffix:
+            relevant = any(token in text for token in signals) or (
+                bool(domain_suffix) and domain_suffix in extracted.get("domain", "")
+            )
+            reason = rules.get("reason_relevant", "") if relevant else rules.get("reason_irrelevant", "")
         else:
-            reason = "clasificación heurística genérica"
+            relevant = True
+            reason = rules.get("reason_generic", "clasificación heurística genérica")
+        premium_signals = rules.get("premium_signals") or []
+        is_premium = any(token in text for token in premium_signals) if premium_signals else False
+        official_website = bool(rules.get("official_website_if_relevant")) and relevant
         return {
             "relevant": relevant,
             "is_premium": is_premium,
-            "official_website": brief.vertical == "public_administration" and relevant,
+            "official_website": official_website,
             "quality_signals": extracted.get("quality_signals", []),
             "reason": reason,
             "notes": reason,
@@ -1229,7 +1194,12 @@ class ProspectingAgentService:
         return len(text) <= 80
 
     async def _push_single_result(self, result: dict[str, Any], brief: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
-        crm_blockers = self._crm_blockers(result, self._normalize_brief(brief))
+        # brief llega como dict serializado (ProspectingBrief.to_dict() guardado en el
+        # run) — _normalize_brief espera un objeto con atributos (ProspectingRunRequest),
+        # igual que ya se resuelve en orchestrate_brief().
+        known_fields = ProspectingRunRequest.model_fields
+        brief_request = ProspectingRunRequest(**{k: v for k, v in brief.items() if k in known_fields})
+        crm_blockers = self._crm_blockers(result, self._normalize_brief(brief_request))
         if crm_blockers:
             return {
                 "status": "blocked",
@@ -1313,7 +1283,8 @@ class ProspectingAgentService:
     def _build_crm_payload(self, result: dict[str, Any], brief: dict[str, Any]) -> dict[str, Any]:
         followup = datetime.now(timezone.utc).date().isoformat()
         geography = ", ".join(filter(None, [result.get("city"), result.get("province")]))
-        vertical = result.get("vertical") or brief.get("vertical", "otros")
+        vertical = result.get("vertical") or brief.get("vertical", "")
+        vertical_row = self._verticals.get(vertical) or self._verticals.get_fallback()
         represented_by = brief.get("represented_by", "assets")
 
         source_note = f"[Google Places]" if result.get("source") == "google_places" else f"[Brave]"
@@ -1348,7 +1319,7 @@ class ProspectingAgentService:
             "lead_source": "cold",
             "next_followup": followup,
             "represented_by": represented_by,
-            "sector": vertical if vertical in ("asesoria", "inmobiliaria", "hosteleria", "salud", "legal") else "otros",
+            "sector": vertical_row.crm_sector,
             "entry_channel": "import",
             "estimated_value": None,
         }
@@ -1369,7 +1340,7 @@ class ProspectingAgentService:
             "next_followup": followup,
             "is_done": False,
         }
-        tags = list(dict.fromkeys([*default_tags_for_vertical(vertical, geography), *brief.get("crm_tags", [])]))
+        tags = list(dict.fromkeys([*vertical_row.default_tags(geography), *brief.get("crm_tags", [])]))
         tags_note_payload = self._build_tags_note_payload(tags)
         return {
             "company_payload": company_payload,
@@ -1402,15 +1373,13 @@ class ProspectingAgentService:
         return ' '.join(words)
 
     def _normalize_brief(self, payload: ProspectingRunRequest) -> ProspectingBrief:
-        # Si ya viene un vertical decidido (por el LLM contra la lista real del
-        # CRM, o escrito a mano en el formulario), se respeta tal cual — no se
-        # revalida contra la lista cerrada de KNOWN_VERTICALS, o cualquier
-        # vertical real del CRM que no este en esos 7 curados a mano acabaria
-        # cayendo a "otros" aqui, pisando lo que ya se habia clasificado bien.
-        # normalize_vertical() (con su heuristica de palabras clave y su
-        # default a "otros") solo hace falta cuando de verdad no llega nada.
+        # resolve() hace de puerta unica: si el vertical que llega (del LLM, del
+        # formulario o de un resume) ya es el slug exacto de una vertical activa
+        # en BBDD se respeta tal cual; si no, intenta aliases/nombre y por
+        # ultimo cae al fallback (custom). Asi el LLM nunca puede colar un
+        # vertical inventado que no exista en sales_verticals.
         raw_vertical = (payload.vertical or "").strip()
-        vertical = raw_vertical or normalize_vertical("", fallback_text=payload.target_description)
+        vertical = self._verticals.resolve(raw_vertical, fallback_text=payload.target_description).slug
         return ProspectingBrief(
             vertical=vertical,
             target_description=payload.target_description.strip(),
@@ -1619,11 +1588,13 @@ class ProspectingAgentService:
         ]))
         return any(pat in title_blob for pat in self._DEAD_PAGE_PATTERNS)
 
-    def _evaluate_candidate_guardrails(
+    async def _evaluate_candidate_guardrails(
         self,
         candidate: dict[str, Any],
         extracted: dict[str, Any],
         brief: ProspectingBrief,
+        *,
+        geo_center: dict[str, Any] | None = None,
     ) -> list[str]:
         failures: list[str] = []
         if self._is_dead_page(candidate, extracted):
@@ -1633,7 +1604,7 @@ class ProspectingAgentService:
             failures.append("marketplace_or_directory")
         if not bool(extracted.get("is_relevant", True)):
             failures.append("vertical_mismatch")
-        if not self._matches_requested_geography(candidate, extracted, brief):
+        if not await self._matches_requested_geography(candidate, extracted, brief, geo_center=geo_center):
             failures.append("geography_mismatch")
         if self._requires_direct_contact(brief) and not (extracted.get("email") or extracted.get("phone")):
             failures.append("missing_direct_contact")
@@ -1668,7 +1639,8 @@ class ProspectingAgentService:
         return failures
 
     def _requires_direct_contact(self, brief: ProspectingBrief) -> bool:
-        if brief.vertical in {"asesoria", "inmobiliaria", "restaurants", "salud"}:
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        if vertical.scoring_rules.get("requires_direct_contact"):
             return True
         requested = " ".join([brief.target_description, *brief.must_have]).lower()
         return any(token in requested for token in ("email", "telefono", "teléfono", "contacto"))
@@ -1679,6 +1651,7 @@ class ProspectingAgentService:
         extracted: dict[str, Any],
         vertical: str,
     ) -> bool:
+        vertical_row = self._verticals.get(vertical) or self._verticals.get_fallback()
         blob = _normalize_text(
             " ".join(
                 [
@@ -1691,18 +1664,20 @@ class ProspectingAgentService:
                 ]
             )
         )
-        for hint in [*BLOCKED_HINT_PREFIXES, *VERTICAL_BLOCKLIST.get(vertical, ())]:
+        blocked_hints = [*BLOCKED_HINT_PREFIXES, *vertical_row.discovery_config.get("blocked_hint_prefixes", [])]
+        for hint in blocked_hints:
             if _normalize_text(hint) in blob:
                 return True
-        if vertical == "inmobiliaria":
-            return any(token in blob for token in ("portal inmobiliario", "anuncios de pisos", "buscador de viviendas"))
-        return False
+        blocked_phrases = vertical_row.discovery_config.get("blocked_listing_phrases", [])
+        return any(token in blob for token in blocked_phrases)
 
-    def _matches_requested_geography(
+    async def _matches_requested_geography(
         self,
         candidate: dict[str, Any],
         extracted: dict[str, Any],
         brief: ProspectingBrief,
+        *,
+        geo_center: dict[str, Any] | None = None,
     ) -> bool:
         requested_city = _normalize_text(brief.city)
         requested_province = _normalize_text(brief.province)
@@ -1723,7 +1698,28 @@ class ProspectingAgentService:
         )
         city_ok = not requested_city or requested_city in blob
         province_ok = not requested_province or requested_province in blob or city_ok
-        return city_ok and province_ok
+        if city_ok and province_ok:
+            return True
+
+        # El nombre exacto de brief.city no aparece en el texto — pasa esto
+        # habitualmente con pedanias/barrios pequenos (ej. "Villamayor de
+        # Gallego") cuyo callejero real usa el nombre de la ciudad grande
+        # (Zaragoza) en vez de la pedania. Si el usuario pidio un radio
+        # explicito y tenemos el centro geocodificado del brief, se comprueba
+        # la distancia real en vez de rechazar por texto.
+        if not brief.radius_km or not geo_center or geo_center.get("lat") is None:
+            return False
+        candidate_place = (
+            str(extracted.get("address") or candidate.get("address") or "").strip()
+            or ", ".join(filter(None, [extracted.get("city", ""), extracted.get("province", "")]))
+        )
+        if not candidate_place:
+            return False
+        candidate_geo = await self._geocode_cache.resolve(candidate_place)
+        if not candidate_geo or candidate_geo.get("lat") is None:
+            return False
+        distance_km = haversine_km(geo_center["lat"], geo_center["lon"], candidate_geo["lat"], candidate_geo["lon"])
+        return distance_km <= brief.radius_km
 
     def _crm_blockers(self, result: dict[str, Any], brief: ProspectingBrief) -> list[str]:
         blockers: list[str] = []

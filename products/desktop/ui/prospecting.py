@@ -19,7 +19,6 @@ from nexus.api.schemas.prospecting import (
     ProspectingRunRequest,
     ProspectingRunResponse,
 )
-from nexus.prospecting.models import normalize_vertical
 from nexus.prospecting import ProspectingAgentService
 router = APIRouter()
 
@@ -98,7 +97,7 @@ def _fallback_parse(text: str) -> dict:
     elif any(w in t for w in ("restaurante", "hostelería", "bar ", "cafetería")):
         vertical = "restaurants"
     else:
-        vertical = normalize_vertical("custom", fallback_text=text)
+        vertical = "custom"
 
     represented_by = "automato" if "automato" in t else "assets"
 

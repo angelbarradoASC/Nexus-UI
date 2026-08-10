@@ -369,6 +369,11 @@ class TestChatStreamEndpoint:
     def test_stream_content_type_es_event_stream(self, authed_client_with_conv):
         client, _ = authed_client_with_conv
         import main as app_module
+        # app_module._redis es None cuando no hay Redis real disponible en el
+        # entorno (el lifespan de main.py lo deja en None si el ping falla al
+        # arrancar) — se sustituye el objeto entero, no solo .pubsub, para que
+        # el test sea autonomo y no dependa de tener Redis corriendo.
+        app_module._redis = AsyncMock()
         app_module._redis.pubsub = MagicMock(
             return_value=self._make_done_pubsub({"type": "done"})
         )
@@ -378,6 +383,11 @@ class TestChatStreamEndpoint:
     def test_stream_header_no_cache(self, authed_client_with_conv):
         client, _ = authed_client_with_conv
         import main as app_module
+        # app_module._redis es None cuando no hay Redis real disponible en el
+        # entorno (el lifespan de main.py lo deja en None si el ping falla al
+        # arrancar) — se sustituye el objeto entero, no solo .pubsub, para que
+        # el test sea autonomo y no dependa de tener Redis corriendo.
+        app_module._redis = AsyncMock()
         app_module._redis.pubsub = MagicMock(
             return_value=self._make_done_pubsub({"type": "done"})
         )
@@ -409,6 +419,7 @@ class TestChatStreamEndpoint:
         pubsub.unsubscribe = AsyncMock()
         pubsub.aclose      = AsyncMock()
         pubsub.get_message = MagicMock(side_effect=_get_message)
+        app_module._redis = AsyncMock()
         app_module._redis.pubsub = MagicMock(return_value=pubsub)
 
         resp = client.get("/chat/stream/test-task")
@@ -419,6 +430,7 @@ class TestChatStreamEndpoint:
     def test_stream_evento_error_termina_stream(self, authed_client_with_conv):
         client, _ = authed_client_with_conv
         import main as app_module
+        app_module._redis = AsyncMock()
         app_module._redis.pubsub = MagicMock(
             return_value=self._make_done_pubsub({"type": "error", "content": "Fallo"})
         )

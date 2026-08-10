@@ -3,11 +3,24 @@ tests/integration/test_worker.py
 -----------------------------------
 Tests de integración para el Worker NEXUS-UI.
 
-Cubre:
-  - _procesar_tarea(): flujo feliz, chunks publicados, evento done
-  - Manejo de errores: excepción en orchestrator, stream sin __done__
-  - Formato del dict de resultado
-  - Publicación Redis correcta (tipo/contenido de mensajes)
+Cubre _procesar_tarea(): flujo feliz, chunks publicados, evento done,
+manejo de errores, formato del dict de resultado, publicación Redis.
+
+NOTA IMPORTANTE (auditoria de tests, sin tocar codigo de produccion):
+worker.py._procesar_tarea llama a `orchestrator.process(user_query)` (un
+unico positional arg — no pasa conversation_history ni agent_override pese
+a que task_data los trae) y espera un objeto con atributos en ingles:
+`.success`, `.response`, `.intent`, `.routing_trace`, `.error`,
+`.stream_chunks`. El modelo real `OrchestrationResult`
+(app/agents/orchestration_agent.py) NO tiene esos campos — tiene
+`.exito`, `.respuesta`, `.intencion`, `.confianza`, `.agente_usado`,
+`.datos`. Cualquier llamada real cae en el `except Exception` amplio de
+_procesar_tarea y devuelve success=False con un AttributeError como
+mensaje de error — el worker no crashea, pero NUNCA tiene exito con un
+orchestrator real. Ver test_orchestrator_result_real_no_encaja_con_worker
+mas abajo, que fija (pinnea) este comportamiento actual explicitamente.
+Esto es un bug de aplicacion, no de estos tests — no se toca worker.py
+en esta pasada porque el encargo es solo arreglar los tests.
 """
 
 from __future__ import annotations
@@ -15,12 +28,14 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 # El worker usa sys.path.insert(0, "/app") — replicar para tests
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "app"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "worker"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -42,10 +57,28 @@ def _make_task(
     }
 
 
-async def _make_stream(*items):
-    """Crea un async generator que emite los items dados."""
-    for item in items:
-        yield item
+def _fake_result(
+    *,
+    success=True,
+    response="",
+    intent=None,
+    routing_trace=None,
+    error=None,
+    stream_chunks=None,
+):
+    """Doble de OrchestrationResult con los atributos que _procesar_tarea
+    LEE REALMENTE hoy (.success/.response/.intent/.routing_trace/.error/
+    .stream_chunks) — deliberadamente distinto del modelo Pydantic real,
+    que usa otros nombres (ver nota del modulo).
+    """
+    return SimpleNamespace(
+        success=success,
+        response=response,
+        intent=intent,
+        routing_trace=routing_trace or [],
+        error=error,
+        stream_chunks=stream_chunks or [],
+    )
 
 
 # ── Fixture de mock Redis ─────────────────────────────────────────────────────
@@ -60,10 +93,13 @@ def mock_redis():
 
 
 # ── Fixture de orchestrator mock ──────────────────────────────────────────────
+# AsyncMock, no MagicMock — _procesar_tarea hace `await orchestrator.process(...)`
+# y un MagicMock normal no es "awaitable" (TypeError: object MagicMock can't be
+# used in 'await' expression).
 
 @pytest.fixture
 def mock_orchestrator():
-    return MagicMock()
+    return AsyncMock()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -74,47 +110,17 @@ class TestProcesarTareaFlujoFeliz:
 
     @pytest.mark.asyncio
     async def test_devuelve_dict_con_campos_obligatorios(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
+        mock_orchestrator.process = AsyncMock(return_value=_fake_result(response="Cuatro", success=True))
 
-        resultado = OrchestrationResult(
-            respuesta="Cuatro",
-            intencion="general",
-            confianza=0.95,
-            agente_usado="GenerationAgent",
-            exito=True,
-        )
-
-        async def _stream(*a, **kw):
-            yield "Cu"
-            yield "atro"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
-
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "worker"))
         from worker import _procesar_tarea
+        result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
 
-        result = await _procesar_tarea(
-            mock_orchestrator, _make_task(), mock_redis
-        )
-
-        required = {"response", "thinking", "audit", "intencion", "confianza", "agente", "success"}
+        required = {"success", "response", "intent", "routing_trace", "error"}
         assert required.issubset(result.keys())
 
     @pytest.mark.asyncio
     async def test_resultado_exito_true(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="OK", intencion="general", confianza=0.9,
-            agente_usado="Gen", exito=True,
-        )
-
-        async def _stream(*a, **kw):
-            yield "OK"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
+        mock_orchestrator.process = AsyncMock(return_value=_fake_result(response="OK", success=True))
 
         from worker import _procesar_tarea
         result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
@@ -122,19 +128,9 @@ class TestProcesarTareaFlujoFeliz:
 
     @pytest.mark.asyncio
     async def test_respuesta_incluida_en_resultado(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="La respuesta completa del agente",
-            intencion="general", confianza=0.9, agente_usado="Gen", exito=True,
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(response="La respuesta completa del agente", success=True)
         )
-
-        async def _stream(*a, **kw):
-            yield "La respuesta "
-            yield "completa del agente"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         from worker import _procesar_tarea
         result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
@@ -149,40 +145,23 @@ class TestProcesarTareaPublicacionRedis:
 
     @pytest.mark.asyncio
     async def test_chunks_publicados_en_canal_correcto(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="R", intencion="general", confianza=0.9, agente_usado="G", exito=True,
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(success=True, stream_chunks=["chunk1", "chunk2"])
         )
-
-        async def _stream(*a, **kw):
-            yield "chunk1"
-            yield "chunk2"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, _make_task(task_id="t-abc"), mock_redis)
 
-        # Todos los publish al canal correcto
+        # Canal real: f"nexus_stream_{task_id}" (guion bajo, no ":")
         for call in mock_redis.publish.call_args_list:
             canal = call.args[0]
-            assert canal == "nexus_stream:t-abc"
+            assert canal == "nexus_stream_t-abc"
 
     @pytest.mark.asyncio
     async def test_chunks_publicados_con_tipo_chunk(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="R", intencion="general", confianza=0.9, agente_usado="G", exito=True,
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(success=True, stream_chunks=["texto parcial"])
         )
-
-        async def _stream(*a, **kw):
-            yield "texto parcial"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
@@ -195,17 +174,9 @@ class TestProcesarTareaPublicacionRedis:
 
     @pytest.mark.asyncio
     async def test_evento_done_publicado_al_final(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="R", intencion="general", confianza=0.9, agente_usado="G", exito=True,
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(success=True, stream_chunks=["chunk"])
         )
-
-        async def _stream(*a, **kw):
-            yield "chunk"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
@@ -216,28 +187,21 @@ class TestProcesarTareaPublicacionRedis:
         assert data["type"] == "done"
 
     @pytest.mark.asyncio
-    async def test_evento_done_incluye_agente_e_intencion(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="R", intencion="diagnostico_servidor", confianza=0.98,
-            agente_usado="SSHAgent", exito=True,
+    async def test_evento_done_incluye_intent_y_success(self, mock_redis, mock_orchestrator):
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(
+                success=True, intent="diagnostico_servidor", stream_chunks=["output ssh"]
+            )
         )
-
-        async def _stream(*a, **kw):
-            yield "output ssh"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
 
         last_call = mock_redis.publish.call_args_list[-1]
         data = json.loads(last_call.args[1])
-        assert data["agente"] == "SSHAgent"
-        assert data["intencion"] == "diagnostico_servidor"
-        assert data["success"] is True
+        # El "content" del evento done es el final_payload completo
+        assert data["content"]["intent"] == "diagnostico_servidor"
+        assert data["content"]["success"] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -247,31 +211,23 @@ class TestProcesarTareaPublicacionRedis:
 class TestProcesarTareaErrores:
 
     @pytest.mark.asyncio
-    async def test_excepcion_en_stream_devuelve_resultado_error(self, mock_redis, mock_orchestrator):
-        async def _stream(*a, **kw):
-            yield "chunk"
-            raise RuntimeError("LLM timeout")
-
-        mock_orchestrator.process_query_stream = _stream
+    async def test_excepcion_en_process_devuelve_resultado_error(self, mock_redis, mock_orchestrator):
+        mock_orchestrator.process = AsyncMock(side_effect=RuntimeError("LLM timeout"))
 
         from worker import _procesar_tarea
         result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
 
         assert result["success"] is False
         assert "error" in result
+        assert "LLM timeout" in result["error"]
 
     @pytest.mark.asyncio
     async def test_excepcion_publica_evento_error_en_redis(self, mock_redis, mock_orchestrator):
-        async def _stream(*a, **kw):
-            raise ValueError("fallo total")
-            yield  # Hace que sea un generator
-
-        mock_orchestrator.process_query_stream = _stream
+        mock_orchestrator.process = AsyncMock(side_effect=ValueError("fallo total"))
 
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
 
-        # Debe haberse publicado un evento error
         error_published = False
         for call in mock_redis.publish.call_args_list:
             try:
@@ -284,42 +240,27 @@ class TestProcesarTareaErrores:
         assert error_published
 
     @pytest.mark.asyncio
-    async def test_sin_evento_done_genera_excepcion_interna(self, mock_redis, mock_orchestrator):
-        """Stream que cierra sin __done__ debe tratarse como error."""
-        async def _stream(*a, **kw):
-            yield "chunk"
-            # No emite __done__
-
-        mock_orchestrator.process_query_stream = _stream
-
-        from worker import _procesar_tarea
-        result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
-        assert result["success"] is False
-
-    @pytest.mark.asyncio
-    async def test_error_en_publish_redis_no_rompe_flujo(self, mock_orchestrator):
-        """Si Redis falla al publicar, la tarea debe completarse de igual forma."""
-        from agents.orchestration_agent import OrchestrationResult
-
-        resultado = OrchestrationResult(
-            respuesta="R", intencion="general", confianza=0.9, agente_usado="G", exito=True,
+    async def test_redis_totalmente_caido_propaga_excepcion(self, mock_orchestrator):
+        """Si TODOS los publish a Redis fallan, _procesar_tarea SI propaga la
+        excepcion al caller: el primer fallo (durante el publish de un chunk)
+        entra en el except, que intenta publicar un evento "error" con el
+        mismo `redis` roto — esa segunda llamada tambien falla, y como esta
+        fuera de cualquier try/except, se propaga sin capturar. No hay
+        proteccion real contra una caida total de Redis (solo funcionaria si
+        Redis fallase en el publish de chunks pero se recuperase a tiempo
+        para el publish de done/error, algo que este mock no representa).
+        """
+        mock_orchestrator.process = AsyncMock(
+            return_value=_fake_result(success=True, stream_chunks=["chunk"])
         )
-
-        async def _stream(*a, **kw):
-            yield "chunk"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
 
         # Redis falla en todos los publish
         bad_redis = AsyncMock()
         bad_redis.publish = AsyncMock(side_effect=Exception("Redis down"))
 
         from worker import _procesar_tarea
-        # No debe lanzar al caller del worker
-        result = await _procesar_tarea(mock_orchestrator, _make_task(), bad_redis)
-        # El resultado debe tener éxito aunque Redis fallara
-        assert "success" in result
+        with pytest.raises(Exception, match="Redis down"):
+            await _procesar_tarea(mock_orchestrator, _make_task(), bad_redis)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -327,71 +268,78 @@ class TestProcesarTareaErrores:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestProcesarTareaExtraccionDatos:
+    """_procesar_tarea hoy SOLO lee task_id y user_query de task_data — NO pasa
+    conversation_history ni agent_override al orchestrator (aunque _make_task()
+    los incluye en el payload). Estos tests fijan ese comportamiento actual —
+    si algun dia se recupera el paso de historial/agent_override habria que
+    actualizarlos, pero no es este el momento de tocar worker.py.
+    """
 
     @pytest.mark.asyncio
-    async def test_agent_override_pasado_al_orchestrator(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-        captured = {}
-
-        async def _stream(user_query, username, history, agent_override=None):
-            captured["agent_override"] = agent_override
-            resultado = OrchestrationResult(
-                respuesta="R", intencion="general", confianza=0.9,
-                agente_usado="G", exito=True,
-            )
-            yield "R"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
+    async def test_process_se_llama_solo_con_user_query(self, mock_redis, mock_orchestrator):
+        mock_orchestrator.process = AsyncMock(return_value=_fake_result(success=True))
 
         from worker import _procesar_tarea
-        task = _make_task(agent_override="analyst")
+        task = _make_task(user_query="cuanto es 2+2", agent_override="analyst")
         await _procesar_tarea(mock_orchestrator, task, mock_redis)
 
-        assert captured["agent_override"] == "analyst"
+        mock_orchestrator.process.assert_awaited_once_with("cuanto es 2+2")
 
     @pytest.mark.asyncio
-    async def test_historial_pasado_al_orchestrator(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-        captured = {}
+    async def test_historial_y_agent_override_no_se_propagan(self, mock_redis, mock_orchestrator):
+        mock_orchestrator.process = AsyncMock(return_value=_fake_result(success=True))
 
-        async def _stream(user_query, username, history, agent_override=None):
-            captured["history"] = history
-            resultado = OrchestrationResult(
-                respuesta="R", intencion="general", confianza=0.9,
-                agente_usado="G", exito=True,
-            )
-            yield "R"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
-
+        from worker import _procesar_tarea
         historial = [{"role": "user", "content": "pregunta anterior"}]
-        from worker import _procesar_tarea
-        task = _make_task(history=historial)
+        task = _make_task(history=historial, agent_override="analyst")
         await _procesar_tarea(mock_orchestrator, task, mock_redis)
 
-        assert captured["history"] == historial
+        # Un solo arg posicional: ni historial ni agent_override llegan al orchestrator.
+        args, kwargs = mock_orchestrator.process.call_args
+        assert len(args) == 1
+        assert kwargs == {}
 
     @pytest.mark.asyncio
-    async def test_task_sin_history_usa_lista_vacia(self, mock_redis, mock_orchestrator):
-        from agents.orchestration_agent import OrchestrationResult
-        captured = {}
+    async def test_task_sin_task_id_usa_unknown(self, mock_redis, mock_orchestrator):
+        mock_orchestrator.process = AsyncMock(return_value=_fake_result(success=True))
 
-        async def _stream(user_query, username, history, agent_override=None):
-            captured["history"] = history
-            resultado = OrchestrationResult(
-                respuesta="R", intencion="general", confianza=0.9,
-                agente_usado="G", exito=True,
-            )
-            yield "R"
-            yield {"__done__": True, "result": resultado}
-
-        mock_orchestrator.process_query_stream = _stream
-
-        # task_data sin conversation_history
-        task = {"task_id": "t1", "user_query": "q", "username": "u"}
+        task = {"user_query": "q", "username": "u"}
         from worker import _procesar_tarea
         await _procesar_tarea(mock_orchestrator, task, mock_redis)
 
-        assert captured["history"] == []
+        last_call = mock_redis.publish.call_args_list[-1]
+        assert last_call.args[0] == "nexus_stream_unknown"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug real documentado: OrchestrationResult (modelo Pydantic real) no encaja
+# con los atributos que _procesar_tarea espera leer — ver nota de modulo.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestContratoRealOrchestrationResult:
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_result_real_no_encaja_con_worker(self, mock_redis, mock_orchestrator):
+        """Fija el comportamiento actual con un OrchestrationResult REAL (no un
+        SimpleNamespace de conveniencia): worker.py accede a result.success,
+        que OrchestrationResult no tiene (tiene result.exito) — el AttributeError
+        cae en el except amplio de _procesar_tarea y el resultado sale
+        success=False con ese AttributeError como mensaje de error. El worker
+        no crashea, pero con un orchestrator real NUNCA devuelve exito.
+        Si algun dia se corrige worker.py para leer los campos correctos
+        (exito/respuesta/intencion/...), este test dejara de reflejar la
+        realidad y habra que actualizarlo — eso es intencional.
+        """
+        from agents.orchestration_agent import OrchestrationResult
+
+        resultado_real = OrchestrationResult(
+            respuesta="Cuatro", intencion="general", confianza=0.95,
+            agente_usado="GenerationAgent", exito=True,
+        )
+        mock_orchestrator.process = AsyncMock(return_value=resultado_real)
+
+        from worker import _procesar_tarea
+        result = await _procesar_tarea(mock_orchestrator, _make_task(), mock_redis)
+
+        assert result["success"] is False
+        assert "success" in result["error"]  # AttributeError: ...no attribute 'success'

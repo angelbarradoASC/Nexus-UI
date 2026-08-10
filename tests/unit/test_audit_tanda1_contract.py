@@ -72,7 +72,13 @@ def test_desktop_backend_arranca_y_health_sigue_estable(tmp_path):
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    # "llm" (snapshot del watchdog del router) se añadió después de este
+    # contrato — se comprueba que existe pero no su forma exacta, que
+    # depende del estado del router en cada arranque.
+    assert "llm" in body
+    body.pop("llm")
+    assert body == {
         "status": "ok",
         "version": app_module.cfg.app_version,
         "redis": False,
@@ -95,7 +101,9 @@ def test_login_valido_conserva_redireccion_esperada(tmp_path):
             follow_redirects=False,
         )
 
-    assert response.status_code == 302
+    # /login usa 303 See Other (no 302) para forzar GET en la redireccion
+    # tras el POST — ver products/desktop/backend/app.py.
+    assert response.status_code == 303
     assert response.headers["location"] == "/open-nexus"
     assert "session_token=" in response.headers.get("set-cookie", "")
 
@@ -112,7 +120,7 @@ def test_login_invalido_conserva_redireccion_esperada(tmp_path):
             follow_redirects=False,
         )
 
-    assert response.status_code == 302
+    assert response.status_code == 303
     assert unquote(response.headers["location"]) == "/login?error=Credenciales incorrectas"
 
 

@@ -11,9 +11,15 @@ from nexus.application.services.assistant_runtime_core import (
 @dataclass
 class _FakeCoordinator:
     captured_resolution: dict | None = None
+    captured_history: list | None = None
 
-    async def handle_chat(self, payload, *, resolution_override=None):
+    async def handle_chat(self, payload, *, resolution_override=None, history=None):
+        # AssistantRuntimeCore.execute() siempre llama con resolution_override
+        # Y history — sin el parametro history aqui, la llamada real lanza
+        # TypeError, que execute() atrapa (ve "history" en el mensaje) y
+        # reintenta SIN resolution_override, perdiendo la resolucion pasada.
         self.captured_resolution = resolution_override
+        self.captured_history = history
         return type(
             "Resp",
             (),

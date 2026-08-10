@@ -155,9 +155,30 @@ class TestCallExitoso:
 
 
 class TestRetries:
+    """OJO: estos dos tests llamaban a router.call() (bucle multi-nivel:
+    L0/L2/L3 en el fixture `router`), que escala al SIGUIENTE nivel en
+    cuanto un intento falla — no reintenta el mismo nivel salvo en 5xx
+    "puros" (ver _llamar_con_retry: timeout/429/4xx hacen `break` inmediato,
+    solo lo que no cae en ninguno de esos tres casos llega al backoff real).
+    Con 3 niveles configurados, call_count siempre salia en 3 sin importar
+    el tipo de error — el docstring original de test_reintenta_en_timeout
+    ("reintenta hasta MAX_RETRIES en timeout") describia un comportamiento
+    que el codigo actual ya no tiene, y test_no_reintenta_en_401 fallaba
+    porque escalar a 3 niveles distintos nunca puede dar call_count == 1.
+
+    Se corrige llamando a _llamar_con_retry() directamente sobre UN solo
+    nivel, que es lo que de verdad decide si se reintenta o no — asi el
+    test aisla el comportamiento que dice comprobar, sin que la escalada
+    entre niveles contamine el conteo.
+    """
+
     @pytest.mark.asyncio
-    async def test_reintenta_en_timeout(self, router):
-        """Debe reintentar hasta MAX_RETRIES veces en timeout."""
+    async def test_timeout_escala_sin_reintentar_el_mismo_nivel(self, router):
+        """Timeout: _llamar_con_retry hace `break` inmediato (comentario en
+        el codigo: "no tiene sentido reintentar si el nivel esta lento") —
+        un solo intento por nivel, la recuperacion viene de escalar a otro
+        nivel en call(), no de reintentar el mismo.
+        """
         call_count = 0
 
         async def mock_post(*args, **kwargs):
@@ -170,15 +191,19 @@ class TestRetries:
             mock_client.post = mock_post
             mock_get_client.return_value = mock_client
 
-            result = await router.call([{"role": "user", "content": "test"}])
+            nivel = router._levels[0]
+            result = await router._llamar_con_retry(
+                nivel, [{"role": "user", "content": "test"}],
+                temperature=0.45, max_tokens=1200, timeout=5.0,
+            )
 
         assert result.error is not None
         assert "timeout" in result.error
-        assert call_count == 3  # 1 intento + 2 reintentos = 3
+        assert call_count == 1  # Sin reintentos dentro del mismo nivel
 
     @pytest.mark.asyncio
     async def test_no_reintenta_en_401(self, router):
-        """No debe reintentar en errores 4xx (salvo 429)."""
+        """No debe reintentar en errores 4xx (salvo 429) dentro del mismo nivel."""
         call_count = 0
 
         async def mock_post(*args, **kwargs):
@@ -192,8 +217,13 @@ class TestRetries:
             mock_client.post = mock_post
             mock_get_client.return_value = mock_client
 
-            result = await router.call([{"role": "user", "content": "test"}])
+            nivel = router._levels[0]
+            result = await router._llamar_con_retry(
+                nivel, [{"role": "user", "content": "test"}],
+                temperature=0.45, max_tokens=1200, timeout=5.0,
+            )
 
+        assert result.error is not None
         assert call_count == 1  # Sin reintentos
 
 

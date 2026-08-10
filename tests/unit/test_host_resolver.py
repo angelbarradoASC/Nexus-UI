@@ -52,14 +52,18 @@ def resolver(tmp_path):
     hosts_file = tmp_path / "known_hosts.json"
     hosts_file.write_text(json.dumps(_KNOWN_HOSTS_DATA), encoding="utf-8")
 
-    with patch("agents.tools.host_resolver.HostResolver.__init__") as mock_init:
-        def _init(self):
-            self.hosts_file = hosts_file
-            self.known_hosts = self._cargar_hosts()
-            self.default_user = "defaultuser"
-            self.default_port = 22
-        mock_init.side_effect = _init
-        from agents.tools.host_resolver import HostResolver
+    from agents.tools.host_resolver import HostResolver
+
+    def _init(self):
+        self.hosts_file = hosts_file
+        self.known_hosts = self._cargar_hosts()
+        self.default_user = "defaultuser"
+        self.default_port = 22
+
+    # new=_init (no side_effect de un MagicMock) porque el mock necesita ser
+    # un descriptor real para que Python le pase `self` al llamar HostResolver() —
+    # un MagicMock no implementa __get__, asi que side_effect nunca recibe self.
+    with patch.object(HostResolver, "__init__", new=_init):
         r = HostResolver()
     return r
 
@@ -70,14 +74,15 @@ def resolver_vacio(tmp_path):
     hosts_file = tmp_path / "known_hosts_empty.json"
     hosts_file.write_text(json.dumps({"hosts": {}}), encoding="utf-8")
 
-    with patch("agents.tools.host_resolver.HostResolver.__init__") as mock_init:
-        def _init(self):
-            self.hosts_file = hosts_file
-            self.known_hosts = self._cargar_hosts()
-            self.default_user = "defaultuser"
-            self.default_port = 22
-        mock_init.side_effect = _init
-        from agents.tools.host_resolver import HostResolver
+    from agents.tools.host_resolver import HostResolver
+
+    def _init(self):
+        self.hosts_file = hosts_file
+        self.known_hosts = self._cargar_hosts()
+        self.default_user = "defaultuser"
+        self.default_port = 22
+
+    with patch.object(HostResolver, "__init__", new=_init):
         r = HostResolver()
     return r
 
@@ -225,14 +230,15 @@ class TestRecargarHosts:
         hosts_file = tmp_path / "known_hosts.json"
         hosts_file.write_text(json.dumps({"hosts": {}}), encoding="utf-8")
 
-        with patch("agents.tools.host_resolver.HostResolver.__init__") as mock_init:
-            def _init(self):
-                self.hosts_file = hosts_file
-                self.known_hosts = self._cargar_hosts()
-                self.default_user = "defaultuser"
-                self.default_port = 22
-            mock_init.side_effect = _init
-            from agents.tools.host_resolver import HostResolver
+        from agents.tools.host_resolver import HostResolver
+
+        def _init(self):
+            self.hosts_file = hosts_file
+            self.known_hosts = self._cargar_hosts()
+            self.default_user = "defaultuser"
+            self.default_port = 22
+
+        with patch.object(HostResolver, "__init__", new=_init):
             resolver = HostResolver()
 
         assert resolver.resolver("nuevo") is None  # No existe todavía
@@ -257,27 +263,29 @@ class TestCargaFicheroProblemas:
 
     def test_fichero_inexistente_arranca_vacio(self, tmp_path):
         non_existent = tmp_path / "no_existe.json"
-        with patch("agents.tools.host_resolver.HostResolver.__init__") as mock_init:
-            def _init(self):
-                self.hosts_file = non_existent
-                self.known_hosts = self._cargar_hosts()
-                self.default_user = "u"
-                self.default_port = 22
-            mock_init.side_effect = _init
-            from agents.tools.host_resolver import HostResolver
+        from agents.tools.host_resolver import HostResolver
+
+        def _init(self):
+            self.hosts_file = non_existent
+            self.known_hosts = self._cargar_hosts()
+            self.default_user = "u"
+            self.default_port = 22
+
+        with patch.object(HostResolver, "__init__", new=_init):
             resolver = HostResolver()
         assert resolver.known_hosts == {}
 
     def test_json_malformado_arranca_vacio(self, tmp_path):
         bad_file = tmp_path / "bad.json"
         bad_file.write_text("{invalid json", encoding="utf-8")
-        with patch("agents.tools.host_resolver.HostResolver.__init__") as mock_init:
-            def _init(self):
-                self.hosts_file = bad_file
-                self.known_hosts = self._cargar_hosts()
-                self.default_user = "u"
-                self.default_port = 22
-            mock_init.side_effect = _init
-            from agents.tools.host_resolver import HostResolver
+        from agents.tools.host_resolver import HostResolver
+
+        def _init(self):
+            self.hosts_file = bad_file
+            self.known_hosts = self._cargar_hosts()
+            self.default_user = "u"
+            self.default_port = 22
+
+        with patch.object(HostResolver, "__init__", new=_init):
             resolver = HostResolver()
         assert resolver.known_hosts == {}

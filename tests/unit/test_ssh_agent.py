@@ -298,7 +298,13 @@ class TestEjecutarDiagnosticoSSH:
     def test_bad_host_key_lanza_ssh_host_key_error(self, mock_llm_router):
         import paramiko as pm
         mock_client = self._make_mock_client()
-        mock_client.connect.side_effect = pm.BadHostKeyException("h", None, None)
+        # BadHostKeyException.__str__ llama a got_key.get_base64() y
+        # expected_key.get_base64() — con None ahi paramiko revienta con
+        # AttributeError al formatear el mensaje, antes incluso de que
+        # SSHAgent pueda capturar la excepcion.
+        fake_key = MagicMock()
+        fake_key.get_base64.return_value = "AAAAfakekeydata"
+        mock_client.connect.side_effect = pm.BadHostKeyException("h", fake_key, fake_key)
         with patch("agents.ssh_agent.paramiko.SSHClient", return_value=mock_client):
             from agents.ssh_agent import SSHAgent, _SSHHostKeyError
             agent = SSHAgent(router=mock_llm_router)

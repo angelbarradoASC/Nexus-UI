@@ -262,13 +262,16 @@ class _FakeCoordinator:
 
 class _FakeProspecting:
     async def run(self, payload):
+        # La ruta real (/api/nexus/prospecting/run) siempre pasa el objeto
+        # ProspectingRunRequest tal cual (FastAPI ya lo parsea del body) —
+        # nunca un dict, asi que es .dry_run (atributo), no .get("dry_run").
         return {
             "status": "completed",
             "run_id": "pros-001",
             "summary": {"usable_results": 1, "discarded": 0, "duplicates": 0},
             "results_count": 1,
             "discarded_count": 0,
-            "dry_run": payload.get("dry_run", True),
+            "dry_run": payload.dry_run,
             "queries": ["restaurante zaragoza eventos"],
         }
 

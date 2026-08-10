@@ -8,6 +8,11 @@ __pycache__/
 .coverage
 coverage.xml
 
+# Reportes de test generados localmente (scripts/tests_to_excel.py) — se
+# regeneran en el momento, no son artefactos versionables.
+_junit_report.xml
+test_report.xlsx
+
 # Virtual environments
 .venv/
 venv/

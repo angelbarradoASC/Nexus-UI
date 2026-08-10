@@ -193,8 +193,7 @@ class TestResearcherAgent:
     async def test_ejecutar_devuelve_resultado_exito(self, mock_llm_router, llm_response_ok):
         mock_llm_router.call = AsyncMock(return_value=llm_response_ok)
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent()
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router)
         result = await agent.ejecutar("Investiga sobre Python", {}, [])
         assert result.exito is True
         assert result.respuesta
@@ -204,8 +203,7 @@ class TestResearcherAgent:
         """Sin web_agent inyectado, el agente debe funcionar como GenerationAgent."""
         mock_llm_router.call = AsyncMock(return_value=llm_response_ok)
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent(web_agent=None)
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router, web_agent=None)
         result = await agent.ejecutar("Investiga sobre async Python", {}, [])
         assert result.exito is True
 
@@ -217,8 +215,7 @@ class TestResearcherAgent:
         mock_llm_router.call = AsyncMock(return_value=llm_response_ok)
         mock_web_agent = AsyncMock()
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent(web_agent=mock_web_agent)
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router, web_agent=mock_web_agent)
         # Consulta sin keywords "hoy", "noticias", "precio"...
         await agent.ejecutar("Explícame el algoritmo quicksort", {}, [])
         mock_web_agent.ejecutar.assert_not_called()
@@ -238,8 +235,7 @@ class TestResearcherAgent:
         mock_web_agent = MagicMock()
         mock_web_agent.ejecutar = AsyncMock(return_value=mock_web_result)
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent(web_agent=mock_web_agent)
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router, web_agent=mock_web_agent)
         # Consulta con keyword de actualidad
         await agent.ejecutar("noticias recientes sobre Python hoy", {}, [])
         mock_web_agent.ejecutar.assert_called_once()
@@ -253,8 +249,7 @@ class TestResearcherAgent:
         mock_web_agent = MagicMock()
         mock_web_agent.ejecutar = AsyncMock(side_effect=Exception("Web timeout"))
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent(web_agent=mock_web_agent)
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router, web_agent=mock_web_agent)
         # No debe lanzar excepción
         result = await agent.ejecutar("últimas noticias Python", {}, [])
         assert result.exito is True
@@ -262,8 +257,7 @@ class TestResearcherAgent:
     @pytest.mark.asyncio
     async def test_ejecutar_stream_emite_chunks(self, mock_llm_router_stream):
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent(web_agent=None)
-        agent.router = mock_llm_router_stream
+        agent = ResearcherAgent(router=mock_llm_router_stream, web_agent=None)
         chunks = []
         async for chunk in agent.ejecutar_stream("Investiga arquitecturas", []):
             chunks.append(chunk)
@@ -288,8 +282,7 @@ class TestResearcherAgent:
     ):
         mock_llm_router.call = AsyncMock(return_value=llm_response_ok)
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent()
-        agent.router = mock_llm_router
+        agent = ResearcherAgent(router=mock_llm_router)
         await agent.ejecutar("query", {}, [])
         messages = mock_llm_router.call.call_args.args[0]
         system_content = messages[0]["content"].lower()
@@ -328,7 +321,7 @@ class TestModeAgentInheritance:
         agent = CoderAgent(router=mock_llm_router)
         assert agent._nombre()
 
-    def test_researcher_nombre(self):
+    def test_researcher_nombre(self, mock_llm_router):
         from agents.researcher_agent import ResearcherAgent
-        agent = ResearcherAgent()
+        agent = ResearcherAgent(router=mock_llm_router)
         assert agent._nombre()

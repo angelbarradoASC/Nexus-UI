@@ -1,13 +1,24 @@
-/* nexus_campaign.css — campaña diaria de prospección */
+/* nexus_campaign.css — campaña diaria de prospección
+   Migrado al mismo sistema visual que PEPO/Sales/Operador (nexus_v1.css,
+   tema claro) — antes usaba open_nexus.css (tema oscuro), inconsistente con
+   el resto de Desktop. Mismo patron que nexus_pepo.css: .workspace-campaign
+   fija la altura de pantalla completa sin scroll de pagina, y cada panel
+   hace scroll internamente — asi ningun panel puede solaparse con otro
+   aunque su contenido no quepa (la causa raiz del solapamiento anterior). */
 
-/* ── Layout ─────────────────────────────────────────────────────────────── */
+.workspace-campaign {
+    height: calc(100dvh / var(--ui-zoom));
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* ── Layout: status+config arriba, resultados abajo a todo el ancho ───────── */
 .campaign-layout {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto;
-    gap: 1.25rem;
-    padding: 1.25rem;
-    align-items: start;
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+    gap: var(--shell-gap);
+    min-height: 0;
 }
 
 @media (max-width: 900px) {
@@ -16,19 +27,54 @@
     }
 }
 
+/* ── Panel base (equivalente a .pepo-panel) ────────────────────────────────── */
+.campaign-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(180deg, rgba(255,253,250,0.98) 0%, rgba(248,243,235,0.96) 100%);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    gap: 10px;
+    /* Techo de altura para status/config — evita que un formulario largo
+       empuje al panel de resultados fuera de la pantalla; si no cabe, este
+       panel hace scroll por su cuenta (ver .campaign-panel-body). */
+    max-height: 46vh;
+}
+
+.campaign-results-panel {
+    grid-column: 1 / -1;
+    max-height: none;
+}
+
+.campaign-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
 /* ── Cabecera de panel ────────────────────────────────────────────────────── */
 .camp-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1.25rem;
+    flex-shrink: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
 }
 
 .camp-header h2 {
-    font-size: 1.15rem;
+    font-size: 1.05rem;
     font-weight: 700;
     margin: 0;
+    color: var(--forest);
+    letter-spacing: -0.02em;
 }
 
 /* ── Badge de estado ─────────────────────────────────────────────────────── */
@@ -38,32 +84,31 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     padding: 0.2rem 0.55rem;
-    border-radius: 4px;
+    border-radius: 20px;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
-.camp-badge--running  { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
-.camp-badge--stopped  { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
-.camp-badge--unknown  { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25); }
-.camp-badge--enabled  { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
-.camp-badge--disabled { background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+.camp-badge--running  { background: var(--ok-soft); color: var(--forest-2); border: 1px solid rgba(26, 101, 89, 0.25); }
+.camp-badge--stopped  { background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(178, 75, 59, 0.25); }
+.camp-badge--unknown  { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.camp-badge--enabled  { background: var(--ok-soft); color: var(--forest-2); border: 1px solid rgba(26, 101, 89, 0.25); }
+.camp-badge--disabled { background: var(--gold-soft); color: var(--gold); border: 1px solid rgba(169, 123, 47, 0.25); }
 
 /* ── Meta grid ───────────────────────────────────────────────────────────── */
 .camp-meta-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
-    margin-bottom: 1.25rem;
 }
 
 .camp-meta-item {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 6px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
     padding: 0.6rem 0.8rem;
 }
 
@@ -71,13 +116,13 @@
     font-size: 0.65rem;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: var(--muted, #64748b);
+    color: var(--muted);
 }
 
 .camp-meta-value {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 0.8rem;
-    color: var(--text, #f1f5f9);
+    color: var(--text);
 }
 
 /* ── Informe del último ciclo ─────────────────────────────────────────────── */
@@ -85,35 +130,36 @@
     font-family: 'IBM Plex Mono', monospace;
     font-size: 0.75rem;
     line-height: 1.6;
-    background: rgba(0,0,0,0.25);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 6px;
+    background: #14170f;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
     padding: 0.75rem 1rem;
     min-height: 80px;
-    color: var(--text, #f1f5f9);
+    color: #c9d6b8;
     white-space: pre-wrap;
     word-break: break-word;
-    margin-bottom: 1.25rem;
 }
 
 .camp-report--empty {
-    color: var(--muted, #64748b);
+    color: var(--muted);
     font-style: italic;
+    background: var(--panel-2);
 }
 
-.camp-report--ok     { border-color: rgba(74, 222, 128, 0.25); }
-.camp-report--error  { border-color: rgba(248, 113, 113, 0.3); }
+.camp-report--ok     { border-color: rgba(26, 101, 89, 0.35); }
+.camp-report--error  { border-color: rgba(178, 75, 59, 0.4); }
 
 /* ── Botón trigger ───────────────────────────────────────────────────────── */
 .camp-trigger-row {
     display: flex;
     align-items: center;
     gap: 1rem;
+    flex-shrink: 0;
 }
 
 .camp-trigger-status {
     font-size: 0.78rem;
-    color: var(--muted, #64748b);
+    color: var(--muted);
 }
 
 /* ── Botones ─────────────────────────────────────────────────────────────── */
@@ -121,24 +167,25 @@
     padding: 0.5rem 1.1rem;
     font-size: 0.82rem;
     font-weight: 600;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     border: none;
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: background 0.15s;
+    font-family: inherit;
 }
 
 .camp-btn:disabled {
-    opacity: 0.45;
+    opacity: 0.5;
     cursor: not-allowed;
 }
 
 .camp-btn--primary {
-    background: var(--accent, #6366f1);
+    background: var(--forest);
     color: #fff;
 }
 
 .camp-btn--primary:not(:disabled):hover {
-    opacity: 0.85;
+    background: var(--forest-2);
 }
 
 /* ── Toggle ──────────────────────────────────────────────────────────────── */
@@ -159,7 +206,7 @@
     position: relative;
     width: 34px;
     height: 18px;
-    background: rgba(255,255,255,0.12);
+    background: var(--line-strong);
     border-radius: 9px;
     transition: background 0.2s;
     flex-shrink: 0;
@@ -175,10 +222,11 @@
     background: #fff;
     border-radius: 50%;
     transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .camp-toggle input:checked + .camp-toggle-track {
-    background: var(--accent, #6366f1);
+    background: var(--forest);
 }
 
 .camp-toggle input:checked + .camp-toggle-track::after {
@@ -188,7 +236,7 @@
 .camp-toggle-label {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--muted, #64748b);
+    color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     min-width: 56px;
@@ -218,17 +266,17 @@
     font-size: 0.7rem;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: var(--muted, #64748b);
+    color: var(--muted);
 }
 
 .camp-form-row input[type="text"],
 .camp-form-row input[type="number"],
 .camp-form-row textarea {
-    background: rgba(0,0,0,0.25);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    color: var(--text, #f1f5f9);
-    font-family: 'IBM Plex Mono', monospace;
+    background: var(--bg-soft);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    font-family: inherit;
     font-size: 0.8rem;
     padding: 0.5rem 0.75rem;
     resize: vertical;
@@ -240,7 +288,7 @@
 .camp-form-row input:focus,
 .camp-form-row textarea:focus {
     outline: none;
-    border-color: var(--accent, #6366f1);
+    border-color: var(--forest-2);
 }
 
 .camp-form-actions {
@@ -248,11 +296,12 @@
     align-items: center;
     gap: 1rem;
     margin-top: 0.25rem;
+    flex-shrink: 0;
 }
 
 .camp-save-status {
     font-size: 0.78rem;
-    color: var(--muted, #64748b);
+    color: var(--muted);
 }
 
 /* ── Toast ───────────────────────────────────────────────────────────────── */
@@ -260,24 +309,147 @@
     position: fixed;
     bottom: 1.5rem;
     right: 1.5rem;
-    background: rgba(30,40,60,0.97);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
     padding: 0.65rem 1.1rem;
     font-size: 0.8rem;
-    color: var(--text, #f1f5f9);
+    color: var(--text);
     pointer-events: none;
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.2s, transform 0.2s;
     z-index: 999;
     max-width: 360px;
+    box-shadow: var(--shadow);
 }
 
 .camp-toast.camp-toast--visible {
     opacity: 1;
     transform: translateY(0);
 }
-html {
-    zoom: 0.75;
+
+/* ── Tabla de resultados ─────────────────────────────────────────────────── */
+.camp-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.camp-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.camp-results-table th {
+    text-align: left;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+}
+
+.camp-results-table td {
+    padding: 0.55rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+.camp-results-table .empty-table {
+    color: var(--muted);
+    font-style: italic;
+    text-align: center;
+    padding: 1.5rem 0;
+}
+
+.camp-company-name {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.camp-company-name a {
+    color: var(--forest-2);
+    text-decoration: none;
+}
+
+.camp-company-name a:hover {
+    text-decoration: underline;
+}
+
+.camp-company-meta {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 0.15rem;
+}
+
+.contact-link { color: var(--forest-2); text-decoration: none; }
+.contact-link:hover { text-decoration: underline; }
+.contact-phone { color: var(--muted); font-size: 0.75rem; }
+.muted-text { color: var(--muted); font-style: italic; }
+
+/* ── Score de oportunidad ────────────────────────────────────────────────── */
+.camp-score-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 20px;
+    display: inline-block;
+}
+
+.camp-score-alta  { background: var(--ok-soft); color: var(--forest-2); }
+.camp-score-media { background: var(--gold-soft); color: var(--gold); }
+.camp-score-baja  { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+
+/* ── Etapa del lead ──────────────────────────────────────────────────────── */
+.camp-stage-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border-radius: 20px;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.camp-stage-QUALIFIED,
+.camp-stage-READY_TO_CONTACT { background: var(--gold-soft); color: var(--gold); }
+.camp-stage-CONTACTED        { background: rgba(26, 101, 89, 0.1); color: var(--forest-2); }
+.camp-stage-REPLIED,
+.camp-stage-OPPORTUNITY      { background: var(--ok-soft); color: var(--forest-2); }
+.camp-stage-REJECTED         { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.camp-stage-DISCOVERED,
+.camp-stage-AUDITING,
+.camp-stage-ANALYZED         { background: var(--danger-soft); color: var(--danger); }
+
+/* ── Fila expandible de hallazgos ────────────────────────────────────────── */
+.camp-findings-toggle {
+    background: none;
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.5rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.camp-findings-toggle:hover {
+    color: var(--forest);
+    border-color: var(--forest-2);
+}
+
+.camp-findings-row td {
+    background: var(--panel-2);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
 }

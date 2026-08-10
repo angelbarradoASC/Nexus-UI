@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <!-- nexus-campaign — gestión de la campaña diaria de prospección -->
 <html lang="es">
 <head>
@@ -8,23 +8,23 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
-    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260611">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260810b">
 </head>
 <body>
-    <main class="shell">
+    <main class="workspace workspace-campaign">
         <header class="shell-topbar">
-            <div class="shell-titlebar">
-                <h1>Open-Nexus</h1>
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Campaña</h1>
             </div>
             {% include "partials/desktop_nav.html" %}
         </header>
 
-        <div class="shell-body campaign-layout">
+        <div class="campaign-layout">
 
             <!-- ── Panel izquierdo: estado del scheduler ─────────────────── -->
-            <section class="card campaign-status-panel">
+            <section class="campaign-panel campaign-status-panel">
                 <div class="camp-header">
                     <div>
                         <p class="eyebrow eyebrow-tight">Prospección automática</p>
@@ -33,31 +33,33 @@
                     <span id="schedulerBadge" class="camp-badge camp-badge--unknown">—</span>
                 </div>
 
-                <div class="camp-meta-grid">
-                    <div class="camp-meta-item">
-                        <span class="camp-meta-label">Próxima ejecución</span>
-                        <span id="nextRunAt" class="camp-meta-value">cargando…</span>
+                <div class="campaign-panel-body">
+                    <div class="camp-meta-grid">
+                        <div class="camp-meta-item">
+                            <span class="camp-meta-label">Próxima ejecución</span>
+                            <span id="nextRunAt" class="camp-meta-value">cargando…</span>
+                        </div>
+                        <div class="camp-meta-item">
+                            <span class="camp-meta-label">Última ejecución</span>
+                            <span id="lastRunAt" class="camp-meta-value">—</span>
+                        </div>
                     </div>
-                    <div class="camp-meta-item">
-                        <span class="camp-meta-label">Última ejecución</span>
-                        <span id="lastRunAt" class="camp-meta-value">—</span>
+
+                    <div id="lastRunReport" class="camp-report camp-report--empty">
+                        Sin ejecuciones previas en esta sesión
                     </div>
-                </div>
 
-                <div id="lastRunReport" class="camp-report camp-report--empty">
-                    Sin ejecuciones previas en esta sesión
-                </div>
-
-                <div class="camp-trigger-row">
-                    <button id="triggerBtn" class="camp-btn camp-btn--primary" onclick="triggerCampaign()">
-                        Ejecutar ahora
-                    </button>
-                    <span id="triggerStatus" class="camp-trigger-status"></span>
+                    <div class="camp-trigger-row">
+                        <button id="triggerBtn" class="camp-btn camp-btn--primary" onclick="triggerCampaign()">
+                            Ejecutar ahora
+                        </button>
+                        <span id="triggerStatus" class="camp-trigger-status"></span>
+                    </div>
                 </div>
             </section>
 
             <!-- ── Panel derecho: configuración ──────────────────────────── -->
-            <section class="card campaign-config-panel">
+            <section class="campaign-panel campaign-config-panel">
                 <div class="camp-header">
                     <div>
                         <p class="eyebrow eyebrow-tight">Parámetros</p>
@@ -70,61 +72,96 @@
                     </label>
                 </div>
 
-                <form id="configForm" class="camp-form" onsubmit="saveConfig(event)">
+                <div class="campaign-panel-body">
+                    <form id="configForm" class="camp-form" onsubmit="saveConfig(event)">
 
-                    <div class="camp-form-row">
-                        <label for="cfgVertical">Vertical</label>
-                        <input type="text" id="cfgVertical" name="vertical" placeholder="inmobiliaria">
-                    </div>
-
-                    <div class="camp-form-row">
-                        <label for="cfgTargetDesc">Descripción del objetivo</label>
-                        <input type="text" id="cfgTargetDesc" name="target_description"
-                               placeholder="agencias inmobiliarias, portales y gestoras">
-                    </div>
-
-                    <div class="camp-form-row">
-                        <label for="cfgGeography">Geografía (opcional)</label>
-                        <input type="text" id="cfgGeography" name="geography"
-                               placeholder="Madrid, España…">
-                    </div>
-
-                    <div class="camp-form-row camp-form-row--half">
-                        <div>
-                            <label for="cfgDesiredCount">Buscar</label>
-                            <input type="number" id="cfgDesiredCount" name="desired_count"
-                                   min="5" max="100" placeholder="30">
+                        <div class="camp-form-row">
+                            <label for="cfgVertical">Vertical</label>
+                            <input type="text" id="cfgVertical" name="vertical" placeholder="inmobiliaria">
                         </div>
-                        <div>
-                            <label for="cfgDailyCap">Enviar máx.</label>
-                            <input type="number" id="cfgDailyCap" name="daily_send_cap"
-                                   min="1" max="50" placeholder="20">
+
+                        <div class="camp-form-row">
+                            <label for="cfgTargetDesc">Descripción del objetivo</label>
+                            <input type="text" id="cfgTargetDesc" name="target_description"
+                                   placeholder="agencias inmobiliarias, portales y gestoras">
                         </div>
-                    </div>
 
-                    <div class="camp-form-row">
-                        <label for="cfgFollowups">Follow-ups (días, separados por coma)</label>
-                        <input type="text" id="cfgFollowups" name="followup_delays_days"
-                               placeholder="14, 14">
-                    </div>
+                        <div class="camp-form-row">
+                            <label for="cfgGeography">Geografía (opcional)</label>
+                            <input type="text" id="cfgGeography" name="geography"
+                                   placeholder="Madrid, España…">
+                        </div>
 
-                    <div class="camp-form-row">
-                        <label for="cfgProposition">Propuesta de valor</label>
-                        <textarea id="cfgProposition" name="proposition" rows="3"
-                                  placeholder="¿Qué les ofrecemos?"></textarea>
-                    </div>
+                        <div class="camp-form-row camp-form-row--half">
+                            <div>
+                                <label for="cfgDesiredCount">Buscar</label>
+                                <input type="number" id="cfgDesiredCount" name="desired_count"
+                                       min="5" max="100" placeholder="30">
+                            </div>
+                            <div>
+                                <label for="cfgDailyCap" title="Deliberadamente bajo — 2 contactos excelentes vale más que 200 mediocres">Enviar máx./día</label>
+                                <input type="number" id="cfgDailyCap" name="daily_send_cap"
+                                       min="1" max="50" placeholder="2">
+                            </div>
+                        </div>
 
-                    <div class="camp-form-row">
-                        <label for="cfgCta">CTA</label>
-                        <textarea id="cfgCta" name="cta" rows="2"
-                                  placeholder="¿Te encajaría una llamada de 15 minutos…?"></textarea>
-                    </div>
+                        <div class="camp-form-row">
+                            <label for="cfgOpportunityThreshold" title="Solo se contacta a quien supere este score de oportunidad (problemas detectados + propuesta fundamentada + madurez digital)">Score mínimo de oportunidad</label>
+                            <input type="number" id="cfgOpportunityThreshold" name="opportunity_threshold"
+                                   min="0" max="100" placeholder="55">
+                        </div>
 
-                    <div class="camp-form-actions">
-                        <button type="submit" class="camp-btn camp-btn--primary">Guardar</button>
-                        <span id="saveStatus" class="camp-save-status"></span>
+                        <div class="camp-form-row">
+                            <label for="cfgFollowups">Follow-ups (días, separados por coma)</label>
+                            <input type="text" id="cfgFollowups" name="followup_delays_days"
+                                   placeholder="14, 14">
+                        </div>
+
+                        <div class="camp-form-row">
+                            <label for="cfgProposition">Propuesta de valor</label>
+                            <textarea id="cfgProposition" name="proposition" rows="3"
+                                      placeholder="¿Qué les ofrecemos?"></textarea>
+                        </div>
+
+                        <div class="camp-form-row">
+                            <label for="cfgCta">CTA</label>
+                            <textarea id="cfgCta" name="cta" rows="2"
+                                      placeholder="¿Te encajaría una llamada de 15 minutos…?"></textarea>
+                        </div>
+
+                        <div class="camp-form-actions">
+                            <button type="submit" class="camp-btn camp-btn--primary">Guardar</button>
+                            <span id="saveStatus" class="camp-save-status"></span>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- ── Panel inferior: resultados de la última ejecución ─────── -->
+            <section class="campaign-panel campaign-results-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Última ejecución</p>
+                        <h2>Leads encontrados</h2>
                     </div>
-                </form>
+                    <span id="resultsCount" class="camp-badge camp-badge--unknown">—</span>
+                </div>
+                <div class="camp-table-wrap">
+                    <table class="camp-results-table">
+                        <thead>
+                            <tr>
+                                <th>Empresa</th>
+                                <th>Oportunidad</th>
+                                <th>Etapa</th>
+                                <th>Contacto</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="campaignResultsBody">
+                            <tr><td colspan="5" class="empty-table">Sin ejecuciones todavía</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </section>
 
         </div>
@@ -132,6 +169,6 @@
 
     <div id="toast" class="camp-toast" aria-live="polite"></div>
 
-    <script src="/static/js/nexus_campaign.js?v=20260611"></script>
+    <script src="/static/js/nexus_campaign.js?v=20260810b"></script>
 </body>
 </html>

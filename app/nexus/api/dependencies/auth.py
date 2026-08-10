@@ -30,6 +30,7 @@ from nexus.operations import AssetsOperationsService
 from nexus.outreach import OutreachManager
 from nexus.crm import CRMBridgeService
 from nexus.prospecting import ProspectingAgentService
+from nexus.prospecting.campaign_agent import CampaignAgent
 from nexus.prompts import PromptManager, set_default_prompt_manager
 from nexus.mail import ThunderbirdMailManager
 from nexus.teams import TeamsChatManager
@@ -48,6 +49,7 @@ class NexusRuntime:
     crm: CRMBridgeService
     operations: AssetsOperationsService
     prospecting: ProspectingAgentService
+    campaign: CampaignAgent
     prompts: PromptManager
     pending_approvals: MemoryPendingApprovalRepository = None
     cmdb:              FileCMDB = None
@@ -115,6 +117,7 @@ def build_runtime(cfg) -> NexusRuntime:
     agent_runtime = AgentRuntimeService()
     outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
     crm = CRMBridgeService(cfg=cfg)
+    campaign = CampaignAgent(prospecting_svc=prospecting, outreach_mgr=outreach, crm_svc=crm)
     vault = VaultService()
     access = AgentAccessService(cmdb=cmdb, vault=vault)
     case_log = CaseLogStore()
@@ -129,6 +132,7 @@ def build_runtime(cfg) -> NexusRuntime:
         crm=crm,
         operations=operations,
         prospecting=prospecting,
+        campaign=campaign,
         prompts=prompt_manager,
         pending_approvals=MemoryPendingApprovalRepository(),
         cmdb=cmdb,
@@ -206,6 +210,11 @@ def get_prompt_manager(request: Request) -> PromptManager:
 def get_prospecting_manager(request: Request) -> ProspectingAgentService:
     """Fetch the prospecting manager from FastAPI application state."""
     return get_runtime(request).prospecting
+
+
+def get_campaign_agent(request: Request) -> CampaignAgent:
+    """Fetch the campaign agent from FastAPI application state."""
+    return get_runtime(request).campaign
 
 
 def get_pending_approvals(request: Request) -> MemoryPendingApprovalRepository:

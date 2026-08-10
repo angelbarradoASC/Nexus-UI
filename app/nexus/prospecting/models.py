@@ -33,6 +33,8 @@ class ProspectingBrief:
     max_employees: int | None = None
     industrial_zone: str = ""
     max_run_minutes: int = 10
+    opportunity_threshold: int = 55
+    enrich_candidates: bool = False
 
     @property
     def geography_label(self) -> str:
@@ -64,4 +66,6 @@ class ProspectingBrief:
             "max_employees": self.max_employees,
             "industrial_zone": self.industrial_zone,
             "max_run_minutes": self.max_run_minutes,
+            "opportunity_threshold": self.opportunity_threshold,
+            "enrich_candidates": self.enrich_candidates,
         }

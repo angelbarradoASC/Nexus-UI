@@ -30,6 +30,8 @@ class ProspectingRunRequest(BaseModel):
     max_employees: int | None = Field(default=None, ge=1)
     industrial_zone: str = ""
     max_run_minutes: int = Field(default=10, ge=2, le=30)
+    opportunity_threshold: int = Field(default=55, ge=0, le=100)
+    enrich_candidates: bool = False
 
 
 class ProspectingRunResponse(BaseModel):

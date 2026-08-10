@@ -2,6 +2,100 @@ html {
     zoom: 0.75;
 }
 
+/* Migrado al tema claro compartido con PEPO/Sales/Operador — antes usaba
+   los nombres de variable de open_nexus.css (tema oscuro). Alias en vez de
+   reescribir cada "var(--accent)"/"var(--ink)" uno a uno por todo el
+   archivo (mismo truco que nexus_vault.css). */
+:root {
+    --ink: var(--text);
+    --accent: var(--forest-2);
+    --accent-strong: var(--forest);
+    --panel-soft: var(--panel-2);
+}
+
+.workspace-settings {
+    height: calc(100dvh / var(--ui-zoom));
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* ── Primitivas compartidas que antes venian de open_nexus.css ───────────── */
+/* Antes open_nexus.css daba color de texto a TODO <button> globalmente
+   (".top-actions a, button { color: var(--ink) }") — sin esa regla, los
+   botones sin clase propia (ej. settings-nav-btn) heredaban el negro por
+   defecto del navegador, ilegible sobre fondo oscuro de boton activo. */
+button {
+    font-family: inherit;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line-strong);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+}
+
+.stack { display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+
+.response-pane {
+    white-space: pre-wrap;
+    min-height: 280px;
+    overflow: auto;
+    width: 100%;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-soft);
+    color: var(--text);
+    padding: 14px;
+    font: 14px/1.6 "IBM Plex Mono", monospace;
+}
+
+.stack > div {
+    width: 100%;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-soft);
+    color: var(--text);
+    padding: 14px;
+    font: 14px/1.6 "IBM Plex Mono", monospace;
+}
+
+.provider-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.field-wide { grid-column: 1 / -1; }
+
+.status-inline { color: var(--muted); font-size: 13px; }
+
+.toggle-row {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.toggle-row input { width: 20px; height: 20px; padding: 0; }
+
+.form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
 .settings-layout {
     flex: 1;
     min-height: 0;
@@ -25,7 +119,7 @@ html {
 .settings-nav-btn {
     width: 100%;
     justify-content: flex-start;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(18, 60, 55, 0.03);
     min-height: 34px;
     padding: 0 14px;
     font-size: 12px;
@@ -33,14 +127,15 @@ html {
 
 .settings-nav-btn.active {
     background: var(--accent-strong);
-    border-color: rgba(143, 199, 177, 0.42);
+    border-color: var(--forest);
+    color: #fffdfa;
 }
 
 .settings-sidebar-note {
     margin-top: auto;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: #101411;
+    background: var(--panel-2);
     padding: 10px 12px;
     color: var(--muted);
     font-size: 12px;
@@ -89,7 +184,7 @@ html {
 
 .info-badge-muted {
     color: var(--muted);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(18, 60, 55, 0.04);
 }
 
 .settings-grid {
@@ -106,7 +201,7 @@ html {
 .prompt-settings-editor {
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(18, 60, 55, 0.03);
 }
 
 .settings-grid-item {
@@ -180,7 +275,7 @@ html {
     width: 100%;
     text-align: left;
     border: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(18, 60, 55, 0.04);
     border-radius: 12px;
     padding: 10px 12px;
     cursor: pointer;
@@ -219,12 +314,12 @@ html {
     gap: 8px;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(18, 60, 55, 0.03);
     padding: 10px 12px;
 }
 
 .prompt-editor-panel-muted {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(18, 60, 55, 0.02);
 }
 
 .prompt-panel-head {
@@ -289,7 +384,7 @@ html {
 .level-card {
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(18, 60, 55, 0.03);
     padding: 10px 14px;
     display: flex;
     flex-direction: column;
@@ -330,18 +425,18 @@ html {
 
 .level-health-ok {
     background: rgba(80, 180, 120, 0.15);
-    color: #50b478;
+    color: var(--forest-2);
     border: 1px solid rgba(80, 180, 120, 0.3);
 }
 
 .level-health-fail {
     background: rgba(220, 80, 80, 0.12);
-    color: #dc6060;
+    color: var(--danger);
     border: 1px solid rgba(220, 80, 80, 0.25);
 }
 
 .level-health-off {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(18, 60, 55, 0.05);
     color: var(--muted);
     border: 1px solid var(--line);
 }
@@ -378,7 +473,7 @@ html {
 .integration-group {
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(18, 60, 55, 0.02);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
@@ -395,7 +490,7 @@ html {
 .integration-card {
     border: 1px solid var(--line);
     border-radius: 12px;
-    background: #101411;
+    background: var(--panel-2);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
@@ -451,13 +546,13 @@ html {
 }
 
 .disabled-pill {
-    color: #ffb4b1;
+    color: var(--danger);
     background: rgba(232, 35, 26, 0.16);
 }
 
 .kind-pill {
     color: var(--muted);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(18, 60, 55, 0.04);
 }
 
 .settings-note-inline { min-height: 58px; }
@@ -565,7 +660,7 @@ html {
 .module-section {
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(18, 60, 55, 0.02);
     padding: 10px 14px;
     display: flex;
     flex-direction: column;
@@ -580,11 +675,6 @@ html {
 
 .module-section-head h3 {
     margin: 0;
-}
-
-/* Compensate CSS zoom so shell fills the full physical window */
-.shell {
-    height: calc(100vh / 0.75);
 }
 
 @media (max-width: 1180px) {
@@ -608,9 +698,10 @@ html {
         grid-template-columns: 1fr;
     }
 
-    .shell {
+    .workspace-settings {
         height: auto;
         min-height: 100vh;
+        overflow: visible;
     }
 
     body {

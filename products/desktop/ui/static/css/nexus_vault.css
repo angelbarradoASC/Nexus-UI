@@ -1,4 +1,38 @@
-/* nexus_vault.css — Vault de credenciales */
+/* nexus_vault.css — Vault de credenciales
+   Migrado al tema claro compartido con PEPO/Sales/Operador — antes este
+   archivo definia su propio namespace de variables (--surface-*, --border,
+   --text-*, --accent) con fallbacks oscuros que NUNCA se resolvian a nada
+   (esas vars no existian en ningun otro sitio), asi que Vault siempre salia
+   oscuro pasara lo que pasara con la hoja de estilos base. Redefinirlas aqui
+   mapeadas a los tokens de nexus_v1.css re-tema todo el archivo sin tocar
+   las ~30 reglas que las usan una por una. */
+:root {
+    --surface-1: var(--panel-2);
+    --surface-0: var(--bg-soft);
+    --border: var(--line-strong);
+    --text-primary: var(--text);
+    --text-secondary: var(--muted);
+    --accent: var(--forest-2);
+}
+
+.workspace-vault {
+    height: calc(100dvh / var(--ui-zoom));
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/* Contenedor con el mismo look de panel que el resto de Desktop — antes
+   .vault-body/.vault-lock-screen vivian sueltos dentro de .shell (fondo del
+   body). Ahora envueltos en un panel para que combinen con Shell/PEPO. */
+.vault-content-area {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(180deg, rgba(255,253,250,0.98) 0%, rgba(248,243,235,0.96) 100%);
+    box-shadow: var(--shadow);
+}
 
 /* ── Lock screen ──────────────────────────────────────────────────────────── */
 
@@ -199,13 +233,13 @@
 
 .vault-table td {
     padding: 10px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    border-bottom: 1px solid var(--line, rgba(29, 24, 20, 0.12));
     color: var(--text-primary, #f0f0f0);
     vertical-align: middle;
 }
 
 .vault-table tbody tr:hover td {
-    background: rgba(255,255,255,0.03);
+    background: rgba(18, 60, 55, 0.04);
 }
 
 .vault-table tbody tr:last-child td {
@@ -244,9 +278,9 @@
 }
 
 .vault-badge-gray {
-    background: rgba(255,255,255,0.06);
+    background: var(--panel-2, #f8f3eb);
     color: var(--text-secondary, #888);
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid var(--line-strong, rgba(18, 60, 55, 0.18));
 }
 
 /* ── Row actions ───────────────────────────────────────────────────────────── */
@@ -279,7 +313,7 @@
 }
 
 .btn-ghost {
-    background: rgba(255,255,255,0.07);
+    background: var(--panel-2, #f8f3eb);
     color: var(--text-primary, #f0f0f0);
     border: 1px solid var(--border, #2a2a2a);
 }
@@ -302,7 +336,7 @@
     cursor: pointer;
 }
 
-.btn-icon:hover { color: var(--text-primary, #f0f0f0); background: rgba(255,255,255,0.05); }
+.btn-icon:hover { color: var(--text-primary, #f0f0f0); background: rgba(18, 60, 55, 0.06); }
 
 /* ── Modal ──────────────────────────────────────────────────────────────────── */
 
@@ -353,7 +387,7 @@
     padding: 2px 6px;
     border-radius: 4px;
 }
-.vault-modal-close:hover { background: rgba(255,255,255,0.07); color: var(--text-primary, #f0f0f0); }
+.vault-modal-close:hover { background: rgba(18, 60, 55, 0.06); color: var(--text-primary, #f0f0f0); }
 
 .vault-form-grid {
     display: grid;
@@ -387,7 +421,7 @@
     border: 1px solid var(--border, #2a2a2a);
     border-radius: 6px;
     color: var(--text-primary, #f0f0f0);
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: inherit;
     font-size: 13px;
     padding: 8px 12px;
     transition: border-color 0.15s;
@@ -395,7 +429,10 @@
     width: 100%;
 }
 
+/* La clave SSH (PEM) se muestra como bloque de codigo, no como campo de
+   texto normal — monospace aqui es intencional, igual que .response-pane. */
 .vault-field textarea {
+    font-family: 'IBM Plex Mono', monospace;
     resize: vertical;
     min-height: 120px;
 }

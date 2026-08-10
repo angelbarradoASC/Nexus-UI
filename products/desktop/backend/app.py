@@ -302,9 +302,20 @@ async def lifespan(app: FastAPI):
     await app.state.llm_router.start_watchdog()
     logger.info("Desktop lifespan | watchdog LLM arrancado")
 
+    from nexus.workers.scheduler import NexusScheduler
+
+    scheduler = NexusScheduler()
+    scheduler.attach_campaign_agent(app.state.nexus_runtime.campaign)
+    scheduler.start()
+    app.state.nexus_scheduler = scheduler
+    logger.info("Desktop lifespan | scheduler de campaña arrancado")
+
     yield
 
     logger.info("Open-Nexus Desktop backend apagandose...")
+    nexus_scheduler = getattr(app.state, "nexus_scheduler", None)
+    if nexus_scheduler is not None:
+        nexus_scheduler.stop()
     llm_router = getattr(app.state, "llm_router", None)
     if llm_router is not None:
         await llm_router.close()

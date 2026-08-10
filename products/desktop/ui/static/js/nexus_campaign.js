@@ -2,11 +2,21 @@
 
 const API = '/api/nexus/campaign';
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
 // ── Arranque ──────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
     loadStatus();
     loadConfig();
+    loadResults();
 });
 
 // ── Estado del scheduler ──────────────────────────────────────────────────
@@ -94,6 +104,7 @@ async function triggerCampaign() {
         setEl('lastRunAt', formatDt(data.report?.completed_at || new Date().toISOString()));
         statusEl.textContent = 'completado';
         toast('Ciclo completado');
+        loadResults();
     } catch (err) {
         statusEl.textContent = 'error';
         toast('Error al ejecutar el ciclo', true);
@@ -120,7 +131,8 @@ function applyConfig(cfg) {
     setInput('cfgTargetDesc',   cfg.target_description || '');
     setInput('cfgGeography',    cfg.geography     || '');
     setInput('cfgDesiredCount', cfg.desired_count ?? 30);
-    setInput('cfgDailyCap',     cfg.daily_send_cap ?? 20);
+    setInput('cfgDailyCap',     cfg.daily_send_cap ?? 2);
+    setInput('cfgOpportunityThreshold', cfg.opportunity_threshold ?? 55);
     setInput('cfgFollowups',    (cfg.followup_delays_days || [14, 14]).join(', '));
     setInput('cfgProposition',  cfg.proposition   || '');
     setInput('cfgCta',          cfg.cta           || '');
@@ -163,7 +175,8 @@ async function saveConfig(event) {
         target_description:   document.getElementById('cfgTargetDesc').value.trim(),
         geography:            document.getElementById('cfgGeography').value.trim(),
         desired_count:        parseInt(document.getElementById('cfgDesiredCount').value, 10) || 30,
-        daily_send_cap:       parseInt(document.getElementById('cfgDailyCap').value, 10) || 20,
+        daily_send_cap:       parseInt(document.getElementById('cfgDailyCap').value, 10) || 2,
+        opportunity_threshold: parseInt(document.getElementById('cfgOpportunityThreshold').value, 10) || 55,
         followup_delays_days: followups.length ? followups : [14, 14],
         proposition:          document.getElementById('cfgProposition').value.trim(),
         cta:                  document.getElementById('cfgCta').value.trim(),
@@ -184,6 +197,87 @@ async function saveConfig(event) {
     } finally {
         setTimeout(() => { statusEl.textContent = ''; }, 3000);
     }
+}
+
+// ── Resultados de la última ejecución ────────────────────────────────────
+
+async function loadResults() {
+    try {
+        const res = await fetch(`${API}/results`);
+        const data = await res.json();
+        renderCampaignResults(data.results || []);
+    } catch (err) {
+        renderCampaignResults([]);
+    }
+}
+
+function opportunityClass(confidence) {
+    if (confidence === 'alta') return 'camp-score-alta';
+    if (confidence === 'media') return 'camp-score-media';
+    return 'camp-score-baja';
+}
+
+function renderCampaignResults(items) {
+    const tbody = document.getElementById('campaignResultsBody');
+    const countBadge = document.getElementById('resultsCount');
+    if (!tbody) return;
+
+    if (countBadge) countBadge.textContent = String(items.length);
+
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-table">Sin ejecuciones todavía</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = items.map((item, index) => {
+        const meta = [item.city || item.province, item.vertical].filter(Boolean).join(' · ');
+        const nameCell = item.website
+            ? `<a href="${escapeHtml(item.website)}" target="_blank" rel="noreferrer">${escapeHtml(item.name || '')}</a>`
+            : escapeHtml(item.name || '');
+        const oppScore = item.opportunity_score;
+        const oppCell = oppScore !== undefined && oppScore !== null
+            ? `<span class="camp-score-pill ${opportunityClass(item.opportunity_confidence)}">${escapeHtml(String(oppScore))}</span>`
+            : '<span class="muted-text">—</span>';
+        const stage = item.lead_stage || 'DISCOVERED';
+        const stageCell = `<span class="camp-stage-badge camp-stage-${escapeHtml(stage)}">${escapeHtml(stage.replace(/_/g, ' ').toLowerCase())}</span>`;
+        const contactLines = [
+            item.email ? `<a href="mailto:${escapeHtml(item.email)}" class="contact-link">${escapeHtml(item.email)}</a>` : '',
+            item.phone ? `<span class="contact-phone">${escapeHtml(item.phone)}</span>` : '',
+        ].filter(Boolean).join('<br>');
+
+        const findings = (item.technical_audit && item.technical_audit.findings) || [];
+        const proposalItems = (item.proposal && item.proposal.items) || [];
+        const hasDetail = findings.length || proposalItems.length;
+        const detailId = `campFindings${index}`;
+
+        const rows = [`<tr data-result-id="${escapeHtml(item.result_id || '')}">
+            <td>
+                <div class="camp-company-name">${nameCell}</div>
+                ${meta ? `<div class="camp-company-meta">${escapeHtml(meta)}</div>` : ''}
+            </td>
+            <td>${oppCell}</td>
+            <td>${stageCell}</td>
+            <td>${contactLines || '<span class="muted-text">sin contacto</span>'}</td>
+            <td>${hasDetail ? `<button class="camp-findings-toggle" type="button" onclick="toggleFindings('${detailId}')">ver auditoría</button>` : ''}</td>
+        </tr>`];
+
+        if (hasDetail) {
+            const lines = [
+                ...findings.map(f => `• ${f}`),
+                ...proposalItems.map(p => `→ ${p.observation}\n  Propuesta: ${p.recommendation}`),
+            ];
+            rows.push(`<tr id="${detailId}" class="camp-findings-row" style="display:none;">
+                <td colspan="5">${escapeHtml(lines.join('\n'))}</td>
+            </tr>`);
+        }
+        return rows.join('');
+    }).join('');
+}
+
+function toggleFindings(id) {
+    const row = document.getElementById(id);
+    if (!row) return;
+    row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

@@ -336,6 +336,58 @@ Reglas:
 - quality_signals debe ser concreta y corta
 - devuelve SOLO JSON""",
     ),
+    "sales.prospecting.business_profile": PromptDefinition(
+        key="sales.prospecting.business_profile",
+        title="Sales Business Profiler",
+        group="sales",
+        description="Construye un perfil de negocio a partir del texto real extraido de la web del candidato.",
+        default_text="""Eres un analista comercial de Nexus Sales.
+A partir del texto real extraido de la web de una empresa (y de la auditoria
+tecnica si esta disponible), construye un perfil de negocio.
+
+Devuelve SOLO JSON con:
+- what_they_do (una frase)
+- target_audience (una frase)
+- value_prop (una frase, o vacio si no es identificable)
+- friction_points (lista corta, solo lo que se ve en el texto o la auditoria)
+- digital_maturity ("bajo", "medio" o "alto")
+- improvement_opportunities (lista corta, concreta)
+
+Reglas:
+- basate solo en el texto y la auditoria proporcionados, nunca inventes datos no verificables
+- si el texto es escaso o confuso, dilo en friction_points en vez de rellenar con genericidades
+- digital_maturity "bajo" solo si hay evidencia real (web lenta, sin movil, sin CTA...)
+- devuelve SOLO JSON""",
+    ),
+    "sales.prospecting.proposal": PromptDefinition(
+        key="sales.prospecting.proposal",
+        title="Sales Proposal Writer",
+        group="sales",
+        description="Genera propuestas concretas y defendibles a partir de hallazgos reales de auditoria y perfil.",
+        default_text="""Eres el redactor de propuestas comerciales de Nexus Sales.
+A partir de los hallazgos tecnicos y el perfil de negocio de una empresa,
+propon mejoras CONCRETAS, cada una anclada a un hallazgo real.
+
+Tipos de propuesta permitidos (usa solo estos, el que mejor encaje):
+renovacion_visual, mejora_ux, optimizacion_movil, mejora_velocidad,
+mejores_ctas, formularios, captacion_leads, chatbot,
+automatizacion_whatsapp, respuestas_llm, reservas, faqs_automaticas
+
+Devuelve SOLO JSON con:
+- items: lista de objetos {type, observation, recommendation}
+  - observation: el hallazgo real concreto en el que se basa (cita algo de
+    los datos proporcionados, nunca algo inventado)
+  - recommendation: la mejora concreta propuesta
+- summary (una frase)
+
+Reglas:
+- cada item DEBE citar un hallazgo real de los datos proporcionados — si no
+  hay hallazgos suficientes, devuelve menos items, nunca inventes problemas
+- prohibido lenguaje robotico, plantillas evidentes o exageraciones
+- maximo 4 items, prioriza los mas defendibles
+- no afirmes datos que no esten en los hallazgos proporcionados
+- devuelve SOLO JSON""",
+    ),
     "sales.prospecting.crm_packager": PromptDefinition(
         key="sales.prospecting.crm_packager",
         title="Sales CRM Packager",

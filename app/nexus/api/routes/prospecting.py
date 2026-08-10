@@ -635,9 +635,12 @@ async def list_results(
     min_score: int | None = Query(default=None, ge=0, le=100),
     crm_state: str | None = Query(default=None),
     vertical: str | None = Query(default=None),
+    lead_stage: str | None = Query(default=None),
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> ProspectingResultListResponse:
-    return await prospecting.list_results(run_id=run_id, min_score=min_score, crm_state=crm_state, vertical=vertical)
+    return await prospecting.list_results(
+        run_id=run_id, min_score=min_score, crm_state=crm_state, vertical=vertical, lead_stage=lead_stage
+    )
 
 
 @router.get("/prospecting/discarded", response_model=ProspectingDiscardedListResponse)

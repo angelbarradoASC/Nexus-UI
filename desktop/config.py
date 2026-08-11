@@ -57,6 +57,10 @@ class DesktopSettings:
         return self.resolved_local_data_root / "history"
 
     @property
+    def pepo_conversations_db_path(self) -> Path:
+        return self.history_dir / "pepo_conversations.db"
+
+    @property
     def llm_provider_config_path(self) -> Path:
         return self.config_dir / "llm_provider.json"
 

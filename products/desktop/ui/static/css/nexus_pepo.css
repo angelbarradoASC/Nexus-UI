@@ -12,10 +12,10 @@ html { zoom: 0.75; }
     grid-template-rows: auto minmax(0, 1fr);
 }
 
-/* ── Split 70/30 ─────────────────────────────────────────────────────────── */
+/* ── Split 15/55/30 — conversaciones / chat / skills ─────────────────────── */
 .pepo-layout {
     display: grid;
-    grid-template-columns: 70fr 30fr;
+    grid-template-columns: 15fr 55fr 30fr;
     gap: var(--shell-gap);
     min-height: 0;
 }
@@ -25,6 +25,12 @@ html { zoom: 0.75; }
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* Sin esto, el min-width:auto por defecto de los items de grid deja que
+       contenido sin wrap (los chips de acceso rapido, sobre todo) fuerce la
+       columna del chat mas ancha que su 55fr — descuadra las 3 columnas
+       15/55/30 igual que min-height:0 evita el problema equivalente en
+       vertical. */
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius-xl);
     background: linear-gradient(180deg, rgba(255,253,250,0.98) 0%, rgba(248,243,235,0.96) 100%);
@@ -50,6 +56,80 @@ html { zoom: 0.75; }
     font-weight: 700;
     color: var(--forest);
     letter-spacing: -0.02em;
+}
+
+/* ── Barra de conversaciones (15%) ────────────────────────────────────────
+   Reutiliza .pepo-panel como base + tokens de nexus_v1.css — misma
+   identidad visual que el resto de Desktop, no la paleta oscura de la
+   barra lateral legacy de chat.html/sidebar.css (otro tema, no aplica aqui). */
+.pepo-conversations-sidebar {
+    padding: 12px;
+}
+
+.pepo-conversations-head {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+}
+
+.pepo-new-chat-btn {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--forest);
+    background: var(--forest);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+.pepo-new-chat-btn:hover { background: var(--forest-2); border-color: var(--forest-2); }
+
+.pepo-conversations-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 4px 2px;
+}
+
+.pepo-conversations-empty {
+    color: var(--muted);
+    font-style: italic;
+    font-size: 0.78rem;
+    text-align: center;
+    padding: 1rem 0;
+}
+
+.pepo-conversation-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.78rem;
+    font-family: inherit;
+    line-height: 1.4;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pepo-conversation-item:hover { background: var(--panel-2); border-color: var(--line); }
+.pepo-conversation-item.is-active {
+    background: var(--gold-soft);
+    border-color: var(--gold);
+    color: var(--forest);
+    font-weight: 600;
 }
 
 /* ── Log de mensajes ─────────────────────────────────────────────────────── */

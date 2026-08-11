@@ -33,7 +33,7 @@ from desktop.runtime.bootstrap import get_current_runtime
 from desktop.storage.local_state import DesktopLocalState
 from exceptions import register_exception_handlers
 from nexus.api.dependencies.auth import build_runtime, upgrade_runtime_with_app_state
-from products.desktop.backend import auth_routes, metrics_routes, rdp, settings_routes
+from products.desktop.backend import auth_routes, metrics_routes, pepo_conversations, rdp, settings_routes
 from products.desktop.backend.auth_routes import get_session_auth
 from products.desktop.backend.dependencies import get_desktop_local_state, get_desktop_settings
 from products.desktop.backend.settings_routes import _get_monitoring_store, bootstrap_desktop_config
@@ -136,6 +136,7 @@ app.include_router(auth_routes.router)
 app.include_router(rdp.router)
 app.include_router(metrics_routes.router)
 app.include_router(settings_routes.router)
+app.include_router(pepo_conversations.router)
 
 
 class _DesktopResolveBody(BaseModel):

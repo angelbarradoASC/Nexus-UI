@@ -9,6 +9,7 @@
             <a class="desktop-nav-link {% if active_primary == 'shell' %}is-active{% endif %}" href="/open-nexus">Shell</a>
             <a class="desktop-nav-link {% if active_admin == 'settings' %}is-active{% endif %}" href="/nexus/settings">Configuracion</a>
             <a class="desktop-nav-link {% if active_admin == 'vault' %}is-active{% endif %}" href="/nexus/vault">Vault</a>
+            <a class="desktop-nav-link {% if active_admin == 'agents' %}is-active{% endif %}" href="/nexus/agents">Agentes</a>
         </nav>
         {% if current_user %}
         <div class="desktop-nav-user">{{ current_user }}</div>

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!-- nexus-agents — gestor de agentes de PEPO/Nexus -->
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentes — Open-Nexus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
+    <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+    <link rel="stylesheet" href="/static/css/nexus_agents.css?v=20260810c">
+</head>
+<body>
+    <main class="workspace workspace-agents">
+        <header class="shell-topbar">
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Agentes</h1>
+            </div>
+            {% include "partials/desktop_nav.html" %}
+        </header>
+
+        <div class="agents-layout">
+
+            <!-- ── Fila superior: pendientes + actividad ─────────────────── -->
+            <section class="agents-panel agents-pending-panel">
+                <div class="ag-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">En curso</p>
+                        <h2>Acciones pendientes</h2>
+                    </div>
+                    <span id="pendingCount" class="ag-badge ag-badge--unknown">—</span>
+                </div>
+                <div class="agents-panel-body">
+                    <div id="pendingList" class="ag-list">
+                        <div class="ag-empty">Sin acciones pendientes de confirmar</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="agents-panel agents-activity-panel">
+                <div class="ag-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Traza</p>
+                        <h2>Actividad reciente</h2>
+                    </div>
+                    <button class="ag-btn ag-btn--ghost" type="button" onclick="loadActivity()">Actualizar</button>
+                </div>
+                <div class="agents-panel-body">
+                    <div id="activityList" class="ag-list ag-list--mono">
+                        <div class="ag-empty">Sin actividad todavía</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Fila inferior: catálogo de agentes ─────────────────────── -->
+            <section class="agents-panel agents-catalog-panel">
+                <div class="ag-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Catálogo</p>
+                        <h2>Agentes</h2>
+                    </div>
+                    <div class="ag-tabbar" role="tablist">
+                        <button class="ag-tab is-active" type="button" data-view="agents" onclick="switchCatalogView('agents')">Agentes</button>
+                        <button class="ag-tab" type="button" data-view="skills" onclick="switchCatalogView('skills')">Skills</button>
+                    </div>
+                    <span id="catalogCount" class="ag-badge ag-badge--unknown">—</span>
+                </div>
+                <div class="agents-panel-body">
+                    <div id="agentCatalog" class="ag-catalog-grid">
+                        <div class="ag-empty">Cargando…</div>
+                    </div>
+                    <div id="skillsCatalog" class="ag-list" style="display:none;">
+                        <div class="ag-empty">Cargando…</div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <div id="toast" class="ag-toast" aria-live="polite"></div>
+
+    <script src="/static/js/nexus_agents.js?v=20260810c"></script>
+</body>
+</html>

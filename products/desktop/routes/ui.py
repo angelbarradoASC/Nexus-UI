@@ -124,3 +124,11 @@ async def nexus_campaign_page(request: Request):
         return r
     context = _page_context(request, page_title="Campaña", active_primary="", active_admin="campaign")
     return templates.TemplateResponse("nexus_campaign.html", context)
+
+
+@router.get("/nexus/agents", response_class=HTMLResponse)
+async def nexus_agents_page(request: Request):
+    if (r := _auth_guard(request)) is not None:
+        return r
+    context = _page_context(request, page_title="Agentes", active_primary="", active_admin="agents")
+    return templates.TemplateResponse("nexus_agents.html", context)

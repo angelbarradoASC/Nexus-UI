@@ -75,3 +75,10 @@ class DesktopSkillCatalogue:
 
     def ids(self) -> list[str]:
         return list(self._skills.keys())
+
+    def as_prompt_options(self) -> str:
+        """Genera la lista de "skill_id — descripcion" para el clasificador LLM
+        directamente desde el catalogo JSON — una unica fuente de verdad, para
+        que la descripcion que ve el LLM nunca pueda desincronizarse de la que
+        de verdad valida/ejecuta cada skill."""
+        return "\n".join(f'- "{skill.skill_id}" — {skill.description}' for skill in self._skills.values())

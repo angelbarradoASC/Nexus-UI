@@ -1,7 +1,7 @@
 {
   "id": "ssh.diagnostico",
   "name": "Diagnóstico de servidor",
-  "description": "Conecta por SSH a un servidor y ejecuta comandos de diagnóstico: carga del sistema, memoria, disco, procesos y logs. Devuelve un análisis en lenguaje natural.",
+  "description": "Conecta por SSH a un servidor REMOTO concreto (nombrado o identificable) y ejecuta comandos de diagnóstico: carga del sistema, memoria, disco, procesos y logs. Nunca uses esto para preguntas sobre 'esta máquina'/'mi ordenador'/el PC donde corre Nexus — eso es desktop.system_task.",
   "execution": {
     "where": "local_agent",
     "timeout": 60,

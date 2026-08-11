@@ -1,7 +1,7 @@
 {
   "id": "linux.prediagnostico",
   "name": "Pre diagnostico Linux",
-  "description": "Prepara una linea de investigacion para incidencias sobre servidores Linux y sistemas Unix-like.",
+  "description": "Diagnostico sobre un servidor Linux/Unix-like REMOTO concreto (nombrado o identificable). Nunca uses esto para preguntas sobre 'esta máquina'/'mi ordenador'/el PC donde corre Nexus — eso es desktop.system_task.",
   "execution": {
     "where": "assistant",
     "timeout": 30,

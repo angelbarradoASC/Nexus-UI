@@ -26,6 +26,34 @@ async function apiJson(url, opts = {}) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
+// Un mensaje de PEPO puede traer un bloque ```...``` (el script que va a
+// ejecutar). El usuario final no quiere ver PowerShell en crudo — se separa
+// el texto en lenguaje llano del codigo, y el codigo se oculta detras de un
+// <details> plegable (mismo patron que "Ver proceso de pensamiento"). Todo
+// el contenido dinamico se sigue escapando por separado: solo las etiquetas
+// <details>/<summary> son HTML literal nuestro, nunca texto del LLM.
+function renderBubbleContent(text) {
+    const codeFence = /```[a-zA-Z]*\n?([\s\S]*?)```/;
+    const match = text.match(codeFence);
+    if (!match) {
+        return escHtml(text).replace(/\n/g, '<br>');
+    }
+
+    const before = text.slice(0, match.index).trim();
+    const after = text.slice(match.index + match[0].length).trim();
+    const code = match[1].trim();
+
+    const beforeHtml = before ? `${escHtml(before).replace(/\n/g, '<br>')}` : '';
+    const afterHtml = after ? `<div class="pepo-bubble-after">${escHtml(after).replace(/\n/g, '<br>')}</div>` : '';
+
+    return `${beforeHtml}
+        <details class="pepo-code-toggle">
+            <summary>Ver script</summary>
+            <pre><code>${escHtml(code)}</code></pre>
+        </details>
+        ${afterHtml}`;
+}
+
 function appendMsg(role, text, isThinking = false) {
     const log = document.getElementById('pepoChatLog');
     if (!log) return null;
@@ -43,8 +71,11 @@ function appendMsg(role, text, isThinking = false) {
                 <div class="pepo-thinking-dot"></div>
             </div>`;
     } else {
+        const bodyHtml = role === 'user'
+            ? escHtml(text).replace(/\n/g, '<br>')
+            : renderBubbleContent(text);
         wrap.innerHTML = `<p class="pepo-msg-role">${escHtml(roleLabel)}</p>
-            <div class="pepo-bubble">${escHtml(text).replace(/\n/g, '<br>')}</div>`;
+            <div class="pepo-bubble">${bodyHtml}</div>`;
     }
 
     log.appendChild(wrap);

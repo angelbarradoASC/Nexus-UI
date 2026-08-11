@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from desktop.runtime.capabilities import PermissionLevel
 from desktop.runtime.skills import DesktopSkill, DesktopSkillCatalogue
@@ -54,6 +55,7 @@ class DesktopSkillRouter:
         "assets.crear_ticket_operador": [],
         "jira.crear_ticket": [],
         "jira.consultar_ticket": [],
+        "monitoring.estado": [],
         "ssh.diagnostico": ["desktop.commands.run"],
         "docker.prediagnostico": ["desktop.docker.inspect"],
         "linux.prediagnostico": ["infra.linux.observe"],
@@ -73,6 +75,7 @@ class DesktopSkillRouter:
         "assets.crear_ticket_operador": PermissionLevel.ASSIST,
         "jira.crear_ticket": PermissionLevel.ASSIST,
         "jira.consultar_ticket": PermissionLevel.ASSIST,
+        "monitoring.estado": PermissionLevel.OBSERVE,
         "ssh.diagnostico": PermissionLevel.OPERATE,
         "docker.prediagnostico": PermissionLevel.ASSIST,
         "linux.prediagnostico": PermissionLevel.ASSIST,
@@ -86,8 +89,14 @@ class DesktopSkillRouter:
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
-    def __init__(self, catalogue: DesktopSkillCatalogue | None = None) -> None:
+    def __init__(
+        self,
+        catalogue: DesktopSkillCatalogue | None = None,
+        *,
+        settings_store: Any | None = None,
+    ) -> None:
         self.catalogue = catalogue or DesktopSkillCatalogue()
+        self._settings_store = settings_store
 
     def resolve(self, user_input: str) -> SkillResolution:
         text = user_input.strip()
@@ -124,7 +133,10 @@ class DesktopSkillRouter:
         """
         text = user_input.strip()
         entities = self._extract_entities(text)
-        messages = [{"role": "system", "content": resolve_prompt_sync("pepo.skill_intention")}]
+        system_prompt = resolve_prompt_sync("pepo.skill_intention").replace(
+            "__SKILLS_CATALOGUE__", self.catalogue.as_prompt_options()
+        )
+        messages = [{"role": "system", "content": system_prompt}]
         if history:
             messages.extend(history[-6:])
         messages.append({"role": "user", "content": text})
@@ -174,6 +186,8 @@ class DesktopSkillRouter:
             return "fichaje.salida", 0.98, "La peticion encaja con una accion de fichaje de salida."
         if entities.get("ticket_id") and any(term in lowered for term in ("ticket", "estado", "como esta", "como esta", "consulta")):
             return "jira.consultar_ticket", 0.97, "Se ha detectado una consulta clara sobre un ticket existente."
+        if any(term in lowered for term in ("hay incidentes", "hay alertas", "hay alarmas", "que incidentes", "que alertas", "algun incidente", "alguna alerta", "estado de las alertas", "estado de los incidentes")):
+            return "monitoring.estado", 0.93, "Pregunta por el estado actual de alertas/incidentes, sin pedir crear nada."
         if any(term in lowered for term in ("crear ticket", "crea ticket", "crea un ticket", "abre ticket", "abre un ticket", "abrir ticket", "abre una incidencia", "registra incidencia", "escalalo a ticket", "escalalo como ticket")) and any(
             term in lowered
             for term in (
@@ -316,7 +330,20 @@ class DesktopSkillRouter:
         rationale: str,
         entities: dict,
     ) -> SkillResolution:
-        permission = self._SKILL_PERMISSION.get(skill_id, PermissionLevel.ASSIST)
+        override = self._settings_store.get_override(skill_id) if self._settings_store else None
+        if override and override.get("enabled") is False and skill_id != "general.respuesta":
+            return self._build_resolution(
+                "general.respuesta", 0.35,
+                f"Skill '{skill_id}' desactivado desde el gestor de agentes.",
+                entities,
+            )
+
+        permission_value = override.get("permission_level") if override else None
+        permission = (
+            PermissionLevel(permission_value)
+            if permission_value is not None
+            else self._SKILL_PERMISSION.get(skill_id, PermissionLevel.ASSIST)
+        )
         capabilities = list(self._SKILL_CAPABILITIES.get(skill_id, []))
         execution_mode = "assist"
         needs_confirmation = False

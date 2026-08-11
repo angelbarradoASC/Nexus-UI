@@ -104,6 +104,46 @@ html { zoom: 0.75; }
     border-bottom-left-radius: 4px;
 }
 
+/* ── Script plegable dentro de una respuesta de PEPO ─────────────────────── */
+.pepo-code-toggle {
+    margin: 8px 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+}
+
+.pepo-code-toggle summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    list-style: none;
+}
+
+.pepo-code-toggle summary::-webkit-details-marker { display: none; }
+.pepo-code-toggle summary::before { content: "▸ "; }
+.pepo-code-toggle[open] summary::before { content: "▾ "; }
+
+.pepo-code-toggle pre {
+    margin: 0;
+    padding: 10px;
+    border-top: 1px solid var(--line);
+    background: var(--panel-2);
+    overflow-x: auto;
+}
+
+.pepo-code-toggle code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    white-space: pre;
+}
+
+.pepo-bubble-after { margin-top: 4px; }
+
 /* ── Indicador de "pensando" ─────────────────────────────────────────────── */
 .pepo-thinking {
     display: flex;

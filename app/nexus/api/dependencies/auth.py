@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import Request
 
 from desktop.config import DesktopSettings
+from desktop.runtime.skill_router import DesktopSkillRouter
 from desktop.storage.monitoring_integrations import (
     DesktopMonitoringIntegrationStore,
     resolve_monitoring_base_urls,
@@ -55,6 +57,7 @@ class NexusRuntime:
     cmdb:              FileCMDB = None
     vault:             VaultService = None
     access:            AgentAccessService = None
+    agent_settings:    Any = None
     mail:              ThunderbirdMailManager = None
     teams:             TeamsChatManager = None
     case_log:          CaseLogStore = None
@@ -67,21 +70,37 @@ def build_runtime(cfg) -> NexusRuntime:
     set_default_prompt_manager(prompt_manager)
     llm_router = get_router()
     cmdb = FileCMDB()
+    # vault/access se construyen aqui (no mas abajo, donde estaban antes) porque
+    # NexusCoordinator los necesita para remote_ops_agent — el resto del runtime
+    # los recibe igual via NexusRuntime.vault/.access mas abajo, sin cambios.
+    vault = VaultService()
+    access = AgentAccessService(cmdb=cmdb, vault=vault)
     monitoring_store = None
     mouse_agent = None
     system_task_agent = None
+    remote_ops_agent = None
+    skill_router = DesktopSkillRouter()
+    agent_settings: "AgentSettingsStore | None" = None
     if getattr(cfg, "is_desktop", False):
         desktop_settings = DesktopSettings.from_env()
         monitoring_store = DesktopMonitoringIntegrationStore(
             desktop_settings.monitoring_config_db_path
         )
         from desktop.local_agents.mouse_agent import MouseAgent
+        from desktop.local_agents.remote_ops_agent import RemoteOpsAgent
         from desktop.local_agents.skill_library import SkillLibrary
         from desktop.local_agents.system_task_agent import SystemTaskAgent
+        from desktop.runtime.agent_settings import AgentSettingsStore
 
         mouse_agent = MouseAgent()
         skill_library = SkillLibrary(desktop_settings.skill_library_db_path)
         system_task_agent = SystemTaskAgent(cfg, llm_router=llm_router, skill_library=skill_library, cmdb=cmdb)
+        remote_ops_agent = RemoteOpsAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, access=access)
+        agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
+        # Un unico DesktopSkillRouter (con el override de permisos ya cargado)
+        # compartido entre NexusCoordinator y AssistantRuntimeCore — antes cada
+        # uno creaba el suyo por separado, sin overrides posibles.
+        skill_router = DesktopSkillRouter(settings_store=agent_settings)
     monitoring_urls = resolve_monitoring_base_urls(cfg, monitoring_store)
     alertmanager = AlertmanagerConnector(
         monitoring_urls["alertmanager"],
@@ -107,19 +126,19 @@ def build_runtime(cfg) -> NexusRuntime:
         prospecting=prospecting,
         mouse_agent=mouse_agent,
         system_task_agent=system_task_agent,
+        remote_ops_agent=remote_ops_agent,
+        skill_router=skill_router,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
         runbooks=RunbookRegistry(),
         llm_router=llm_router,
         docker_diagnostics=DockerPreDiagnosticService(),
     )
-    assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router)
+    assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router, skill_router=skill_router)
     agent_runtime = AgentRuntimeService()
     outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
     crm = CRMBridgeService(cfg=cfg)
     campaign = CampaignAgent(prospecting_svc=prospecting, outreach_mgr=outreach, crm_svc=crm)
-    vault = VaultService()
-    access = AgentAccessService(cmdb=cmdb, vault=vault)
     case_log = CaseLogStore()
     mail = ThunderbirdMailManager(cfg=cfg, llm_router=llm_router)
     teams = TeamsChatManager(cfg=cfg, llm_router=llm_router, case_log=case_log)
@@ -138,6 +157,7 @@ def build_runtime(cfg) -> NexusRuntime:
         cmdb=cmdb,
         vault=vault,
         access=access,
+        agent_settings=agent_settings,
         mail=mail,
         teams=teams,
         case_log=case_log,
@@ -215,6 +235,11 @@ def get_prospecting_manager(request: Request) -> ProspectingAgentService:
 def get_campaign_agent(request: Request) -> CampaignAgent:
     """Fetch the campaign agent from FastAPI application state."""
     return get_runtime(request).campaign
+
+
+def get_agent_settings_store(request: Request) -> Any:
+    """Fetch the AgentSettingsStore (permission/enabled overrides) from application state."""
+    return get_runtime(request).agent_settings
 
 
 def get_pending_approvals(request: Request) -> MemoryPendingApprovalRepository:

@@ -547,23 +547,8 @@ Si se te pasan turnos anteriores de la conversacion, usalos para resolver refere
 
 {"skill_id": "...", "confidence": 0.0, "rationale": "...", "entities": {"servidor": null, "ticket_id": null, "container": null}}
 
-skill_id debe ser EXACTAMENTE una de estas opciones:
-- "fichaje.entrada" — el usuario dice que acaba de empezar su jornada laboral.
-- "fichaje.salida" — el usuario dice que termina su jornada laboral.
-- "assets.crear_ticket_operador" — quiere abrir un ticket/incidencia operativa en Assets (servidores, alertas, monitorizacion, Docker, red).
-- "jira.consultar_ticket" — quiere consultar el estado de un ticket ya existente (menciona una clave tipo NEXUS-42).
-- "jira.crear_ticket" — quiere crear o preparar un ticket generico (no operativo).
-- "docker.prediagnostico" — pide revisar/diagnosticar un contenedor Docker concreto.
-- "linux.prediagnostico" — pide revisar/diagnosticar un servidor Linux.
-- "windows.prediagnostico" — pide revisar/diagnosticar un servidor o servicio Windows.
-- "fortinet.prediagnostico" — pide revisar un firewall Fortinet/FortiGate.
-- "cisco.switch.prediagnostico" — pide revisar switching Cisco (VLAN, spanning tree, puertos).
-- "ssh.diagnostico" — pide un diagnostico tecnico general sobre un servidor concreto, sin encajar en las categorias anteriores.
-- "sales.prospecting" — pide BUSCAR o ENCONTRAR negocios/empresas reales (por ejemplo peluquerias, asesorias, restaurantes, clinicas...) en una ciudad o zona, para prospeccion comercial. Esto incluye peticiones como "buscame X cerca de Y", "dame un listado de X en Y", "quiero que me ayudes buscando X en Y".
-- "desktop.mouse_speed" — pide subir, bajar, maximizar, minimizar o resetear la velocidad del puntero del raton/mouse de ESTE ordenador. Ejemplos: "baja la velocidad de mi raton", "el cursor va muy lento", "sube un poco la sensibilidad del mouse".
-- "desktop.system_task" — pide hacer CUALQUIER OTRA cosa en ESTE ordenador (Windows) que no sea la velocidad del raton: instalar/configurar una impresora, cambiar ajustes de red o wifi, abrir/cerrar programas, cambiar configuracion del sistema, ejecutar comandos, organizar ficheros, etc. Es el cajon general para "toca el PC" cuando no encaja en un skill mas especifico.
-- "web.busqueda" — necesita informacion externa o reciente que no es una busqueda de negocios (precios, noticias, documentacion, version de un producto, etc.).
-- "general.respuesta" — conversacion general, preguntas que el LLM puede responder sin ejecutar nada.
+skill_id debe ser EXACTAMENTE una de estas opciones (generadas desde el catalogo real de skills — si no aparece aqui, no existe):
+__SKILLS_CATALOGUE__
 
 entities (usa null si no aplica):
 - servidor: nombre o IP de un servidor/host mencionado.
@@ -583,11 +568,23 @@ Usuario: "quiero que me ayudes buscando peluquerias cerca de villamayor de galle
 Usuario: "como esta el ticket NEXUS-42"
 {"skill_id":"jira.consultar_ticket","confidence":0.95,"rationale":"Consulta sobre un ticket existente con clave identificada.","entities":{"servidor":null,"ticket_id":"NEXUS-42","container":null}}
 
+Usuario: "¿hay incidentes o alertas que requieran atencion inmediata?"
+{"skill_id":"monitoring.estado","confidence":0.95,"rationale":"Pregunta si hay algo activo ahora mismo — solo lectura, no pide crear un ticket.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Usuario: "abre un ticket para el servidor web-prod-01, esta caido"
+{"skill_id":"assets.crear_ticket_operador","confidence":0.96,"rationale":"Pide explicitamente crear un ticket operativo.","entities":{"servidor":"web-prod-01","ticket_id":null,"container":null}}
+
 Usuario: "hola, que tal"
 {"skill_id":"general.respuesta","confidence":0.99,"rationale":"Conversacion general sin accion que ejecutar.","entities":{"servidor":null,"ticket_id":null,"container":null}}
 
 Usuario: "puedes bajar un poco la velocidad de mi raton?"
 {"skill_id":"desktop.mouse_speed","confidence":0.95,"rationale":"Pide reducir la velocidad del puntero de este ordenador.","entities":{"servidor":null,"ticket_id":null,"container":null,"direction":"down"}}
+
+Usuario: "cuentame el estado de esta maquina, cpu memoria y disco"
+{"skill_id":"desktop.system_task","confidence":0.92,"rationale":"Pregunta por el estado del PC local (este ordenador), no nombra ningun servidor remoto.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Usuario: "revisa el servidor BeaServer"
+{"skill_id":"ssh.diagnostico","confidence":0.9,"rationale":"Nombra un servidor remoto concreto por nombre.","entities":{"servidor":"BeaServer","ticket_id":null,"container":null}}
 
 Devuelve SOLO el JSON, sin explicaciones.""",
     ),
@@ -625,10 +622,30 @@ Devuelve SOLO el JSON.""",
 
 Reglas:
 - Antes de suponer un dato, comprueba si puedes averiguarlo con lookup_cmdb.
-- Si de verdad no hay forma de saberlo (no esta en el CMDB, no lo has dicho tu ni el usuario antes), pregunta con ask_user — UNA sola cosa concreta cada vez, nunca varias a la vez.
+- Si la tarea es un sintoma vago (va lento, no responde, se cuelga, esta raro) y no un objetivo concreto, usa SIEMPRE run_diagnostic antes de proponer nada — es de solo lectura, no pide confirmacion, y te da datos reales (procesos por CPU/memoria, disco, uptime) en vez de adivinar la causa.
+- Con el diagnostico en la mano, propon la accion MENOS drastica que explique lo que has visto — no la mas grande que conozcas. Reiniciar el equipo (Restart-Computer) es el ultimo recurso, no el primero: solo propon eso si el diagnostico realmente lo justifica (por ejemplo llevas dias sin reiniciar y hay actualizaciones pendientes) o el usuario lo pide explicitamente. Si el diagnostico muestra que un proceso concreto consume todo, propon actuar sobre ESE proceso, no reiniciar todo el sistema.
+- Si de verdad no hay forma de saberlo (no esta en el CMDB, no lo has dicho tu ni el usuario antes, y run_diagnostic no lo aclara), pregunta con ask_user — UNA sola cosa concreta cada vez, nunca varias a la vez.
 - Cuando ya tengas todos los datos que necesitas, usa run_script con el comando final.
 - Si la tarea no se puede resolver con un script (requiere manejar una GUI sin cmdlet equivalente) o ya esta resuelta con lo que sabes, usa finish.
 - No inventes nombres de cmdlet que no existen. Usa solo comandos y cmdlets estandar y muy conocidos de PowerShell/Windows (Get-*, Set-*, New-Item, Test-Path, Clear-RecycleBin, w32tm, etc). Si no estas seguro de que un cmdlet exista, prefiere el enfoque mas basico y verificable en vez de arriesgar un nombre inventado.
+- Responde siempre llamando a una herramienta — no respondas en texto libre salvo que ya hayas llamado a finish.""",
+    ),
+    "pepo.remote_ops_loop": PromptDefinition(
+        key="pepo.remote_ops_loop",
+        title="PEPO Bucle de Operaciones Remotas",
+        group="pepo",
+        description="Prompt del bucle generico con tool calling para diagnosticar servidores/dispositivos remotos via CMDB + Vault + SSH real.",
+        default_text="""Eres PEPO, resolviendo una pregunta sobre un servidor o dispositivo remoto, paso a paso, usando las herramientas disponibles.
+
+Reglas:
+- Si el usuario pregunta por "esta maquina", "este ordenador", "mi PC" o el equipo donde trabaja, SIN nombrar un servidor concreto — eso NO es tarea tuya, es el PC local (otro agente lo gestiona). Usa finish explicandolo, no busques nada en el CMDB.
+- NUNCA supongas la tecnologia (Linux, Windows, Fortinet, Cisco...) por palabras del mensaje del usuario. Usa lookup_cmdb SIEMPRE primero — el CMDB es la fuente de verdad, no lo adivines.
+- Si lookup_cmdb no encuentra nada que coincida, dilo con claridad en finish (por ejemplo: "no encuentro 'BeaServer' en el CMDB"). Eso es una respuesta completa, no un fallo — no preguntes al usuario que tecnologia es si el dispositivo no esta registrado.
+- Si lookup_cmdb encuentra varios dispositivos que podrian ser el que pide el usuario y no esta claro cual, usa ask_user para preguntar cual de ellos.
+- Antes de proponer run_diagnostic, usa check_credentials sobre el device_id ya resuelto — si el Vault esta bloqueado o no hay credenciales, dilo con claridad en finish, no propongas un diagnostico que sabes que va a fallar.
+- Solo propon run_diagnostic si el dispositivo tiene protocolo ssh y hay credenciales confirmadas. Para otros protocolos (winrm, rest_api, snmp) o sin credenciales, usa finish explicando honestamente que no se puede actuar todavia sobre ese dispositivo.
+- run_diagnostic requiere confirmacion humana antes de conectarse — nunca asumas que el usuario ya confirmo.
+- No inventes datos del dispositivo (IP, SO, estado) que no vengan de lookup_cmdb o del resultado real del diagnostico.
 - Responde siempre llamando a una herramienta — no respondas en texto libre salvo que ya hayas llamado a finish.""",
     ),
     "pepo.skill_library_match": PromptDefinition(

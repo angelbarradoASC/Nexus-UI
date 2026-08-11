@@ -80,6 +80,18 @@ class MouseAgent:
     def has_pending(self, context_id: str) -> bool:
         return context_id in self._pending
 
+    def list_pending(self) -> list[dict[str, Any]]:
+        """Solo lectura, para el gestor de agentes — nunca expone nada sensible."""
+        return [
+            {
+                "context_id": context_id,
+                "agent_id": "mouse",
+                "kind": "mouse_speed",
+                "summary": f"Cambiar velocidad del raton: {pending.current_value} -> {pending.target_value} ({pending.direction})",
+            }
+            for context_id, pending in self._pending.items()
+        ]
+
     def confirm(self, context_id: str) -> dict[str, Any] | None:
         """Aplica el cambio pendiente para este contexto, si existe."""
         pending = self._pending.pop(context_id, None)

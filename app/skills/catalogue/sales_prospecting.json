@@ -1,0 +1,31 @@
+{
+  "id": "sales.prospecting",
+  "name": "Prospección comercial B2B",
+  "description": "Pide BUSCAR o ENCONTRAR negocios/empresas reales (por ejemplo peluquerías, asesorías, restaurantes, clínicas...) en una ciudad o zona, para prospección comercial. Incluye peticiones como 'buscame X cerca de Y', 'dame un listado de X en Y', 'quiero que me ayudes buscando X en Y'.",
+  "execution": {
+    "where": "server",
+    "timeout": 120,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2"
+  },
+  "inputs": {
+    "vertical": {"type": "str", "required": false},
+    "city": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "run_id": "str"
+  },
+  "triggers": [
+    "buscame peluquerias cerca de",
+    "dame un listado de",
+    "quiero que me ayudes buscando",
+    "encuentrame negocios de"
+  ],
+  "examples": [
+    "quiero que me ayudes buscando peluquerias cerca de villamayor de gallego en zaragoza, dame el listado"
+  ]
+}

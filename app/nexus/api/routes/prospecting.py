@@ -43,6 +43,55 @@ class InterpretRequest(BaseModel):
     text: str
 
 
+# Propiedades del "brief de prospección" compartidas por las dos vías de
+# extracción por LLM (tool-call único de /interpret y tool finish_brief del
+# bucle de /chat) — antes cada una definía su propia copia del mismo esquema,
+# ya desincronizadas entre si (finish_brief no tenia las descripciones
+# detalladas de interpret). Una sola definicion, cada tool añade solo lo que
+# le es propio (interpret: rango de empleados/poligono/dry_run; chat: reply).
+_PROSPECTING_BRIEF_CORE_PROPERTIES: dict[str, dict] = {
+    "vertical": {
+        "type": "string",
+        "description": (
+            "Usa EXACTAMENTE uno de los slugs listados en 'VERTICALES DISPONIBLES' "
+            "del contexto de este mensaje. Nunca inventes un slug nuevo — si ninguno "
+            "encaja de verdad, usa 'custom'."
+        ),
+    },
+    "target_description": {
+        "type": "string",
+        "description": (
+            "SOLO el sintagma nominal que describe el tipo de negocio, "
+            "ej. 'restaurantes de lujo', 'asesorias fiscales'. NUNCA copies la frase completa "
+            "del usuario ni incluyas verbos de instruccion (quiero que, busca, dame...) "
+            "ni la geografia ni la marca representada."
+        ),
+    },
+    "city": {
+        "type": "string",
+        "description": (
+            "SOLO el nombre propio de la ciudad/localidad, capitalizado (ej. 'Salamanca', 'Toledo'). "
+            "Si el texto dice 'la zona de X' o 'cerca de X', la ciudad es X, nunca la palabra 'zona'."
+        ),
+    },
+    "province": {
+        "type": "string",
+        "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
+    },
+    "region": {"type": "string"},
+    "radius_km": {
+        "type": "integer",
+        "description": (
+            "SOLO si el usuario menciona explicitamente un radio o distancia "
+            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
+            "entre 1 y 250. Si no lo menciona, omite este campo."
+        ),
+    },
+    "desired_count": {"type": "integer"},
+    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
+    "must_have": {"type": "array", "items": {"type": "string"}},
+}
+
 # Mismo mecanismo que el bucle de PEPO (desktop/local_agents/system_task_agent.py):
 # tool calling forzado en vez de "pedir JSON en texto y esperar" — mas robusto con
 # modelos de razonamiento (el contenido de razonamiento no puede corromper el JSON
@@ -56,46 +105,7 @@ _INTERPRET_BRIEF_TOOL = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "vertical": {
-                        "type": "string",
-                        "description": (
-                            "Usa EXACTAMENTE uno de los slugs listados en 'VERTICALES DISPONIBLES' "
-                            "del contexto de este mensaje. Nunca inventes un slug nuevo — si ninguno "
-                            "encaja de verdad, usa 'custom'."
-                        ),
-                    },
-                    "target_description": {
-                        "type": "string",
-                        "description": (
-                            "SOLO el sintagma nominal que describe el tipo de negocio, "
-                            "ej. 'restaurantes de lujo', 'asesorias fiscales'. NUNCA copies la frase completa "
-                            "del usuario ni incluyas verbos de instruccion (quiero que, busca, dame...) "
-                            "ni la geografia ni la marca representada."
-                        ),
-                    },
-                    "city": {
-                        "type": "string",
-                        "description": (
-                            "SOLO el nombre propio de la ciudad/localidad, capitalizado (ej. 'Salamanca', 'Toledo'). "
-                            "Si el texto dice 'la zona de X' o 'cerca de X', la ciudad es X, nunca la palabra 'zona'."
-                        ),
-                    },
-                    "province": {
-                        "type": "string",
-                        "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
-                    },
-                    "region": {"type": "string"},
-                    "radius_km": {
-                        "type": "integer",
-                        "description": (
-                            "SOLO si el usuario menciona explicitamente un radio o distancia "
-                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
-                            "entre 1 y 250. Si no lo menciona, omite este campo."
-                        ),
-                    },
-                    "desired_count": {"type": "integer"},
-                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
-                    "must_have": {"type": "array", "items": {"type": "string"}},
+                    **_PROSPECTING_BRIEF_CORE_PROPERTIES,
                     "min_employees": {"type": "integer"},
                     "max_employees": {"type": "integer"},
                     "industrial_zone": {"type": "string"},
@@ -303,33 +313,15 @@ async def interpret_brief(
     # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura.
     if brief is None:
         brief = _fallback_parse(payload.text, prospecting.verticals)
-    # Puerta unica: aunque el LLM SI haya respondido, su slug se resuelve contra
-    # BBDD igualmente — asi nunca puede colar un vertical inventado que no
-    # exista en sales_verticals (resolve() respeta el slug tal cual si ya es
-    # exacto, asi que esto no cambia nada cuando el LLM elige bien).
-    brief["vertical"] = prospecting.verticals.resolve(brief.get("vertical", ""), fallback_text=payload.text).slug
     brief["vertical_created"] = False
     # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
     if "location" in brief and not brief.get("city"):
         brief["city"] = brief.pop("location")
     if "quantity" in brief and not brief.get("desired_count"):
         brief["desired_count"] = brief.pop("quantity")
-    brief.setdefault("desired_count", 20)
-    brief.setdefault("minimum_score", 40)
-    brief.setdefault("represented_by", "assets")
-    brief.setdefault("dry_run", True)
-    brief.setdefault("must_have", [])
-    try:
-        orchestrated = await asyncio.wait_for(
-            prospecting.orchestrate_brief(brief, original_text=payload.text.strip()),
-            timeout=4.0,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("interpret | orchestrate_brief timeout (4s) — devolviendo brief base")
-        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
-    except Exception as exc:
-        logger.error("interpret | orchestrate_brief error — {}", exc)
-        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": str(exc)[:100], "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
+    # Cierre canonico compartido con /prospecting/chat: resuelve vertical contra
+    # BBDD (puerta unica) + orquesta. Ver ProspectingAgentService.finalize_brief.
+    orchestrated = await prospecting.finalize_brief(brief, original_text=payload.text.strip())
     return {
         "status": "ok",
         "brief": orchestrated["brief"],
@@ -377,23 +369,8 @@ _PROSPECTING_CHAT_TOOLS = [
                 "type": "object",
                 "properties": {
                     "reply": {"type": "string", "description": "Resumen breve y natural de lo que se va a buscar."},
-                    "vertical": {"type": "string"},
-                    "city": {"type": "string"},
-                    "province": {"type": "string"},
-                    "region": {"type": "string"},
-                    "target_description": {"type": "string"},
-                    "radius_km": {
-                        "type": "integer",
-                        "description": (
-                            "SOLO si el usuario menciona explicitamente un radio o distancia "
-                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
-                            "entre 1 y 250. Si no lo menciona, omite este campo."
-                        ),
-                    },
-                    "desired_count": {"type": "integer"},
+                    **_PROSPECTING_BRIEF_CORE_PROPERTIES,
                     "minimum_score": {"type": "integer"},
-                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
-                    "must_have": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["reply", "vertical", "city"],
             },
@@ -547,14 +524,15 @@ async def prospecting_chat(
             reply += " ⚠ La búsqueda de prueba encontró pocos resultados directos — puede que la zona tenga poca presencia online o que el run sea corto."
 
     if status == "ready" and brief:
+        # Fallback de UX propio de chat (no de /interpret): si no hay provincia,
+        # usar la ciudad — se conserva tal cual, es previo a este refactor.
         brief.setdefault("province", brief.get("city", ""))
-        brief.setdefault("region", "")
-        brief.setdefault("target_description", "")
-        brief.setdefault("desired_count", 20)
-        brief.setdefault("minimum_score", 40)
-        brief.setdefault("represented_by", "assets")
-        brief.setdefault("must_have", [])
-        brief.setdefault("dry_run", True)
+        # Cierre canonico compartido con /prospecting/interpret: resuelve vertical
+        # contra BBDD (puerta unica, antes solo lo hacia /interpret) + orquesta
+        # (antes /chat nunca pasaba por el refinamiento de guardrails/fuentes).
+        combined_text = " ".join(m["content"] for m in history if m["role"] == "user")
+        finalized = await prospecting.finalize_brief(brief, original_text=combined_text)
+        brief = finalized["brief"]
 
     from utils.logger import hito
     if status == "ready" and brief:
@@ -675,30 +653,6 @@ async def push_valid_results_to_crm(
     if response.get("status") == "not_found":
         raise HTTPException(status_code=404, detail=f"Run {payload.run_id} not found")
     return response
-
-
-# ── Search Decomposer (Fase 1 del pipeline agéntico) ─────────────────────────
-
-class DecomposeRequest(BaseModel):
-    text: str
-    requested_by: str = "anonymous"
-
-
-@router.post("/prospecting/decompose")
-async def decompose_search(payload: DecomposeRequest) -> dict:
-    """Descompone una petición en lenguaje natural en un search intent estructurado.
-
-    Nuevo endpoint standalone — no toca el pipeline existente.
-    Fase 1 del pipeline agéntico de búsqueda.
-    """
-    from agents.search_decomposer_agent import SearchDecomposerAgent
-
-    if not payload.text.strip():
-        raise HTTPException(status_code=400, detail="text is required")
-
-    agent = SearchDecomposerAgent()
-    result = await agent.decompose(payload.text, requested_by=payload.requested_by)
-    return {"status": "ok", **result}
 
 
 # ── Verticales comerciales (CRUD) ─────────────────────────────────────────────

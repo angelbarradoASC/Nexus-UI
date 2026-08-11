@@ -46,6 +46,41 @@ class DesktopLLMRouterConfig:
     updated_at: str = ""
 
     @classmethod
+    def from_app_config(cls, cfg) -> "DesktopLLMRouterConfig":
+        """Deriva la tabla L0-L3 desde AppConfig (env/.env) — se usa como
+        default de la API cuando todavía no existe `llm_router.json`
+        guardado. Antes esto era un dict ad-hoc suelto en
+        `products/desktop/backend/app.py` (`_cfg_as_router_defaults()`),
+        una sexta representación de esta misma tabla — ahora es un
+        constructor de la clase que ya modela exactamente esta forma.
+        Nunca expone `api_key` real (queda vacía; el valor real solo vive
+        en `cfg` hasta que el usuario guarda su propia config desde la UI).
+        """
+        return cls(
+            priority=cfg.llm_priority,
+            l0=LLMLevelConfig(
+                url=cfg.llm_l0_url or cfg.llm_api_base_url or "",
+                model=cfg.llm_l0_model or cfg.llm_model or "",
+                enabled=bool(cfg.llm_l0_url or cfg.llm_api_base_url),
+            ),
+            l1=LLMLevelConfig(
+                url=cfg.llm_l1_url or "",
+                model=cfg.llm_l1_model or "",
+                enabled=bool(cfg.llm_l1_url),
+            ),
+            l2=LLMLevelConfig(
+                url=cfg.llm_l2_url or "",
+                model=cfg.llm_l2_model or "",
+                enabled=bool(cfg.llm_l2_url),
+            ),
+            l3=LLMLevelConfig(
+                url=cfg.llm_l3_url or "",
+                model=cfg.llm_l3_model or "",
+                enabled=bool(cfg.llm_l3_url),
+            ),
+        )
+
+    @classmethod
     def from_dict(cls, d: dict | None) -> "DesktopLLMRouterConfig":
         d = d or {}
         return cls(

@@ -200,6 +200,38 @@ class ProspectingAgentService:
         brief = self._normalize_brief(request)
         return await self._orchestrator.orchestrate(brief, original_text=original_text)
 
+    async def finalize_brief(self, raw_brief: dict[str, Any], *, original_text: str) -> dict[str, Any]:
+        """Punto único de cierre de un brief crudo, venga de /interpret o de
+        /chat: resuelve el vertical contra BBDD (nunca confía en el slug que
+        haya decidido el LLM o la heurística tal cual — "puerta única"),
+        rellena los defaults mínimos, y pasa por orchestrate_brief para que
+        ambos caminos reciban el mismo refinamiento de guardrails/fuentes.
+        Antes solo /interpret hacía esto — /chat construía su propio brief
+        ad-hoc sin resolver vertical contra BBDD ni orquestar."""
+        raw_brief["vertical"] = self.verticals.resolve(raw_brief.get("vertical", ""), fallback_text=original_text).slug
+        raw_brief.setdefault("desired_count", 20)
+        raw_brief.setdefault("minimum_score", 40)
+        raw_brief.setdefault("represented_by", "assets")
+        raw_brief.setdefault("dry_run", True)
+        raw_brief.setdefault("must_have", [])
+        try:
+            return await asyncio.wait_for(
+                self.orchestrate_brief(raw_brief, original_text=original_text),
+                timeout=4.0,
+            )
+        except asyncio.TimeoutError:
+            _logger.warning("finalize_brief | orchestrate_brief timeout (4s) — devolviendo brief base")
+            return {
+                "brief": raw_brief,
+                "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []},
+            }
+        except Exception as exc:
+            _logger.error("finalize_brief | orchestrate_brief error — {}", exc)
+            return {
+                "brief": raw_brief,
+                "orchestration": {"refinement_applied": False, "refinement_notes": str(exc)[:100], "source_plan": {}, "autonomous_agents": [], "preserved_fields": []},
+            }
+
     async def resume_run(self, run_id: str) -> dict[str, Any]:
         run = await self._repository.get_run(run_id)
         if run is None:
@@ -631,7 +663,8 @@ class ProspectingAgentService:
                     self._log(run, f"Duplicado CRM: {cname[:50]}", level="warning")
 
                 run["status"] = "scoring"
-                score_payload = self._scorer.score(extracted, vertical=brief.vertical, minimum_score=brief.minimum_score)
+                scoring_vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+                score_payload = self._scorer.score(extracted, vertical=scoring_vertical, minimum_score=brief.minimum_score)
                 extracted.update(score_payload)
                 extracted["crm_blockers"] = self._crm_blockers(extracted, brief)
                 extracted["crm_ready"] = not extracted["crm_blockers"] and bool(extracted.get("accepted"))

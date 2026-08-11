@@ -133,6 +133,73 @@ _GENERIC_QUALITY_TOKENS = [
     "transformacion digital", "modernizacion", "transparencia",
 ]
 _GENERIC_DDG_TEMPLATES = ["{target} {geo} contacto", "{target} {geo} email teléfono"]
+
+# ── point_criteria: scoring por puntos, antes hardcodeado en 5 metodos
+# _score_* de ProspectScorer (app/nexus/prospecting/scoring.py). Migracion
+# 1:1 de esos pesos — ver docs/scoring.md para el vocabulario de cada campo.
+# _GENERIC_POINT_CRITERIA es el fallback real para "custom" y cualquier
+# vertical sin criterio propio (zapaterias, talleres, o una vertical nueva
+# creada desde la API) — antes esas verticales heredaban por accidente los
+# pesos de "administracion publica" via el `else` del if/elif.
+_GENERIC_POINT_CRITERIA: dict[str, Any] = {
+    "has_website": 20, "official_website": 0, "dns_valid": 10, "mx_valid": 10,
+    "email_points": 15, "email_requires_direct": False,
+    "phone": 15, "contact_form_only_bonus": 0,
+    "contact_role_keywords": 0, "contact_person": 0,
+    "rating_high_points": 10, "rating_high_threshold": 4.0,
+    "rating_mid_points": 5, "rating_mid_threshold": 3.5,
+    "social_links_per_item": 4, "social_links_max": 12,
+    "quality_signals_per_item": 5, "quality_signals_max": 10,
+    "premium_bonus": 0, "contact_form_only_penalty": 0, "crm_duplicate_penalty": 25,
+}
+
+_RESTAURANT_POINT_CRITERIA: dict[str, Any] = {
+    "has_website": 15, "official_website": 0, "dns_valid": 10, "mx_valid": 10,
+    "email_points": 15, "email_requires_direct": False,
+    "phone": 10, "contact_form_only_bonus": 5,
+    "contact_role_keywords": 0, "contact_person": 0,
+    "rating_high_points": 0, "rating_high_threshold": 4.0,
+    "rating_mid_points": 0, "rating_mid_threshold": 3.5,
+    "social_links_per_item": 4, "social_links_max": 12,
+    "quality_signals_per_item": 6, "quality_signals_max": 24,
+    "premium_bonus": 8, "contact_form_only_penalty": 0, "crm_duplicate_penalty": 25,
+}
+
+_ASESORIA_POINT_CRITERIA: dict[str, Any] = {
+    "has_website": 20, "official_website": 0, "dns_valid": 10, "mx_valid": 15,
+    "email_points": 15, "email_requires_direct": True,
+    "phone": 15, "contact_form_only_bonus": 0,
+    "contact_role_keywords": 0, "contact_person": 5,
+    "rating_high_points": 10, "rating_high_threshold": 4.0,
+    "rating_mid_points": 5, "rating_mid_threshold": 3.5,
+    "social_links_per_item": 0, "social_links_max": 0,
+    "quality_signals_per_item": 5, "quality_signals_max": 10,
+    "premium_bonus": 0, "contact_form_only_penalty": 10, "crm_duplicate_penalty": 25,
+}
+
+_INMOBILIARIA_SALUD_POINT_CRITERIA: dict[str, Any] = {
+    "has_website": 20, "official_website": 0, "dns_valid": 10, "mx_valid": 10,
+    "email_points": 15, "email_requires_direct": False,
+    "phone": 15, "contact_form_only_bonus": 0,
+    "contact_role_keywords": 0, "contact_person": 0,
+    "rating_high_points": 10, "rating_high_threshold": 4.0,
+    "rating_mid_points": 5, "rating_mid_threshold": 3.5,
+    "social_links_per_item": 4, "social_links_max": 12,
+    "quality_signals_per_item": 5, "quality_signals_max": 10,
+    "premium_bonus": 0, "contact_form_only_penalty": 0, "crm_duplicate_penalty": 25,
+}
+
+_PUBLIC_ADMINISTRATION_POINT_CRITERIA: dict[str, Any] = {
+    "has_website": 20, "official_website": 10, "dns_valid": 10, "mx_valid": 15,
+    "email_points": 15, "email_requires_direct": True,
+    "phone": 10, "contact_form_only_bonus": 0,
+    "contact_role_keywords": 10, "contact_person": 5,
+    "rating_high_points": 0, "rating_high_threshold": 4.0,
+    "rating_mid_points": 0, "rating_mid_threshold": 3.5,
+    "social_links_per_item": 0, "social_links_max": 0,
+    "quality_signals_per_item": 5, "quality_signals_max": 15,
+    "premium_bonus": 0, "contact_form_only_penalty": 10, "crm_duplicate_penalty": 25,
+}
 _INMOBILIARIA_EXCLUSIONS = (
     "-site:idealista.com -site:fotocasa.es -site:pisos.com "
     "-site:habitaclia.com -site:yaencontre.com -site:indomio.es "
@@ -150,6 +217,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
             "reason_irrelevant": "no parece restaurante objetivo",
             "organization_type": "restaurant",
             "requires_direct_contact": True,
+            "point_criteria": _RESTAURANT_POINT_CRITERIA,
         },
         "discovery_config": {
             "ddg_templates": [
@@ -181,6 +249,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
             "reason_irrelevant": "no parece asesoría objetivo",
             "organization_type": "asesoria",
             "requires_direct_contact": True,
+            "point_criteria": _ASESORIA_POINT_CRITERIA,
         },
         "discovery_config": {
             "places_queries": [
@@ -209,6 +278,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
             "reason_irrelevant": "no parece inmobiliaria",
             "organization_type": "inmobiliaria",
             "requires_direct_contact": True,
+            "point_criteria": _INMOBILIARIA_SALUD_POINT_CRITERIA,
         },
         "discovery_config": {
             "ddg_templates": [
@@ -244,6 +314,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
             "reason_relevant": "organismo público con señales oficiales",
             "reason_irrelevant": "no parece organismo oficial",
             "organization_type": "public_body",
+            "point_criteria": _PUBLIC_ADMINISTRATION_POINT_CRITERIA,
         },
         "discovery_config": {
             "ddg_templates": [
@@ -267,7 +338,11 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
     {
         "slug": "salud", "nombre": "Clinicas / Salud",
         "aliases": ["clinic", "dentist", "odont", "salud", "medic"],
-        "scoring_rules": {"organization_type": "custom", "requires_direct_contact": True},
+        "scoring_rules": {
+            "organization_type": "custom",
+            "requires_direct_contact": True,
+            "point_criteria": _INMOBILIARIA_SALUD_POINT_CRITERIA,
+        },
         "discovery_config": {
             "ddg_templates": [
                 "clinica dental {geo} contacto",
@@ -290,7 +365,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
     {
         "slug": "zapaterias", "nombre": "Zapaterias",
         "aliases": ["zapater", "calzado", "zapato"],
-        "scoring_rules": {"organization_type": "custom"},
+        "scoring_rules": {"organization_type": "custom", "point_criteria": dict(_GENERIC_POINT_CRITERIA)},
         "discovery_config": {
             "ddg_templates": list(_GENERIC_DDG_TEMPLATES),
             "link_hints": _RESTAURANT_LINK_HINTS,
@@ -302,7 +377,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
     {
         "slug": "talleres", "nombre": "Talleres / Automocion",
         "aliases": ["taller", "mecanico", "automocion", "neumatico", "coches", "chapa y pintura"],
-        "scoring_rules": {"organization_type": "custom"},
+        "scoring_rules": {"organization_type": "custom", "point_criteria": dict(_GENERIC_POINT_CRITERIA)},
         "discovery_config": {
             "ddg_templates": list(_GENERIC_DDG_TEMPLATES),
             "link_hints": _RESTAURANT_LINK_HINTS,
@@ -315,7 +390,7 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
         "slug": FALLBACK_SLUG, "nombre": "Otros",
         "aliases": [],
         "is_fallback": True,
-        "scoring_rules": {"organization_type": "custom"},
+        "scoring_rules": {"organization_type": "custom", "point_criteria": dict(_GENERIC_POINT_CRITERIA)},
         "discovery_config": {
             "ddg_templates": list(_GENERIC_DDG_TEMPLATES),
             "link_hints": _RESTAURANT_LINK_HINTS,
@@ -343,6 +418,7 @@ class SalesVerticalsRepository:
         self._store = SQLiteStore(db_path)
         ensure_prospecting_schema(self._store)
         self._seed_defaults_if_empty()
+        self._backfill_point_criteria_if_missing()
 
     def _seed_defaults_if_empty(self) -> None:
         with self._store.transaction() as conn:
@@ -371,6 +447,28 @@ class SalesVerticalsRepository:
                         now,
                         now,
                     ),
+                )
+
+    def _backfill_point_criteria_if_missing(self) -> None:
+        """Instalaciones que ya tenian sales_verticals sembrada antes de que
+        existiera point_criteria no lo reciben via _seed_defaults_if_empty
+        (solo siembra si la tabla esta vacia). Migracion idempotente: solo
+        escribe las filas a las que de verdad les falta el campo."""
+        seed_point_criteria = {
+            seed["slug"]: seed.get("scoring_rules", {}).get("point_criteria")
+            for seed in _DEFAULT_SEED
+        }
+        with self._store.transaction() as conn:
+            rows = conn.execute("SELECT slug, scoring_rules_json FROM sales_verticals").fetchall()
+            now = _now_iso()
+            for row in rows:
+                rules = json.loads(row["scoring_rules_json"] or "{}")
+                if "point_criteria" in rules:
+                    continue
+                rules["point_criteria"] = seed_point_criteria.get(row["slug"]) or dict(_GENERIC_POINT_CRITERIA)
+                conn.execute(
+                    "UPDATE sales_verticals SET scoring_rules_json = ?, updated_at = ? WHERE slug = ?",
+                    (json.dumps(rules, ensure_ascii=False), now, row["slug"]),
                 )
 
     # ── Lectura ─────────────────────────────────────────────────────────────

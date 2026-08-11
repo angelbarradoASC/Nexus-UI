@@ -209,7 +209,9 @@ class TestDesktopToken:
 
         from desktop.storage.provider_config import DesktopLLMProviderConfig
         with patch(
-            "products.desktop.backend.app._reload_desktop_provider_runtime",
+            # Movido de app.py a settings_routes.py en el refactor de deduplicacion
+            # de Nexus Desktop (extraccion del CRUD de config a ficheros por afinidad).
+            "products.desktop.backend.settings_routes._reload_desktop_provider_runtime",
             AsyncMock(
                 return_value=DesktopLLMProviderConfig(
                     provider_label="Servidor Claude",

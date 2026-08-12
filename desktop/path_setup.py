@@ -13,7 +13,14 @@ def ensure_desktop_import_paths() -> tuple[Path, Path]:
 
     for candidate in (repo_root, app_root):
         candidate_str = str(candidate)
-        if candidate_str not in sys.path:
-            sys.path.insert(0, candidate_str)
+        # Reinsertar siempre al frente, no solo si falta: si ya estaba
+        # presente mas atras (p.ej. via PYTHONPATH precargado por el script
+        # de arranque), dejarlo ahi permite que desktop/main.py (que se
+        # inserta a si mismo en sys.path[0] antes de llamar aqui) tape
+        # config.py de la raiz con desktop/config.py — mismo nombre de
+        # modulo, resultado distinto.
+        if candidate_str in sys.path:
+            sys.path.remove(candidate_str)
+        sys.path.insert(0, candidate_str)
 
     return repo_root, app_root

@@ -371,7 +371,10 @@ propon mejoras CONCRETAS, cada una anclada a un hallazgo real.
 Tipos de propuesta permitidos (usa solo estos, el que mejor encaje):
 renovacion_visual, mejora_ux, optimizacion_movil, mejora_velocidad,
 mejores_ctas, formularios, captacion_leads, chatbot,
-automatizacion_whatsapp, respuestas_llm, reservas, faqs_automaticas
+automatizacion_whatsapp, respuestas_llm, reservas, faqs_automaticas,
+mejora_seo (meta description, canonical, H1, Open Graph, datos
+estructurados, sitemap — usa este tipo solo si los hallazgos tecnicos
+mencionan explicitamente alguna de estas señales SEO)
 
 Devuelve SOLO JSON con:
 - items: lista de objetos {type, observation, recommendation}

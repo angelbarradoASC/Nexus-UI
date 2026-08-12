@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadStatus();
     loadConfig();
     loadResults();
+    loadPending();
 });
 
 // ── Estado del scheduler ──────────────────────────────────────────────────
@@ -105,6 +106,7 @@ async function triggerCampaign() {
         statusEl.textContent = 'completado';
         toast('Ciclo completado');
         loadResults();
+        loadPending();
     } catch (err) {
         statusEl.textContent = 'error';
         toast('Error al ejecutar el ciclo', true);
@@ -196,6 +198,101 @@ async function saveConfig(event) {
         toast('Error al guardar', true);
     } finally {
         setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+}
+
+// ── Cola de revisión — nadie se contacta sin pasar por aquí ────────────────
+
+async function loadPending() {
+    try {
+        const res = await fetch(`${API}/pending`);
+        const data = await res.json();
+        renderPending(data.pending || []);
+    } catch (err) {
+        renderPending([]);
+    }
+}
+
+function renderPending(items) {
+    const list = document.getElementById('pendingList');
+    const countBadge = document.getElementById('pendingCount');
+    if (!list) return;
+
+    if (countBadge) countBadge.textContent = String(items.length);
+
+    if (!items.length) {
+        list.innerHTML = '<div class="camp-report camp-report--empty">Sin leads pendientes de revisión</div>';
+        return;
+    }
+
+    list.innerHTML = items.map(item => {
+        const resultId = escapeHtml(item.result_id || '');
+        const meta = [item.city || item.province].filter(Boolean).join(' · ');
+        const nameCell = item.website
+            ? `<a href="${escapeHtml(item.website)}" target="_blank" rel="noreferrer">${escapeHtml(item.name || '')}</a>`
+            : escapeHtml(item.name || '');
+        const oppScore = item.opportunity_score;
+        const oppCell = oppScore !== undefined && oppScore !== null
+            ? `<span class="camp-score-pill ${opportunityClass(item.opportunity_confidence)}">${escapeHtml(String(oppScore))}</span>`
+            : '';
+
+        const findings = (item.technical_audit && item.technical_audit.findings) || [];
+        const proposalItems = (item.proposal && item.proposal.items) || [];
+        const lines = [
+            ...findings.map(f => `• ${f}`),
+            ...proposalItems.map(p => `→ ${p.observation}\n  Propuesta: ${p.recommendation}`),
+        ];
+
+        return `<div class="camp-pending-card" data-result-id="${resultId}">
+            <div class="camp-pending-card-head">
+                <div>
+                    <div class="camp-company-name">${nameCell}</div>
+                    ${meta ? `<div class="camp-company-meta">${escapeHtml(meta)}</div>` : ''}
+                </div>
+                ${oppCell}
+            </div>
+            ${lines.length ? `<div class="camp-pending-findings">${escapeHtml(lines.join('\n'))}</div>` : ''}
+            <div class="camp-pending-actions">
+                <button class="camp-btn camp-btn--danger" type="button" onclick="discardPending('${resultId}')">Descartar</button>
+                <button class="camp-btn camp-btn--primary" type="button" onclick="sendPending('${resultId}')" ${item.email ? '' : 'disabled title="Sin email de contacto"'}>Enviar</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function sendPending(resultId) {
+    const card = document.querySelector(`.camp-pending-card[data-result-id="${CSS.escape(resultId)}"]`);
+    const buttons = card ? card.querySelectorAll('button') : [];
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        const res = await fetch(`${API}/pending/${encodeURIComponent(resultId)}/send`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'sent') {
+            toast('Email enviado');
+        } else {
+            toast(data.status === 'failed' ? 'No se pudo enviar — revisa el SMTP' : 'No encontrado', true);
+        }
+    } catch {
+        toast('Error al enviar', true);
+    } finally {
+        loadPending();
+        loadResults();
+    }
+}
+
+async function discardPending(resultId) {
+    const card = document.querySelector(`.camp-pending-card[data-result-id="${CSS.escape(resultId)}"]`);
+    const buttons = card ? card.querySelectorAll('button') : [];
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        await fetch(`${API}/pending/${encodeURIComponent(resultId)}/discard`, { method: 'POST' });
+        toast('Lead descartado');
+    } catch {
+        toast('Error al descartar', true);
+    } finally {
+        loadPending();
     }
 }
 

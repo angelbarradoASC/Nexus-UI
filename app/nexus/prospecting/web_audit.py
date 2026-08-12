@@ -50,7 +50,19 @@ _AUDIT_EVAL_SCRIPT = (
     "var t = (el.innerText || '').toLowerCase();"
     "return /contact|contacto|reserva|presupuesto|llama|whatsapp|comprar|solicit/.test(t);"
     "}),"
-    "title_length: (document.title || '').length"
+    "title_length: (document.title || '').length,"
+    # Señales de SEO on-page — mismo criterio que el resto del script: solo
+    # lo que se puede leer directamente del DOM ya renderizado, sin
+    # dependencias nuevas ni herramientas externas (Lighthouse/PageSpeed).
+    "meta_description_length: (function(){"
+    "var m = document.querySelector('meta[name=\"description\"]');"
+    "return m ? (m.getAttribute('content') || '').trim().length : 0;"
+    "})(),"
+    "has_canonical: !!document.querySelector('link[rel=\"canonical\"]'),"
+    "h1_count: document.querySelectorAll('h1').length,"
+    "has_og_tags: !!document.querySelector('meta[property=\"og:title\"]')"
+    " && !!document.querySelector('meta[property=\"og:description\"]'),"
+    "has_structured_data: !!document.querySelector('script[type=\"application/ld+json\"]')"
     "})"
 )
 
@@ -73,7 +85,26 @@ class WebAuditor:
         raw = await self._run_obscura_eval(binary, website)
         if raw is None:
             return None
+        raw["sitemap_reachable"] = await self._check_sitemap_reachable(website)
         return self._build_findings(raw)
+
+    async def _check_sitemap_reachable(self, website: str) -> bool:
+        """robots.txt/sitemap.xml no se pueden leer desde el eval de la pagina
+        (otra ruta, no el DOM ya renderizado) — un GET directo aparte, igual de
+        ligero, sin libreria nueva (httpx ya es la convencion del resto del
+        modulo de prospeccion)."""
+        import httpx
+
+        origin = website.rstrip("/")
+        for path in ("/sitemap.xml", "/robots.txt"):
+            try:
+                async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                    response = await client.get(f"{origin}{path}")
+                if response.status_code == 200:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _resolve_obscura_binary(self) -> Path | None:
         candidate = Path(self.obscura_binary_path) if self.obscura_binary_path else _default_obscura_binary()
@@ -139,6 +170,35 @@ class WebAuditor:
         if not raw.get("has_cta"):
             findings.append("No se detecta ninguna llamada a la accion clara (contacto, reserva, presupuesto...)")
 
+        # ── SEO on-page ──────────────────────────────────────────────────────
+        meta_description_length = int(raw.get("meta_description_length") or 0)
+        if meta_description_length == 0:
+            findings.append("No tiene meta description (Google la sustituye por texto aleatorio de la pagina)")
+        elif meta_description_length > 160:
+            findings.append(f"La meta description es demasiado larga ({meta_description_length} caracteres, Google la recorta a ~160)")
+
+        has_canonical = bool(raw.get("has_canonical"))
+        if not has_canonical:
+            findings.append("No tiene etiqueta canonical (riesgo de contenido duplicado en buscadores)")
+
+        h1_count = int(raw.get("h1_count") or 0)
+        if h1_count == 0:
+            findings.append("La pagina no tiene ningun H1 (encabezado principal para SEO)")
+        elif h1_count > 1:
+            findings.append(f"La pagina tiene {h1_count} H1 (deberia haber solo uno)")
+
+        has_og_tags = bool(raw.get("has_og_tags"))
+        if not has_og_tags:
+            findings.append("No tiene etiquetas Open Graph (los enlaces se ven pobres al compartir en redes)")
+
+        has_structured_data = bool(raw.get("has_structured_data"))
+        if not has_structured_data:
+            findings.append("No tiene datos estructurados (schema.org) para que Google entienda el negocio")
+
+        sitemap_reachable = bool(raw.get("sitemap_reachable"))
+        if not sitemap_reachable:
+            findings.append("No se encuentra sitemap.xml ni robots.txt accesibles")
+
         return {
             "load_time_ms": load_time_ms,
             "ttfb_ms": raw.get("ttfb_ms"),
@@ -150,6 +210,14 @@ class WebAuditor:
             "has_whatsapp": bool(raw.get("has_whatsapp")),
             "has_phone_link": bool(raw.get("has_phone_link")),
             "has_cta": bool(raw.get("has_cta")),
+            "seo": {
+                "meta_description_length": meta_description_length,
+                "has_canonical": has_canonical,
+                "h1_count": h1_count,
+                "has_og_tags": has_og_tags,
+                "has_structured_data": has_structured_data,
+                "sitemap_reachable": sitemap_reachable,
+            },
             "findings": findings,
             "audited_at": datetime.now(timezone.utc).isoformat(),
         }

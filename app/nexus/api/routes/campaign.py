@@ -7,6 +7,10 @@ GET  /campaign/status          — estado del scheduler + último informe
 GET  /campaign/config          — configuración de la campaña activa
 PUT  /campaign/config          — actualizar configuración
 POST /campaign/trigger         — lanzar ciclo ahora (trigger manual)
+GET  /campaign/pending         — cola de revision humana (QUALIFIED sin
+                                  contactar ni descartar aun)
+POST /campaign/pending/{id}/send    — aprobar y enviar UN lead concreto
+POST /campaign/pending/{id}/discard — descartar UN lead sin contactarlo
 GET  /campaign/results         — leads de la ultima ejecucion (atajo sobre
                                   prospecting.list_results filtrado por run_id)
 """
@@ -63,6 +67,30 @@ async def trigger_campaign(request: Request) -> dict[str, Any]:
         return JSONResponse({"status": "error", "error": "scheduler_not_initialized"}, status_code=503)
     result = await scheduler.trigger_now()
     return {"status": "ok", "report": result}
+
+
+@router.get("/pending")
+async def campaign_pending(agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    """Leads QUALIFIED en cola de revision — nada se envia hasta que el
+    usuario elija por cada uno via /pending/{result_id}/send."""
+    pending = await agent.list_pending_review()
+    return {"status": "ok", "total": len(pending), "pending": pending}
+
+
+@router.post("/pending/{result_id}/send")
+async def campaign_send_pending(result_id: str, agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    result = await agent.send_to_prospect(result_id)
+    if result.get("status") == "not_found":
+        return JSONResponse(result, status_code=404)
+    return result
+
+
+@router.post("/pending/{result_id}/discard")
+async def campaign_discard_pending(result_id: str, agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    result = await agent.discard_prospect(result_id)
+    if result.get("status") == "not_found":
+        return JSONResponse(result, status_code=404)
+    return result
 
 
 @router.get("/results")

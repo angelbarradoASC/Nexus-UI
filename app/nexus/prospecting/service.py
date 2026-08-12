@@ -984,6 +984,7 @@ class ProspectingAgentService:
         "renovacion_visual", "mejora_ux", "optimizacion_movil", "mejora_velocidad",
         "mejores_ctas", "formularios", "captacion_leads", "chatbot",
         "automatizacion_whatsapp", "respuestas_llm", "reservas", "faqs_automaticas",
+        "mejora_seo",
     }
 
     async def _draft_proposal(

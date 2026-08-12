@@ -16,7 +16,7 @@
 .campaign-layout {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
     gap: var(--shell-gap);
     min-height: 0;
 }
@@ -47,6 +47,58 @@
 .campaign-results-panel {
     grid-column: 1 / -1;
     max-height: none;
+}
+
+.campaign-pending-panel {
+    grid-column: 1 / -1;
+    max-height: 40vh;
+    border-color: rgba(169, 123, 47, 0.35);
+}
+
+.camp-pending-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.camp-pending-card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel-2);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.camp-pending-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.camp-pending-findings {
+    font-size: 0.85rem;
+    color: var(--muted);
+    white-space: pre-line;
+}
+
+.camp-pending-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.camp-btn--danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid rgba(178, 75, 59, 0.3);
+}
+
+.camp-btn--danger:not(:disabled):hover {
+    background: rgba(178, 75, 59, 0.18);
 }
 
 .campaign-panel-body {

@@ -3,14 +3,21 @@ app/nexus/prospecting/campaign_agent.py
 ------------------------------------------
 Agente diario de prospección para campañas outreach automatizadas.
 
-Flujo completo:
+Flujo completo (run_daily, disparado por el scheduler o /campaign/trigger):
   1. Corre follow-ups vencidos de campañas activas
   2. Busca nuevas empresas (discovery + auditoria tecnica + perfil + propuesta
      + score de oportunidad, vía ProspectingAgentService.run(enrich_candidates=True))
-  3. Toma los QUALIFIED (superan opportunity_threshold), hasta daily_send_cap
-     — deliberadamente bajo (por defecto 2): pocos contactos, muy cuidados
-  4. Lanza campaña outreach con el hallazgo real de cada lead
-  5. Marca CONTACTED en el lead de origen y sincroniza al CRM
+  3. Alimenta el CRM con TODO lo descubierto (push_valid_to_crm), no solo lo
+     que se acabe contactando
+  4. Con require_manual_approval=true (default — restriccion explicita del
+     usuario: "yo decido a quien escribo"), el ciclo PARA AQUI: los QUALIFIED
+     (superaron opportunity_threshold) quedan en cola de revision
+     (list_pending_review) sin enviar nada. Solo send_to_prospect(), llamado
+     desde /campaign/pending/{id}/send cuando el usuario aprueba un lead
+     concreto, lanza el outreach, marca CONTACTED y sincroniza ese lead al CRM.
+     Con require_manual_approval=false se mantiene el modo 100% autonomo de
+     antes: toma los QUALIFIED hasta daily_send_cap — deliberadamente bajo
+     (por defecto 2) — y los envia/marca/sincroniza en la misma pasada.
 
 No bloquea el arranque: si el SMTP no está configurado, registra el error
 y continúa sin crashear el servidor. Reubicado desde
@@ -235,12 +242,16 @@ class CampaignAgent:
         except Exception as exc:
             logger.warning("Fallo alimentando el CRM con el run completo (no critico): {}", exc)
 
-        # Solo los que ya superaron el umbral de oportunidad (QUALIFIED) y no
-        # estan ya en CRM (crm_state=pending) — el filtro por lead_stage es lo
-        # que hace que "2 contactos excelentes" sea real y no solo un limite
-        # numerico sobre resultados mediocres.
+        # Solo los que ya superaron el umbral de oportunidad (QUALIFIED) — el
+        # filtro por lead_stage es lo que hace que "2 contactos excelentes"
+        # sea real y no solo un limite numerico sobre resultados mediocres.
+        # NO se filtra por crm_state="pending": push_valid_to_crm (arriba)
+        # acaba de dejar estos mismos resultados en crm_state="created", asi
+        # que ese filtro nunca encontraria nada — mismo bug ya corregido en
+        # list_pending_review, misma causa (crm_state trackea sincronizacion
+        # con el CRM, no si un humano ya decidio que hacer con el lead).
         results_payload = await self._prospecting.list_results(
-            run_id=run_id, crm_state="pending", lead_stage="QUALIFIED"
+            run_id=run_id, lead_stage="QUALIFIED"
         )
         all_results = results_payload.get("results", [])
         new_prospects = [r for r in all_results if r.get("email")][:daily_cap]
@@ -272,16 +283,24 @@ class CampaignAgent:
 
         # 2. Lanzar campaña outreach
         campaign_name = f"{vertical.capitalize()} {date.today().isoformat()}"
-        campaign_result = await self._outreach.launch_campaign({
-            "campaign_name":         campaign_name,
-            "proposition":           proposition,
-            "cta":                   cta,
-            "audience_hint":         audience,
-            "followup_delays_days":  followups,
-            "max_daily_send":        daily_cap,
-            "dry_run":               False,
-            "prospects":             [self._map_prospect(p) for p in new_prospects],
-        })
+        try:
+            campaign_result = await self._outreach.launch_campaign({
+                "campaign_name":         campaign_name,
+                "sender_name":           cfg.get("sender_name", ""),
+                "proposition":           proposition,
+                "cta":                   cta,
+                "audience_hint":         audience,
+                "followup_delays_days":  followups,
+                "max_daily_send":        daily_cap,
+                "dry_run":               False,
+                "prospects":             [self._map_prospect(p) for p in new_prospects],
+            })
+        except Exception as exc:
+            # launch_campaign exige sender_name (propio o cfg.outreach_
+            # sender_name) — sin este catch, un ciclo diario entero se
+            # marcaria como error en vez de devolver un status legible.
+            logger.error("Fallo lanzando la campaña outreach: {}", exc)
+            return {"status": "error", "error": str(exc), "sent_count": 0, "run_id": run_id}
 
         campaign_id = campaign_result.get("campaign_id")
         sent_count  = campaign_result.get("executed_count", 0)
@@ -369,40 +388,58 @@ class CampaignAgent:
 
         cfg = self.load_config()
         campaign_name = f"{prospect.get('name', 'lead')} {date.today().isoformat()}"
-        campaign_result = await self._outreach.launch_campaign({
-            "campaign_name":        campaign_name,
-            "proposition":          cfg.get("proposition", ""),
-            "cta":                  cfg.get("cta", ""),
-            "audience_hint":        cfg.get("audience_hint", ""),
-            "followup_delays_days": cfg.get("followup_delays_days", [14, 14]),
-            "max_daily_send":       1,
-            "dry_run":              False,
-            "prospects":            [self._map_prospect(prospect)],
-        })
+        try:
+            campaign_result = await self._outreach.launch_campaign({
+                "campaign_name":        campaign_name,
+                "sender_name":          cfg.get("sender_name", ""),
+                "proposition":          cfg.get("proposition", ""),
+                "cta":                  cfg.get("cta", ""),
+                "audience_hint":        cfg.get("audience_hint", ""),
+                "followup_delays_days": cfg.get("followup_delays_days", [14, 14]),
+                "max_daily_send":       1,
+                "dry_run":              False,
+                "prospects":            [self._map_prospect(prospect)],
+            })
+        except Exception as exc:
+            # launch_campaign exige sender_name (propio o de cfg.outreach_
+            # sender_name) y puede fallar tambien si el SMTP no esta
+            # configurado — sin este catch, el usuario veria un 500 sin
+            # explicacion al pulsar "Enviar" en vez de un error legible.
+            logger.warning("send_to_prospect fallo al lanzar la campaña | {} | {}", result_id, exc)
+            return {"status": "failed", "result_id": result_id, "error": str(exc)}
+
         campaign_id = campaign_result.get("campaign_id")
         sent_count  = campaign_result.get("executed_count", 0)
+        # executed_count solo dice "se proceso un intento de envio", no que
+        # el email de verdad saliera — SMTPOutreachTransport.send() no lanza
+        # si el SMTP no esta configurado, devuelve delivery_status=
+        # "not_configured" y run_campaign lo cuenta igual como "ejecutado".
+        # Sin mirar el evento real, se reportaria "enviado" sin haber
+        # enviado nada.
+        events = campaign_result.get("events") or []
+        delivery_status = events[0].get("delivery_status") if events else None
+        delivered = delivery_status == "sent"
 
-        try:
-            await self._prospecting.mark_lead_stage(result_id, "CONTACTED")
-        except Exception as exc:
-            logger.warning("mark_lead_stage fallido (no critico) | {} | {}", result_id, exc)
-
-        if campaign_id:
+        if delivered:
             try:
-                await self._crm.sync_campaign(campaign_id, limit=1, dry_run=False)
+                await self._prospecting.mark_lead_stage(result_id, "CONTACTED")
             except Exception as exc:
-                logger.warning("CRM sync fallido (no critico): {}", exc)
+                logger.warning("mark_lead_stage fallido (no critico) | {} | {}", result_id, exc)
+
+            if campaign_id:
+                try:
+                    await self._crm.sync_campaign(campaign_id, limit=1, dry_run=False)
+                except Exception as exc:
+                    logger.warning("CRM sync fallido (no critico): {}", exc)
 
         logger.info(
-            "Envio manual aprobado | lead={} | campaign_id={} | enviados={}",
-            prospect.get("name"), campaign_id, sent_count,
+            "Envio manual aprobado | lead={} | campaign_id={} | delivery_status={}",
+            prospect.get("name"), campaign_id, delivery_status,
         )
-        return {
-            "status":      "sent" if sent_count else "failed",
-            "result_id":   result_id,
-            "campaign_id": campaign_id,
-            "sent_count":  sent_count,
-        }
+        if delivered:
+            return {"status": "sent", "result_id": result_id, "campaign_id": campaign_id, "sent_count": sent_count}
+        error = "SMTP no configurado" if delivery_status == "not_configured" else f"delivery_status={delivery_status}"
+        return {"status": "failed", "result_id": result_id, "campaign_id": campaign_id, "error": error}
 
     async def discard_prospect(self, result_id: str) -> dict[str, Any]:
         """Saca un lead de la cola de revision sin contactarlo — sigue en el

@@ -33,7 +33,18 @@ class _FakeProspectingService:
 
     async def push_valid_to_crm(self, run_id: str, *, dry_run: bool = True) -> dict:
         self.push_valid_calls.append((run_id, dry_run))
-        return {"status": "accepted", "run_id": run_id, "pushed_count": len(self.results)}
+        # Mismo comportamiento que ProspectingAgentService real: cualquier
+        # resultado crm_ready pasa a crm_state="created", sea cual sea su
+        # lead_stage (QUALIFIED o REJECTED). Sin esto, un test no detectaria
+        # el bug real de filtrar por crm_state="pending" justo despues de
+        # haber empujado todo al CRM.
+        pushed = 0
+        if not dry_run:
+            for r in self.results:
+                if r.get("crm_ready"):
+                    r["crm_state"] = "created"
+                    pushed += 1
+        return {"status": "accepted", "run_id": run_id, "pushed_count": pushed}
 
     async def mark_lead_stage(self, result_id: str, lead_stage: str) -> dict:
         self.mark_lead_stage_calls.append((result_id, lead_stage))
@@ -44,12 +55,24 @@ class _FakeProspectingService:
 
 
 class _FakeOutreachManager:
-    def __init__(self):
+    def __init__(self, *, fail_without_sender_name: bool = False, delivery_status: str = "sent"):
         self.launch_calls: list[dict] = []
+        self._fail_without_sender_name = fail_without_sender_name
+        self._delivery_status = delivery_status
 
     async def launch_campaign(self, payload: dict) -> dict:
         self.launch_calls.append(payload)
-        return {"campaign_id": "camp-test-1", "executed_count": len(payload.get("prospects", []))}
+        if self._fail_without_sender_name and not payload.get("sender_name"):
+            # Mismo comportamiento que OutreachManager real: sender_name es
+            # obligatorio (propio o de cfg.outreach_sender_name) y lanza
+            # ValueError si falta.
+            raise ValueError("sender_name es obligatorio para lanzar una campaña.")
+        prospects = payload.get("prospects", [])
+        # executed_count cuenta intentos procesados, no entregas reales — el
+        # delivery_status por evento (mismo campo que SMTPOutreachTransport.send()
+        # real) es lo unico que dice si de verdad salio o no.
+        events = [{"delivery_status": self._delivery_status} for _ in prospects]
+        return {"campaign_id": "camp-test-1", "executed_count": len(prospects), "events": events}
 
 
 class _FakeCRMService:
@@ -68,13 +91,14 @@ def _qualified_result(result_id: str, name: str) -> dict:
         "email": f"{result_id}@example.com",
         "lead_stage": "QUALIFIED",
         "crm_state": "pending",
+        "crm_ready": True,
         "opportunity_score": 70,
     }
 
 
-def _agent(tmp_path, *, results=None, require_manual_approval: bool = True):
+def _agent(tmp_path, *, results=None, require_manual_approval: bool = True, outreach=None):
     prospecting = _FakeProspectingService(results=results)
-    outreach = _FakeOutreachManager()
+    outreach = outreach or _FakeOutreachManager()
     crm = _FakeCRMService()
     agent = CampaignAgent(
         prospecting_svc=prospecting,
@@ -184,6 +208,60 @@ async def test_send_to_prospect_not_found_returns_not_found_status(tmp_path):
     result = await agent.send_to_prospect("no-existe")
 
     assert result["status"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_send_to_prospect_reports_failed_when_smtp_not_configured(tmp_path):
+    """SMTPOutreachTransport.send() no lanza si el SMTP no esta configurado
+    — devuelve delivery_status='not_configured' y run_campaign lo cuenta
+    igual como 'ejecutado'. send_to_prospect debe mirar el delivery_status
+    real, no solo executed_count, o reportaria 'enviado' sin haber enviado
+    nada — estado real observado en verificacion manual (SMTP sin
+    configurar en la app)."""
+    results = [_qualified_result("r1", "Panaderia Ana")]
+    outreach = _FakeOutreachManager(delivery_status="not_configured")
+    agent, prospecting, _, crm = _agent(tmp_path, results=results, outreach=outreach)
+
+    result = await agent.send_to_prospect("r1")
+
+    assert result["status"] == "failed"
+    assert "SMTP" in result["error"]
+    assert results[0]["lead_stage"] == "QUALIFIED"  # no se marco CONTACTED
+    assert prospecting.mark_lead_stage_calls == []
+    assert crm.sync_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_to_prospect_surfaces_launch_campaign_failure_as_clean_error(tmp_path):
+    """launch_campaign exige sender_name (real: lanza ValueError si falta,
+    tanto en el payload como en cfg.outreach_sender_name) — sin manejarlo,
+    el usuario veria un 500 sin explicacion al pulsar 'Enviar'."""
+    results = [_qualified_result("r1", "Panaderia Ana")]
+    outreach = _FakeOutreachManager(fail_without_sender_name=True)
+    agent, *_ = _agent(tmp_path, results=results, outreach=outreach)
+    # sender_name vacio por defecto en _write_default_config — a proposito,
+    # para reproducir el estado real observado en verificacion manual.
+
+    result = await agent.send_to_prospect("r1")
+
+    assert result["status"] == "failed"
+    assert "sender_name" in result["error"]
+    assert results[0]["lead_stage"] == "QUALIFIED"  # no se marco CONTACTED
+
+
+@pytest.mark.asyncio
+async def test_send_to_prospect_passes_sender_name_from_config(tmp_path):
+    results = [_qualified_result("r1", "Panaderia Ana")]
+    outreach = _FakeOutreachManager(fail_without_sender_name=True)
+    agent, *_ = _agent(tmp_path, results=results, outreach=outreach)
+    cfg = agent.load_config()
+    cfg["sender_name"] = "Vicente Araizeta"
+    agent.save_config(cfg)
+
+    result = await agent.send_to_prospect("r1")
+
+    assert result["status"] == "sent"
+    assert outreach.launch_calls[0]["sender_name"] == "Vicente Araizeta"
 
 
 @pytest.mark.asyncio

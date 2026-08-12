@@ -270,8 +270,10 @@ async function sendPending(resultId) {
         const data = await res.json();
         if (data.status === 'sent') {
             toast('Email enviado');
+        } else if (data.status === 'failed') {
+            toast(data.error ? `No se pudo enviar: ${data.error}` : 'No se pudo enviar — revisa el SMTP', true);
         } else {
-            toast(data.status === 'failed' ? 'No se pudo enviar — revisa el SMTP' : 'No encontrado', true);
+            toast('No encontrado', true);
         }
     } catch {
         toast('Error al enviar', true);

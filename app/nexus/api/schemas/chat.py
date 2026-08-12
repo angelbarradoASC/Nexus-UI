@@ -23,3 +23,4 @@ class ChatResponse(BaseModel):
     flow: str
     audit_id: str
     run_id: str | None = None
+    redact_next_reply: bool = False

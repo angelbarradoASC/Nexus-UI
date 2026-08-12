@@ -9,6 +9,12 @@ const PEPO_ACTIVE_CONVERSATION_KEY = 'pepo_active_conversation_id';
 // y se manda como context_id en cada peticion a /api/nexus/chat.
 let _pepoContextId = localStorage.getItem(PEPO_ACTIVE_CONVERSATION_KEY) || null;
 let _pepoBusy = false;
+// Cuando PEPO pide un secreto (contraseña/token) via ask_user_secret, la
+// respuesta trae redact_next_reply=true — el turno que el usuario responda
+// a continuacion se guarda en el historial como "[secreto omitido]" en vez
+// del texto real (que si se manda tal cual a /api/nexus/chat, unico sitio
+// que lo necesita para procesarlo).
+let _pepoRedactNextUserTurn = false;
 let _pepoRunPollTimer = null;
 let _pepoRunSeenCount = 0;
 
@@ -137,13 +143,17 @@ async function sendToChat(message) {
             try {
                 await apiJson(`/api/desktop/pepo/conversations/${encodeURIComponent(_pepoContextId)}/messages`, {
                     method: 'POST',
-                    body: JSON.stringify({ user_message: message, assistant_message: reply }),
+                    body: JSON.stringify({
+                        user_message: _pepoRedactNextUserTurn ? '[secreto omitido]' : message,
+                        assistant_message: reply,
+                    }),
                 });
                 loadConversationsList();
             } catch (err) {
                 console.warn('No se pudo guardar el turno en el historial', err);
             }
         }
+        _pepoRedactNextUserTurn = !!data.redact_next_reply;
     } catch (err) {
         thinkEl?.remove();
         appendMsg('pepo', `Error al conectar: ${err.message}`);
@@ -179,6 +189,7 @@ function startNewChat() {
     setActiveConversationId(null);
     clearChatLogToGreeting();
     renderConversationsList(_pepoConversationsCache);
+    _pepoRedactNextUserTurn = false;
     const input = document.getElementById('pepoInput');
     if (input) input.focus();
 }
@@ -216,6 +227,7 @@ async function loadConversationsList() {
 
 async function switchConversation(conversationId) {
     if (_pepoBusy || conversationId === _pepoContextId) return;
+    _pepoRedactNextUserTurn = false;
     await loadConversationMessages(conversationId);
 }
 

@@ -1,0 +1,45 @@
+{
+  "id": "crm.configurar",
+  "name": "Configurar conexión a CRM",
+  "description": "Configura la conexión de Sales a un CRM (Assets CRM u Odoo — los únicos dos soportados hoy). Pregunta cuál si no está claro, ya que ambos pueden estar activos a la vez. Requiere confirmación explícita del usuario antes de escribir nada.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 1200,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "proveedor": {"type": "str", "required": false, "options": ["assets_crm", "odoo"]},
+    "url": {"type": "str", "required": true},
+    "usuario": {"type": "str", "required": true},
+    "secreto": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "proveedor": "str",
+    "confirmado": "bool"
+  },
+  "triggers": [
+    "conéctate a mi crm",
+    "conecta esto a mi crm",
+    "configura el crm",
+    "configura la conexión al crm",
+    "conecta con assets",
+    "conecta con odoo",
+    "pon las credenciales del crm",
+    "cambia la conexión del crm"
+  ],
+  "examples": [
+    "conéctate a mi CRM",
+    "configura la conexión a Odoo",
+    "cambia la url y contraseña de Assets CRM"
+  ]
+}

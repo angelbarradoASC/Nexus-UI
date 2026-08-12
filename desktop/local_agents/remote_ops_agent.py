@@ -176,20 +176,9 @@ class RemoteOpsAgent:
     # ── Tool: check_credentials ──────────────────────────────────────────────
 
     async def _check_credentials(self, device_id: str) -> str:
-        if self._vault is None:
-            return "Vault no disponible."
-        if not device_id:
-            return "Falta el device_id."
-        if self._vault.is_locked:
-            return "El Vault esta bloqueado. Pide al usuario que lo desbloquee desde la pestana Vault antes de continuar."
-        try:
-            credential = await self._vault.get_credential(device_id)
-        except Exception:
-            logger.exception("Fallo consultando el Vault")
-            return "Error consultando el Vault."
-        if credential is None:
-            return f"No hay credenciales guardadas en el Vault para {device_id}. Hay que anadirlas desde la pestana Vault antes de poder conectar."
-        return f"Hay credenciales para {device_id}: usuario={credential.username}, metodo={credential.auth_method}."
+        from nexus.vault.check import check_credentials
+
+        return await check_credentials(self._vault, device_id)
 
     # ── Bucle generico ───────────────────────────────────────────────────────
 

@@ -66,6 +66,8 @@ class DesktopSkillRouter:
         "sales.prospecting": [],
         "desktop.mouse_speed": ["desktop.system.control"],
         "desktop.system_task": ["desktop.system.control"],
+        "vault.add_credential": ["vault.write"],
+        "crm.configurar": ["crm.configure"],
         "general.respuesta": [],
     }
 
@@ -86,6 +88,8 @@ class DesktopSkillRouter:
         "sales.prospecting": PermissionLevel.ASSIST,
         "desktop.mouse_speed": PermissionLevel.OPERATE,
         "desktop.system_task": PermissionLevel.OPERATE,
+        "vault.add_credential": PermissionLevel.ADMIN,
+        "crm.configurar": PermissionLevel.ADMIN,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -245,6 +249,14 @@ class DesktopSkillRouter:
             term in lowered for term in ("velocidad", "sensibilidad", "rapido", "rápido", "lento", "va lento", "va rapido")
         ):
             return "desktop.mouse_speed", 0.85, "La peticion pide ajustar la velocidad del raton de este ordenador."
+        if any(term in lowered for term in ("vault", "credenciales", "contraseña de", "usuario y contraseña")) and any(
+            term in lowered for term in ("añade", "anade", "guarda", "registra", "da de alta", "mete", "añadir", "anadir")
+        ):
+            return "vault.add_credential", 0.92, "La peticion pide guardar credenciales/dispositivo en el Vault."
+        if "crm" in lowered and any(
+            term in lowered for term in ("conecta", "conéctate", "conectate", "configura", "configurar", "credenciales del crm", "cambia la conexion", "cambia la conexión")
+        ):
+            return "crm.configurar", 0.92, "La peticion pide configurar la conexion a un CRM."
         if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
             "cerca de" in lowered
             or any(

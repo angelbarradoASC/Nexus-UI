@@ -38,6 +38,8 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             AgentCapability(capability_id="vault.check_credentials", name="Comprobar credenciales", description="Verifica si hay credenciales en el Vault para un dispositivo, sin revelar el secreto."),
             AgentCapability(capability_id="ssh.run_diagnostic", name="Diagnóstico SSH remoto", description="Ejecuta un whitelist de comandos de solo lectura sobre un servidor del CMDB, pendiente de confirmación."),
             AgentCapability(capability_id="docker.inspect", name="Inspeccionar Docker", description="docker ps/inspect/stats/logs sobre el contenedor detectado o el más problemático, solo lectura."),
+            AgentCapability(capability_id="vault.add_credential", name="Añadir credenciales al Vault", description="Da de alta un dispositivo (si es nuevo) y guarda sus credenciales cifradas en el Vault, pendiente de confirmación."),
+            AgentCapability(capability_id="crm.configure", name="Configurar conexión a CRM", description="Configura la conexión de Sales a Assets CRM u Odoo, pendiente de confirmación."),
         ],
         skill_ids=[
             "desktop.system_task",
@@ -46,8 +48,10 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             "linux.prediagnostico",
             "windows.prediagnostico",
             "docker.prediagnostico",
+            "vault.add_credential",
+            "crm.configurar",
         ],
-        connector_ids=["cmdb", "vault", "ssh", "powershell", "docker_cli", "windows_registry"],
+        connector_ids=["cmdb", "vault", "ssh", "powershell", "docker_cli", "windows_registry", "crm"],
         tags=["pepo", "local", "confirmable"],
     ),
     AgentManifest(

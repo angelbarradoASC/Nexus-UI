@@ -79,6 +79,7 @@ def build_runtime(cfg) -> NexusRuntime:
     mouse_agent = None
     system_task_agent = None
     remote_ops_agent = None
+    self_config_agent = None
     skill_router = DesktopSkillRouter()
     agent_settings: "AgentSettingsStore | None" = None
     if getattr(cfg, "is_desktop", False):
@@ -88,14 +89,18 @@ def build_runtime(cfg) -> NexusRuntime:
         )
         from desktop.local_agents.mouse_agent import MouseAgent
         from desktop.local_agents.remote_ops_agent import RemoteOpsAgent
+        from desktop.local_agents.self_config_agent import SelfConfigAgent
         from desktop.local_agents.skill_library import SkillLibrary
         from desktop.local_agents.system_task_agent import SystemTaskAgent
         from desktop.runtime.agent_settings import AgentSettingsStore
+        from desktop.storage.local_state import DesktopLocalState
 
         mouse_agent = MouseAgent()
         skill_library = SkillLibrary(desktop_settings.skill_library_db_path)
         system_task_agent = SystemTaskAgent(cfg, llm_router=llm_router, skill_library=skill_library, cmdb=cmdb)
         remote_ops_agent = RemoteOpsAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, access=access)
+        desktop_local_state = DesktopLocalState(desktop_settings)
+        self_config_agent = SelfConfigAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, local_state=desktop_local_state)
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
         # Un unico DesktopSkillRouter (con el override de permisos ya cargado)
         # compartido entre NexusCoordinator y AssistantRuntimeCore — antes cada
@@ -127,6 +132,7 @@ def build_runtime(cfg) -> NexusRuntime:
         mouse_agent=mouse_agent,
         system_task_agent=system_task_agent,
         remote_ops_agent=remote_ops_agent,
+        self_config_agent=self_config_agent,
         skill_router=skill_router,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),

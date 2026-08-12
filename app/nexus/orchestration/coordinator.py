@@ -90,6 +90,7 @@ class NexusCoordinator:
         mouse_agent: Any | None = None,
         system_task_agent: Any | None = None,
         remote_ops_agent: Any | None = None,
+        self_config_agent: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
     ) -> None:
         self._alertmanager = alertmanager
@@ -101,6 +102,7 @@ class NexusCoordinator:
         self._mouse_agent = mouse_agent
         self._system_task_agent = system_task_agent
         self._remote_ops_agent = remote_ops_agent
+        self._self_config_agent = self_config_agent
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -119,19 +121,19 @@ class NexusCoordinator:
         self._audit_repository = audit_repository
 
     # ── Gestor de agentes: acciones pendientes unificadas ──────────────────────
-    # Los 3 agentes locales con confirmacion en dos pasos comparten forma
+    # Los 4 agentes locales con confirmacion en dos pasos comparten forma
     # (has_pending/confirm/cancel) — se agregan aqui para que la pestaña
     # Agentes pueda listarlas/confirmarlas/cancelarlas sin duplicar el chat.
 
     def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -144,8 +146,10 @@ class NexusCoordinator:
             result = self._mouse_agent.confirm(context_id)
         elif agent is self._system_task_agent:
             result = await self._system_task_agent.confirm(context_id, user_reply)
-        else:
+        elif agent is self._remote_ops_agent:
             result = await self._remote_ops_agent.confirm(context_id, user_reply)
+        else:
+            result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
 
     def cancel_pending_action(self, context_id: str) -> dict[str, Any]:
@@ -178,6 +182,8 @@ class NexusCoordinator:
             return await self._handle_system_task_pending(payload, audit_id, context_key)
         if self._remote_ops_agent is not None and self._remote_ops_agent.has_pending(context_key):
             return await self._handle_remote_ops_pending(payload, audit_id, context_key)
+        if self._self_config_agent is not None and self._self_config_agent.has_pending(context_key):
+            return await self._handle_self_config_pending(payload, audit_id, context_key)
         resolution = resolution_override or self._skill_router.resolve(payload.message).to_dict()
         skill_id = resolution.get("skill_id", "general.respuesta")
         if skill_id == "desktop.mouse_speed" and self._mouse_agent is not None:
@@ -186,6 +192,8 @@ class NexusCoordinator:
             return await self._handle_system_task_propose(payload, audit_id, context_key, history)
         if skill_id in {"ssh.diagnostico", "linux.prediagnostico", "windows.prediagnostico"} and self._remote_ops_agent is not None:
             return await self._handle_remote_ops_propose(payload, audit_id, context_key, history)
+        if skill_id in {"vault.add_credential", "crm.configurar"} and self._self_config_agent is not None:
+            return await self._handle_self_config_propose(payload, audit_id, context_key, history)
         if skill_id == "monitoring.estado":
             return await self._handle_monitoring_status_chat(payload, audit_id)
         if skill_id == "assets.crear_ticket_operador" or (
@@ -688,6 +696,123 @@ class NexusCoordinator:
             agent="remote-ops-agent",
             flow="chat",
             audit_id=audit_id,
+        )
+
+    async def _handle_self_config_propose(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> ChatResponse:
+        proposal = await self._self_config_agent.propose(context_key, payload.message, history=history)
+        response = self._render_self_config_proposal(proposal)
+        redact = proposal.get("kind") == "ask_user_secret"
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status="accepted",
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "self_config",
+                "proposal_kind": proposal.get("kind"),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted",
+            response=response,
+            agent="self-config-agent",
+            flow="chat",
+            audit_id=audit_id,
+            redact_next_reply=redact,
+        )
+
+    def _render_self_config_proposal(self, proposal: dict[str, Any]) -> str:
+        kind = proposal.get("kind")
+        if kind in {"ask_user", "ask_user_secret"}:
+            return proposal.get("question", "¿Puedes darme mas detalles?")
+        if kind == "store_credential":
+            data = proposal.get("payload", {})
+            device_name = data.get("device_name") or data.get("device_id") or "el dispositivo"
+            return (
+                f"Voy a guardar credenciales en el Vault para '{device_name}' "
+                f"(usuario: {data.get('username', '-')}). ¿Confirmas?"
+            )
+        if kind == "set_crm_config":
+            data = proposal.get("payload", {})
+            provider_label = "Assets CRM" if data.get("provider") == "assets_crm" else "Odoo"
+            return (
+                f"Voy a configurar la conexion a {provider_label} "
+                f"(url: {data.get('base_url', '-')}, usuario: {data.get('username', '-')}). ¿Confirmas?"
+            )
+        return proposal.get("summary", "Hecho.")
+
+    async def _handle_self_config_pending(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        pending_kind = self._self_config_agent.pending_kind(context_key)
+        redact = False
+
+        if pending_kind in {"ask_user", "ask_user_secret"}:
+            result = await self._self_config_agent.confirm(context_key, payload.message)
+            if result is None:
+                response = "No había ninguna consulta pendiente."
+            elif result.get("next_question"):
+                response = result["next_question"]
+                redact = result.get("next_kind") == "ask_user_secret"
+            elif result.get("next_kind") in {"store_credential", "set_crm_config"}:
+                response = self._render_self_config_proposal(
+                    {"kind": result["next_kind"], "payload": result.get("next_payload", {})}
+                )
+            elif result.get("error"):
+                response = f"No lo he conseguido: {result['error']}"
+            else:
+                response = result.get("content") or "Hecho."
+        else:
+            verdict = _match_confirmation(payload.message)
+            if verdict == "yes":
+                result = await self._self_config_agent.confirm(context_key)
+                if result and result.get("error"):
+                    response = f"No lo he conseguido: {result['error']}"
+                elif result:
+                    response = result.get("content") or "Hecho."
+                else:
+                    response = "No había ninguna accion pendiente."
+            elif verdict == "no":
+                self._self_config_agent.cancel(context_key)
+                response = "Vale, no cambio nada."
+            else:
+                response = "¿Confirmas? (sí/no)"
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status="accepted",
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "self_config",
+                "pending_resolution": response[:200],
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted",
+            response=response,
+            agent="self-config-agent",
+            flow="chat",
+            audit_id=audit_id,
+            redact_next_reply=redact,
         )
 
     async def _handle_docker_prediagnostic_chat(

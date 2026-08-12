@@ -530,10 +530,6 @@ function initPepo() {
         });
     }
 
-    document.querySelectorAll('[data-pepo-prompt]').forEach(btn => {
-        btn.addEventListener('click', () => sendToChat(btn.dataset.pepoPrompt));
-    });
-
     const newChatBtn = document.getElementById('pepoNewChatBtn');
     if (newChatBtn) newChatBtn.addEventListener('click', startNewChat);
 }

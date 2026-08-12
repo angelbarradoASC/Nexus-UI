@@ -253,32 +253,6 @@ html { zoom: 0.75; }
     40%            { transform: scale(1);   opacity: 1;    }
 }
 
-/* ── Quick chips ─────────────────────────────────────────────────────────── */
-.pepo-chips {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-}
-
-.pepo-chip {
-    font-size: 0.75rem;
-    font-family: inherit;
-    padding: 5px 12px;
-    border-radius: 20px;
-    border: 1px solid var(--line-strong);
-    background: var(--panel-2);
-    color: var(--muted);
-    cursor: pointer;
-    transition: all 0.14s;
-}
-
-.pepo-chip:hover {
-    border-color: var(--forest-2);
-    color: var(--forest);
-    background: var(--ok-soft);
-}
-
 /* ── Compositor de mensajes ───────────────────────────────────────────────── */
 .pepo-composer {
     display: flex;

@@ -460,9 +460,11 @@ class SystemTaskAgent:
     def has_pending(self, context_id: str) -> bool:
         return context_id in self._pending
 
-    def list_pending(self) -> list[dict[str, Any]]:
+    async def list_pending(self) -> list[dict[str, Any]]:
         """Solo lectura, para el gestor de agentes — nunca expone el script en claro
-        para pendientes ajenos, solo la descripcion/tarea."""
+        para pendientes ajenos, solo la descripcion/tarea.
+
+        Async por consistencia con el resto de agentes (ver mouse_agent.py)."""
         return [
             {
                 "context_id": context_id,

@@ -122,6 +122,13 @@ def build_runtime(cfg) -> NexusRuntime:
     operations = AssetsOperationsService(cfg=cfg, llm_router=llm_router)
     jira_connector = JiraConnector(cfg)
     prospecting = ProspectingAgentService(cfg=cfg)
+    # outreach/crm/campaign se construyen aqui (no mas abajo, donde estaban
+    # antes) porque NexusCoordinator ahora necesita campaign_agent para
+    # incluir su cola de revision en list_pending_actions() — mismo motivo
+    # que vault/access se adelantaron para remote_ops_agent.
+    outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
+    crm = CRMBridgeService(cfg=cfg)
+    campaign = CampaignAgent(prospecting_svc=prospecting, outreach_mgr=outreach, crm_svc=crm)
     coordinator = NexusCoordinator(
         alertmanager=alertmanager,
         grafana=grafana,
@@ -133,6 +140,7 @@ def build_runtime(cfg) -> NexusRuntime:
         system_task_agent=system_task_agent,
         remote_ops_agent=remote_ops_agent,
         self_config_agent=self_config_agent,
+        campaign_agent=campaign,
         skill_router=skill_router,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),
@@ -142,9 +150,6 @@ def build_runtime(cfg) -> NexusRuntime:
     )
     assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router, skill_router=skill_router)
     agent_runtime = AgentRuntimeService()
-    outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
-    crm = CRMBridgeService(cfg=cfg)
-    campaign = CampaignAgent(prospecting_svc=prospecting, outreach_mgr=outreach, crm_svc=crm)
     case_log = CaseLogStore()
     mail = ThunderbirdMailManager(cfg=cfg, llm_router=llm_router)
     teams = TeamsChatManager(cfg=cfg, llm_router=llm_router, case_log=case_log)

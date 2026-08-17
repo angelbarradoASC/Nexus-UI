@@ -376,6 +376,27 @@ class CampaignAgent:
             if r.get("email") and r.get("opportunity_score") is not None
         ]
 
+    async def list_pending(self) -> list[dict[str, Any]]:
+        """Adaptador para NexusCoordinator.list_pending_actions() — misma
+        forma {context_id, agent_id, kind, summary} que usan Mouse/SystemTask/
+        RemoteOps/SelfConfig, para que la cola de Campaña aparezca junto al
+        resto en la pestaña Agentes sin duplicar la logica de
+        list_pending_review(). context_id lleva el prefijo "campaign:" para
+        que el coordinador pueda enrutar confirm/cancel a send_to_prospect/
+        discard_prospect en vez del bucle has_pending() (Campaña no lo
+        implementa — su "pendiente" es una cola de leads, no un unico estado
+        por conversacion)."""
+        pending = await self.list_pending_review()
+        return [
+            {
+                "context_id": f"campaign:{r['result_id']}",
+                "agent_id": "campaign",
+                "kind": "review",
+                "summary": f"{r.get('name', 'lead')} — oportunidad {r.get('opportunity_score')}",
+            }
+            for r in pending
+        ]
+
     async def send_to_prospect(self, result_id: str) -> dict[str, Any]:
         """Envia el outreach a UN lead concreto de la cola de revision, elegido
         por el usuario. Reusa la propuesta/CTA/follow-ups de la config vigente

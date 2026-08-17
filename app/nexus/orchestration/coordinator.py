@@ -91,6 +91,7 @@ class NexusCoordinator:
         system_task_agent: Any | None = None,
         remote_ops_agent: Any | None = None,
         self_config_agent: Any | None = None,
+        campaign_agent: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
     ) -> None:
         self._alertmanager = alertmanager
@@ -103,6 +104,7 @@ class NexusCoordinator:
         self._system_task_agent = system_task_agent
         self._remote_ops_agent = remote_ops_agent
         self._self_config_agent = self_config_agent
+        self._campaign_agent = campaign_agent
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -124,12 +126,18 @@ class NexusCoordinator:
     # Los 4 agentes locales con confirmacion en dos pasos comparten forma
     # (has_pending/confirm/cancel) — se agregan aqui para que la pestaña
     # Agentes pueda listarlas/confirmarlas/cancelarlas sin duplicar el chat.
+    # CampaignAgent se suma con la misma forma {context_id, agent_id, kind,
+    # summary} (ver CampaignAgent.list_pending()), pero NO implementa
+    # has_pending(context_id)/confirm(context_id) — su "pendiente" es una
+    # cola de leads (result_id), no un unico estado por conversacion. Se
+    # distingue por el prefijo "campaign:" en el context_id sintetico y se
+    # enruta aparte, antes de tocar el bucle has_pending() de los otros 4.
 
-    def list_pending_actions(self) -> list[dict[str, Any]]:
+    async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent):
             if agent is not None and hasattr(agent, "list_pending"):
-                pending.extend(agent.list_pending())
+                pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
@@ -139,6 +147,15 @@ class NexusCoordinator:
         return None
 
     async def confirm_pending_action(self, context_id: str, user_reply: str | None = None) -> dict[str, Any]:
+        if context_id.startswith("campaign:"):
+            if self._campaign_agent is None:
+                return {"status": "not_found", "context_id": context_id}
+            result_id = context_id.removeprefix("campaign:")
+            result = await self._campaign_agent.send_to_prospect(result_id)
+            if result.get("status") == "not_found":
+                return {"status": "not_found", "context_id": context_id}
+            return {"status": "ok", "context_id": context_id, "result": result}
+
         agent = self._find_pending_agent(context_id)
         if agent is None:
             return {"status": "not_found", "context_id": context_id}
@@ -152,7 +169,16 @@ class NexusCoordinator:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
 
-    def cancel_pending_action(self, context_id: str) -> dict[str, Any]:
+    async def cancel_pending_action(self, context_id: str) -> dict[str, Any]:
+        if context_id.startswith("campaign:"):
+            if self._campaign_agent is None:
+                return {"status": "not_found", "context_id": context_id}
+            result_id = context_id.removeprefix("campaign:")
+            result = await self._campaign_agent.discard_prospect(result_id)
+            if result.get("status") == "not_found":
+                return {"status": "not_found", "context_id": context_id}
+            return {"status": "ok", "context_id": context_id}
+
         agent = self._find_pending_agent(context_id)
         if agent is None:
             return {"status": "not_found", "context_id": context_id}

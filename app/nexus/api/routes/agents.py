@@ -132,7 +132,7 @@ class PendingActionConfirm(BaseModel):
 async def list_pending_actions(
     coordinator: NexusCoordinator = Depends(get_coordinator),
 ) -> dict[str, Any]:
-    pending = coordinator.list_pending_actions()
+    pending = await coordinator.list_pending_actions()
     return {"status": "ok", "total": len(pending), "pending": pending}
 
 
@@ -154,7 +154,7 @@ async def cancel_pending_action(
     context_id: str,
     coordinator: NexusCoordinator = Depends(get_coordinator),
 ) -> dict[str, Any]:
-    result = coordinator.cancel_pending_action(context_id)
+    result = await coordinator.cancel_pending_action(context_id)
     if result.get("status") == "not_found":
         raise HTTPException(status_code=404, detail="No hay ninguna accion pendiente con ese context_id")
     return result

@@ -166,6 +166,26 @@ async def test_list_pending_review_filters_qualified_with_email(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_list_pending_shapes_review_queue_for_coordinator_aggregation(tmp_path):
+    """CampaignAgent.list_pending() es el adaptador que deja aparecer la cola
+    de revision junto al resto de acciones pendientes de PEPO en la pestaña
+    Agentes (NexusCoordinator.list_pending_actions()) — misma forma
+    {context_id, agent_id, kind, summary}, con prefijo 'campaign:' en
+    context_id para que el coordinador la enrute aparte."""
+    results = [_qualified_result("r1", "Panaderia Ana")]
+    agent, *_ = _agent(tmp_path, results=results)
+
+    pending = await agent.list_pending()
+
+    assert pending == [{
+        "context_id": "campaign:r1",
+        "agent_id": "campaign",
+        "kind": "review",
+        "summary": "Panaderia Ana — oportunidad 70",
+    }]
+
+
+@pytest.mark.asyncio
 async def test_list_pending_review_excludes_plain_search_qualified_without_score(tmp_path):
     """lead_stage='QUALIFIED' tambien lo pone una busqueda normal de Sales
     (sin enriquecer) para cualquier resultado que pase el filtro basico —

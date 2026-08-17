@@ -80,8 +80,14 @@ class MouseAgent:
     def has_pending(self, context_id: str) -> bool:
         return context_id in self._pending
 
-    def list_pending(self) -> list[dict[str, Any]]:
-        """Solo lectura, para el gestor de agentes — nunca expone nada sensible."""
+    async def list_pending(self) -> list[dict[str, Any]]:
+        """Solo lectura, para el gestor de agentes — nunca expone nada sensible.
+
+        Async por consistencia con el resto de agentes (algunos, como
+        CampaignAgent, necesitan I/O real para listar sus pendientes) — este
+        no necesita await para nada, pero la interfaz comun evita que
+        NexusCoordinator.list_pending_actions() tenga que distinguir cuales
+        son async y cuales no."""
         return [
             {
                 "context_id": context_id,

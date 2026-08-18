@@ -1,0 +1,44 @@
+{
+  "id": "mcp.conectar",
+  "name": "Conectar servidor MCP",
+  "description": "Conecta PEPO a un servidor MCP (Model Context Protocol) externo — stdio (comando local) o http (URL remota) — y guarda la conexión para poder usar sus herramientas despues. Requiere confirmación explícita del usuario antes de conectar nada, y solo se guarda si la conexión funciona de verdad.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 1200,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "nombre": {"type": "str", "required": true},
+    "transporte": {"type": "str", "required": true, "options": ["stdio", "http"]},
+    "comando": {"type": "str", "required": false},
+    "url": {"type": "str", "required": false}
+  },
+  "outputs": {
+    "nombre": "str",
+    "confirmado": "bool"
+  },
+  "triggers": [
+    "conecta un servidor mcp",
+    "conecta pepo a mi servidor mcp",
+    "añade un servidor mcp",
+    "agrega un servidor mcp",
+    "da de alta un servidor mcp",
+    "registra un servidor mcp",
+    "conectate a mi mcp"
+  ],
+  "examples": [
+    "conecta un servidor MCP llamado notion",
+    "añade el servidor MCP de ficheros del proyecto",
+    "conecta PEPO a mi servidor MCP de Slack"
+  ]
+}

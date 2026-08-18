@@ -40,6 +40,8 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             AgentCapability(capability_id="docker.inspect", name="Inspeccionar Docker", description="docker ps/inspect/stats/logs sobre el contenedor detectado o el más problemático, solo lectura."),
             AgentCapability(capability_id="vault.add_credential", name="Añadir credenciales al Vault", description="Da de alta un dispositivo (si es nuevo) y guarda sus credenciales cifradas en el Vault, pendiente de confirmación."),
             AgentCapability(capability_id="crm.configure", name="Configurar conexión a CRM", description="Configura la conexión de Sales a Assets CRM u Odoo, pendiente de confirmación."),
+            AgentCapability(capability_id="mcp.connect", name="Conectar servidor MCP", description="Conecta PEPO a un servidor MCP (Model Context Protocol) externo, stdio o http, pendiente de confirmación."),
+            AgentCapability(capability_id="mcp.call", name="Usar herramientas MCP", description="Usa las herramientas de un servidor MCP ya conectado — solo lectura directo, escritura pendiente de confirmación."),
         ],
         skill_ids=[
             "desktop.system_task",
@@ -50,8 +52,10 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             "docker.prediagnostico",
             "vault.add_credential",
             "crm.configurar",
+            "mcp.conectar",
+            "mcp.usar",
         ],
-        connector_ids=["cmdb", "vault", "ssh", "powershell", "docker_cli", "windows_registry", "crm"],
+        connector_ids=["cmdb", "vault", "ssh", "powershell", "docker_cli", "windows_registry", "crm", "mcp"],
         tags=["pepo", "local", "confirmable"],
     ),
     AgentManifest(

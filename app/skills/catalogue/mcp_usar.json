@@ -1,0 +1,39 @@
+{
+  "id": "mcp.usar",
+  "name": "Usar servidor MCP conectado",
+  "description": "Usa las herramientas de un servidor MCP (Model Context Protocol) ya conectado para resolver lo que pide el usuario. Las herramientas de solo lectura se ejecutan directo; las de escritura (heurística por nombre) piden confirmación antes de ejecutarse.",
+  "execution": {
+    "where": "local_agent",
+    "timeout": 30,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2",
+    "speed_level": "L2"
+  },
+  "cost": {
+    "tokens_estimate": 1200,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "servidor": {"type": "str", "required": false},
+    "tarea": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "resultado": "str",
+    "confirmado": "bool"
+  },
+  "triggers": [
+    "usa el servidor mcp",
+    "usa mi mcp",
+    "con el mcp de",
+    "a traves del mcp",
+    "mediante mcp"
+  ],
+  "examples": [
+    "usa el servidor MCP de notion para buscar la pagina de onboarding",
+    "con el mcp de ficheros, lista lo que hay en el proyecto"
+  ]
+}

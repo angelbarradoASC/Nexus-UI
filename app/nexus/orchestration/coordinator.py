@@ -92,6 +92,8 @@ class NexusCoordinator:
         remote_ops_agent: Any | None = None,
         self_config_agent: Any | None = None,
         campaign_agent: Any | None = None,
+        mcp_agent: Any | None = None,
+        mcp_server_store: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
     ) -> None:
         self._alertmanager = alertmanager
@@ -105,6 +107,8 @@ class NexusCoordinator:
         self._remote_ops_agent = remote_ops_agent
         self._self_config_agent = self_config_agent
         self._campaign_agent = campaign_agent
+        self._mcp_agent = mcp_agent
+        self._mcp_server_store = mcp_server_store
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -135,13 +139,13 @@ class NexusCoordinator:
 
     async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -165,6 +169,8 @@ class NexusCoordinator:
             result = await self._system_task_agent.confirm(context_id, user_reply)
         elif agent is self._remote_ops_agent:
             result = await self._remote_ops_agent.confirm(context_id, user_reply)
+        elif agent is self._mcp_agent:
+            result = await self._mcp_agent.confirm(context_id, user_reply)
         else:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
@@ -210,6 +216,8 @@ class NexusCoordinator:
             return await self._handle_remote_ops_pending(payload, audit_id, context_key)
         if self._self_config_agent is not None and self._self_config_agent.has_pending(context_key):
             return await self._handle_self_config_pending(payload, audit_id, context_key)
+        if self._mcp_agent is not None and self._mcp_agent.has_pending(context_key):
+            return await self._handle_mcp_pending(payload, audit_id, context_key)
         resolution = resolution_override or self._skill_router.resolve(payload.message).to_dict()
         skill_id = resolution.get("skill_id", "general.respuesta")
         if skill_id == "desktop.mouse_speed" and self._mouse_agent is not None:
@@ -220,6 +228,10 @@ class NexusCoordinator:
             return await self._handle_remote_ops_propose(payload, audit_id, context_key, history)
         if skill_id in {"vault.add_credential", "crm.configurar"} and self._self_config_agent is not None:
             return await self._handle_self_config_propose(payload, audit_id, context_key, history)
+        if skill_id == "mcp.conectar" and self._mcp_agent is not None:
+            return await self._handle_mcp_connect_propose(payload, audit_id, context_key, history)
+        if skill_id == "mcp.usar" and self._mcp_agent is not None:
+            return await self._handle_mcp_use_propose(payload, audit_id, context_key, history)
         if skill_id == "monitoring.estado":
             return await self._handle_monitoring_status_chat(payload, audit_id)
         if skill_id == "assets.crear_ticket_operador" or (
@@ -841,6 +853,158 @@ class NexusCoordinator:
             flow="chat",
             audit_id=audit_id,
             redact_next_reply=redact,
+        )
+
+    # ── MCP (Model Context Protocol) ────────────────────────────────────────
+    # Dos flujos sobre el mismo MCPAgent, elegidos ANTES de propose() porque
+    # el bucle compartido (ConfirmableAgent._run_loop) fija sus tools al
+    # empezar cada llamada — no se pueden cambiar a mitad del bucle. Por eso
+    # "mcp.usar" resuelve el servidor objetivo AQUI (en el coordinador, antes
+    # de invocar al agente) en vez de dejar que el LLM lo elija con una tool.
+
+    async def _handle_mcp_connect_propose(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> ChatResponse:
+        self._mcp_agent.use_connect_mode()
+        proposal = await self._mcp_agent.propose(context_key, payload.message, history=history)
+        response = self._render_mcp_proposal(proposal)
+        redact = proposal.get("kind") == "ask_user_secret"
+
+        await self._audit(
+            flow="chat", action="handle_chat", actor=payload.user_id, status="accepted",
+            details={
+                "mode": payload.mode, "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "mcp.conectar", "proposal_kind": proposal.get("kind"),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted", response=response, agent="mcp-agent", flow="chat",
+            audit_id=audit_id, redact_next_reply=redact,
+        )
+
+    async def _handle_mcp_use_propose(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> ChatResponse:
+        if self._mcp_server_store is None:
+            response = "No tengo acceso al almacen de servidores MCP."
+        else:
+            servers = self._mcp_server_store.list_servers(enabled_only=True)
+            if not servers:
+                response = "No tienes ningun servidor MCP conectado todavia. Dime, por ejemplo, 'conecta un servidor MCP llamado X' para añadir uno."
+            else:
+                lowered = payload.message.lower()
+                matches = [s for s in servers if s.name.lower() in lowered]
+                target = matches[0] if len(matches) == 1 else (servers[0] if len(servers) == 1 else None)
+                if target is None:
+                    names = ", ".join(s.name for s in servers)
+                    response = f"¿A cual servidor MCP te refieres? Tienes conectados: {names}."
+                elif not await self._mcp_agent.use_server(target.name):
+                    response = f"No he podido conectarme al servidor MCP '{target.name}' ahora mismo."
+                else:
+                    proposal = await self._mcp_agent.propose(context_key, payload.message, history=history)
+                    response = self._render_mcp_proposal(proposal)
+                    redact = proposal.get("kind") == "ask_user_secret"
+                    await self._audit(
+                        flow="chat", action="handle_chat", actor=payload.user_id, status="accepted",
+                        details={
+                            "mode": payload.mode, "context_id": payload.context_id,
+                            "message_preview": payload.message[:160],
+                            "skill_id": "mcp.usar", "proposal_kind": proposal.get("kind"),
+                            "mcp_server": target.name,
+                        },
+                        audit_id=audit_id,
+                    )
+                    return ChatResponse(
+                        status="accepted", response=response, agent=f"mcp-agent:{target.name}", flow="chat",
+                        audit_id=audit_id, redact_next_reply=redact,
+                    )
+
+        await self._audit(
+            flow="chat", action="handle_chat", actor=payload.user_id, status="accepted",
+            details={
+                "mode": payload.mode, "context_id": payload.context_id,
+                "message_preview": payload.message[:160], "skill_id": "mcp.usar",
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status="accepted", response=response, agent="mcp-agent", flow="chat", audit_id=audit_id)
+
+    def _render_mcp_proposal(self, proposal: dict[str, Any]) -> str:
+        kind = proposal.get("kind")
+        if kind in {"ask_user", "ask_user_secret"}:
+            return proposal.get("question", "¿Puedes darme mas detalles?")
+        if kind == "connect_server":
+            data = proposal.get("payload", {})
+            destino = data.get("command") or data.get("url") or "?"
+            return f"Voy a conectar el servidor MCP '{data.get('name', '?')}' ({data.get('transport', '?')}: {destino}). ¿Confirmas?"
+        if kind == "mcp_call":
+            data = proposal.get("payload", {})
+            return (
+                f"Voy a ejecutar '{data.get('tool', '?')}' en el servidor MCP '{data.get('server_name', '?')}' "
+                f"con estos datos: {data.get('arguments', {})}. ¿Confirmas?"
+            )
+        return proposal.get("summary", "Hecho.")
+
+    async def _handle_mcp_pending(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        pending_kind = self._mcp_agent.pending_kind(context_key)
+        redact = False
+
+        if pending_kind in {"ask_user", "ask_user_secret"}:
+            result = await self._mcp_agent.confirm(context_key, payload.message)
+            if result is None:
+                response = "No había ninguna consulta pendiente."
+            elif result.get("next_question"):
+                response = result["next_question"]
+                redact = result.get("next_kind") == "ask_user_secret"
+            elif result.get("next_kind") in {"connect_server", "mcp_call"}:
+                response = self._render_mcp_proposal({"kind": result["next_kind"], "payload": result.get("next_payload", {})})
+            elif result.get("error"):
+                response = f"No lo he conseguido: {result['error']}"
+            else:
+                response = result.get("content") or "Hecho."
+        else:
+            verdict = _match_confirmation(payload.message)
+            if verdict == "yes":
+                result = await self._mcp_agent.confirm(context_key)
+                if result and result.get("error"):
+                    response = f"No lo he conseguido: {result['error']}"
+                elif result:
+                    response = result.get("content") or "Hecho."
+                else:
+                    response = "No había ninguna accion pendiente."
+            elif verdict == "no":
+                self._mcp_agent.cancel(context_key)
+                response = "Vale, no hago nada."
+            else:
+                response = "¿Confirmas? (sí/no)"
+
+        await self._audit(
+            flow="chat", action="handle_chat", actor=payload.user_id, status="accepted",
+            details={
+                "mode": payload.mode, "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "mcp", "pending_resolution": response[:200],
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted", response=response, agent="mcp-agent", flow="chat",
+            audit_id=audit_id, redact_next_reply=redact,
         )
 
     async def _handle_docker_prediagnostic_chat(

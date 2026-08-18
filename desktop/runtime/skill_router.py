@@ -68,6 +68,8 @@ class DesktopSkillRouter:
         "desktop.system_task": ["desktop.system.control"],
         "vault.add_credential": ["vault.write"],
         "crm.configurar": ["crm.configure"],
+        "mcp.conectar": ["mcp.connect"],
+        "mcp.usar": ["mcp.call"],
         "general.respuesta": [],
     }
 
@@ -90,6 +92,8 @@ class DesktopSkillRouter:
         "desktop.system_task": PermissionLevel.OPERATE,
         "vault.add_credential": PermissionLevel.ADMIN,
         "crm.configurar": PermissionLevel.ADMIN,
+        "mcp.conectar": PermissionLevel.ADMIN,
+        "mcp.usar": PermissionLevel.OPERATE,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -257,6 +261,12 @@ class DesktopSkillRouter:
             term in lowered for term in ("conecta", "conéctate", "conectate", "configura", "configurar", "credenciales del crm", "cambia la conexion", "cambia la conexión")
         ):
             return "crm.configurar", 0.92, "La peticion pide configurar la conexion a un CRM."
+        if "mcp" in lowered and any(
+            term in lowered for term in ("conecta", "conéctate", "conectate", "añade", "anade", "agrega", "da de alta", "registra", "nuevo servidor")
+        ):
+            return "mcp.conectar", 0.92, "La peticion pide conectar un servidor MCP nuevo."
+        if "mcp" in lowered:
+            return "mcp.usar", 0.85, "La peticion menciona MCP sin pedir conectar uno nuevo — se interpreta como usar un servidor ya conectado."
         if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
             "cerca de" in lowered
             or any(

@@ -80,6 +80,8 @@ def build_runtime(cfg) -> NexusRuntime:
     system_task_agent = None
     remote_ops_agent = None
     self_config_agent = None
+    mcp_agent = None
+    mcp_server_store = None
     skill_router = DesktopSkillRouter()
     agent_settings: "AgentSettingsStore | None" = None
     if getattr(cfg, "is_desktop", False):
@@ -87,6 +89,7 @@ def build_runtime(cfg) -> NexusRuntime:
         monitoring_store = DesktopMonitoringIntegrationStore(
             desktop_settings.monitoring_config_db_path
         )
+        from desktop.local_agents.mcp_agent import MCPAgent
         from desktop.local_agents.mouse_agent import MouseAgent
         from desktop.local_agents.remote_ops_agent import RemoteOpsAgent
         from desktop.local_agents.self_config_agent import SelfConfigAgent
@@ -94,6 +97,8 @@ def build_runtime(cfg) -> NexusRuntime:
         from desktop.local_agents.system_task_agent import SystemTaskAgent
         from desktop.runtime.agent_settings import AgentSettingsStore
         from desktop.storage.local_state import DesktopLocalState
+        from desktop.storage.mcp_servers import DesktopMCPServerStore
+        from nexus.mcp.manager import MCPManager
 
         mouse_agent = MouseAgent()
         skill_library = SkillLibrary(desktop_settings.skill_library_db_path)
@@ -101,6 +106,8 @@ def build_runtime(cfg) -> NexusRuntime:
         remote_ops_agent = RemoteOpsAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, access=access)
         desktop_local_state = DesktopLocalState(desktop_settings)
         self_config_agent = SelfConfigAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, local_state=desktop_local_state)
+        mcp_server_store = DesktopMCPServerStore(desktop_settings.mcp_servers_db_path)
+        mcp_agent = MCPAgent(cfg, llm_router=llm_router, manager=MCPManager(), store=mcp_server_store)
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
         # Un unico DesktopSkillRouter (con el override de permisos ya cargado)
         # compartido entre NexusCoordinator y AssistantRuntimeCore — antes cada
@@ -141,6 +148,8 @@ def build_runtime(cfg) -> NexusRuntime:
         remote_ops_agent=remote_ops_agent,
         self_config_agent=self_config_agent,
         campaign_agent=campaign,
+        mcp_agent=mcp_agent,
+        mcp_server_store=mcp_server_store,
         skill_router=skill_router,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),

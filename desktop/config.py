@@ -73,6 +73,10 @@ class DesktopSettings:
         return self.config_dir / "skill_library.db"
 
     @property
+    def mcp_servers_db_path(self) -> Path:
+        return self.config_dir / "mcp_servers.db"
+
+    @property
     def llm_router_config_path(self) -> Path:
         return self.config_dir / "llm_router.json"
 

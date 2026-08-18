@@ -83,11 +83,25 @@ class MCPAgent(ConfirmableAgent):
     tools = _CONNECT_TOOLS
     prompt_key = "pepo.mcp_connect_loop"
     agent_id = "mcp"
+    # Fija a diferencia de `agent_id` (que se muta a "mcp.<servidor>" en modo
+    # "usar") — la persistencia de pendientes necesita una clave estable
+    # para encontrarlos sin importar en que modo estaba el agente cuando se
+    # guardaron. Nota: si el proceso se reinicia a mitad de un ask_user en
+    # modo "usar" (pregunta de seguimiento sobre un servidor concreto), el
+    # modo/servidor activo no se restaura solo — es un caso raro (reinicio
+    # justo en ese instante) que se acepta como limitacion conocida; los
+    # pendientes reales de escritura (connect_server/mcp_call) si sobreviven
+    # completos, payload incluido.
+    persistence_key = "mcp"
 
-    def __init__(self, cfg, *, llm_router=None, manager=None, store=None) -> None:
-        super().__init__(cfg, llm_router=llm_router)
+    def __init__(self, cfg, *, llm_router=None, manager=None, server_store=None, store=None) -> None:
+        # `server_store` = DesktopMCPServerStore (definiciones de servidores
+        # MCP conectados) — sin relacion con `store` (DesktopPendingActionStore,
+        # heredado de ConfirmableAgent, persiste el estado pendiente de
+        # confirmar). Nombres distintos a proposito para no confundirlos.
+        super().__init__(cfg, llm_router=llm_router, store=store)
         self._manager = manager
-        self._store = store
+        self._server_store = server_store
         self._active_server_name: str | None = None
 
     # ── Cambio de modo (antes de propose()) ─────────────────────────────────
@@ -102,9 +116,9 @@ class MCPAgent(ConfirmableAgent):
         """Prepara el bucle para usar las tools REALES de un servidor MCP ya
         conectado. Devuelve False si el servidor no existe/esta deshabilitado
         o si la conexion falla — en ese caso el modo no cambia."""
-        if self._store is None or self._manager is None:
+        if self._server_store is None or self._manager is None:
             return False
-        server = self._store.get_by_name(server_name)
+        server = self._server_store.get_by_name(server_name)
         if server is None or not server.enabled:
             return False
         try:
@@ -140,9 +154,9 @@ class MCPAgent(ConfirmableAgent):
             return f"Error ejecutando '{name}': {exc}"
 
     def _list_connected_servers_text(self) -> str:
-        if self._store is None:
+        if self._server_store is None:
             return "No hay almacen de servidores MCP disponible."
-        servers = self._store.list_servers()
+        servers = self._server_store.list_servers()
         if not servers:
             return "No hay ningun servidor MCP conectado todavia."
         lines = [
@@ -190,8 +204,8 @@ class MCPAgent(ConfirmableAgent):
             logger.exception("Fallo conectando al servidor MCP '%s'", server.name)
             return {"task": pending.task, "is_done": False, "content": None, "error": f"No pude conectar: {exc}"}
 
-        if self._store is not None:
-            self._store.save_server(server)
+        if self._server_store is not None:
+            self._server_store.save_server(server)
 
         from utils.logger import hito
         hito(

@@ -75,7 +75,7 @@ async def test_propose_connect_server_creates_pending(tmp_path):
         )]),
     ])
     manager = _FakeMCPManager()
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=_store(tmp_path))
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=_store(tmp_path))
 
     result = await agent.propose("ctx-1", "conecta un servidor MCP llamado fs")
 
@@ -94,7 +94,7 @@ async def test_confirm_connect_server_persists_when_connection_succeeds(tmp_path
     ])
     store = _store(tmp_path)
     manager = _FakeMCPManager(tool_schemas=[_schema("list_files"), _schema("read_file")])
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=store)
     await agent.propose("ctx-1", "conecta un servidor MCP llamado fs")
 
     result = await agent.confirm("ctx-1")
@@ -117,7 +117,7 @@ async def test_confirm_connect_server_does_not_persist_when_connection_fails(tmp
     ])
     store = _store(tmp_path)
     manager = _FakeMCPManager(tools_error=RuntimeError("no se pudo lanzar el proceso"))
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=store)
     await agent.propose("ctx-1", "conecta un servidor MCP llamado fs")
 
     result = await agent.confirm("ctx-1")
@@ -135,7 +135,7 @@ async def test_list_connected_servers_reports_saved_servers(tmp_path):
         _FakeLLMResponse(tool_calls=[_tool_call("c1", "list_connected_servers")]),
         _FakeLLMResponse(tool_calls=[_tool_call("c2", "finish", summary="Solo hay 'fs' conectado.")]),
     ])
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=_FakeMCPManager(), store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=_FakeMCPManager(), server_store=store)
 
     result = await agent.propose("ctx-1", "que servidores mcp tengo")
 
@@ -150,7 +150,7 @@ async def test_use_server_loads_dynamic_tools_from_manager(tmp_path):
     store = _store(tmp_path)
     store.save_server(DesktopMCPServer.create(name="fs", transport="stdio", command="python"))
     manager = _FakeMCPManager(tool_schemas=[_schema("list_files")])
-    agent = MCPAgent(_fake_cfg(), llm_router=_FakeLLMRouter([]), manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=_FakeLLMRouter([]), manager=manager, server_store=store)
 
     ok = await agent.use_server("fs")
 
@@ -162,7 +162,7 @@ async def test_use_server_loads_dynamic_tools_from_manager(tmp_path):
 
 @pytest.mark.asyncio
 async def test_use_server_returns_false_for_unknown_server(tmp_path):
-    agent = MCPAgent(_fake_cfg(), llm_router=_FakeLLMRouter([]), manager=_FakeMCPManager(), store=_store(tmp_path))
+    agent = MCPAgent(_fake_cfg(), llm_router=_FakeLLMRouter([]), manager=_FakeMCPManager(), server_store=_store(tmp_path))
 
     assert await agent.use_server("no-existe") is False
 
@@ -179,7 +179,7 @@ async def test_read_only_tool_executes_directly_without_confirmation(tmp_path):
         _FakeLLMResponse(tool_calls=[_tool_call("c1", "list_files")]),
         _FakeLLMResponse(tool_calls=[_tool_call("c2", "finish", summary="Hay a.txt y b.txt.")]),
     ])
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=store)
     await agent.use_server("fs")
 
     result = await agent.propose("ctx-1", "lista los ficheros")
@@ -200,7 +200,7 @@ async def test_write_tool_requires_confirmation_before_executing(tmp_path):
     llm = _FakeLLMRouter([
         _FakeLLMResponse(tool_calls=[_tool_call("c1", "create_page", title="Onboarding")]),
     ])
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=store)
     await agent.use_server("notion")
 
     proposal = await agent.propose("ctx-1", "crea una pagina de onboarding en notion")
@@ -224,7 +224,7 @@ async def test_cancel_write_tool_call_does_not_execute(tmp_path):
     llm = _FakeLLMRouter([
         _FakeLLMResponse(tool_calls=[_tool_call("c1", "delete_page", page_id="p-1")]),
     ])
-    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, store=store)
+    agent = MCPAgent(_fake_cfg(), llm_router=llm, manager=manager, server_store=store)
     await agent.use_server("notion")
     await agent.propose("ctx-1", "borra la pagina p-1")
 

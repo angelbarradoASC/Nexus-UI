@@ -126,9 +126,10 @@ class SelfConfigAgent(ConfirmableAgent):
     tools = _TOOLS
     prompt_key = "pepo.self_config_loop"
     agent_id = "self_config"
+    persistence_key = "self_config"
 
-    def __init__(self, cfg, *, llm_router=None, cmdb=None, vault=None, local_state=None) -> None:
-        super().__init__(cfg, llm_router=llm_router)
+    def __init__(self, cfg, *, llm_router=None, cmdb=None, vault=None, local_state=None, store=None) -> None:
+        super().__init__(cfg, llm_router=llm_router, store=store)
         self._cmdb = cmdb
         self._vault = vault
         self._local_state = local_state

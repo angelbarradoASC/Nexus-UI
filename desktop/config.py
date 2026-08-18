@@ -77,6 +77,10 @@ class DesktopSettings:
         return self.config_dir / "mcp_servers.db"
 
     @property
+    def pending_actions_db_path(self) -> Path:
+        return self.config_dir / "pending_actions.db"
+
+    @property
     def llm_router_config_path(self) -> Path:
         return self.config_dir / "llm_router.json"
 

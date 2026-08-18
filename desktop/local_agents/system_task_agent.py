@@ -213,13 +213,47 @@ def _run_powershell(
 class SystemTaskAgent:
     """Resuelve tareas libres sobre el PC via skill guardada, bucle de tools o windows-use."""
 
-    def __init__(self, cfg, *, llm_router=None, skill_library=None, cmdb=None) -> None:
+    persistence_key = "system_task"
+
+    def __init__(self, cfg, *, llm_router=None, skill_library=None, cmdb=None, store=None) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
         self._skill_library = skill_library
         self._cmdb = cmdb
+        self._store = store
         self._agent = None
         self._pending: dict[str, PendingSystemTask] = {}
+
+    # ── Persistencia (ver desktop/storage/pending_actions.py) ───────────────
+
+    def _set_pending(self, context_id: str, pending: PendingSystemTask) -> None:
+        self._pending[context_id] = pending
+        if self._store is not None:
+            payload = {
+                "skill_id": pending.skill_id, "script": pending.script,
+                "verify_command": pending.verify_command, "description": pending.description,
+            }
+            self._store.save(
+                agent_id=self.persistence_key, context_id=context_id, kind=pending.kind,
+                task=pending.task, payload=payload, messages=pending.messages,
+                tool_call_id=pending.tool_call_id,
+            )
+
+    def _clear_pending(self, context_id: str) -> PendingSystemTask | None:
+        pending = self._pending.pop(context_id, None)
+        if self._store is not None:
+            self._store.delete(agent_id=self.persistence_key, context_id=context_id)
+        return pending
+
+    def load_pending_from_store(self) -> None:
+        if self._store is None:
+            return
+        for row in self._store.list_for_agent(self.persistence_key):
+            self._pending[row.context_id] = PendingSystemTask(
+                task=row.task, kind=row.kind, messages=row.messages, tool_call_id=row.tool_call_id,
+                skill_id=row.payload.get("skill_id"), script=row.payload.get("script"),
+                verify_command=row.payload.get("verify_command"), description=row.payload.get("description"),
+            )
 
     def _get_windows_use_agent(self):
         if self._agent is None:
@@ -400,22 +434,22 @@ class SystemTaskAgent:
         kind = outcome["kind"]
 
         if kind == "ask_user":
-            self._pending[context_id] = PendingSystemTask(
+            self._set_pending(context_id, PendingSystemTask(
                 task=task, kind="ask_user", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
-            )
+            ))
             return {"kind": "ask_user", "task": task, "question": outcome["question"]}
 
         if kind == "run_script":
-            self._pending[context_id] = PendingSystemTask(
+            self._set_pending(context_id, PendingSystemTask(
                 task=task, kind="run_script", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
                 script=outcome["script"], verify_command=outcome.get("verify_command", ""),
                 description=outcome.get("description", task),
-            )
+            ))
             return {"kind": "run_script", "task": task, "script": outcome["script"], "description": outcome.get("description", task)}
 
         # finish
         if not outcome.get("scriptable", True):
-            self._pending[context_id] = PendingSystemTask(task=task, kind="windows_use")
+            self._set_pending(context_id, PendingSystemTask(task=task, kind="windows_use"))
             return {"kind": "windows_use", "task": task}
 
         return {"kind": "finish", "task": task, "summary": outcome.get("summary", "Hecho.")}
@@ -431,11 +465,11 @@ class SystemTaskAgent:
             if match is not None:
                 problems = await self._validate_script(match.script_body)
                 if not problems:
-                    self._pending[context_id] = PendingSystemTask(
+                    self._set_pending(context_id, PendingSystemTask(
                         task=task, kind="skill_match", skill_id=match.skill_id,
                         script=match.script_body, verify_command=match.verify_command,
                         description=match.description,
-                    )
+                    ))
                     return {
                         "kind": "skill_match", "task": task, "script": match.script_body,
                         "description": match.description, "status": match.status,
@@ -447,7 +481,7 @@ class SystemTaskAgent:
                 self._skill_library.record_failure(match.skill_id)
 
         if self._llm_router is None:
-            self._pending[context_id] = PendingSystemTask(task=task, kind="windows_use")
+            self._set_pending(context_id, PendingSystemTask(task=task, kind="windows_use"))
             return {"kind": "windows_use", "task": task}
 
         # Igual que en RemoteOpsAgent: sin el historial previo, un mensaje de
@@ -480,7 +514,7 @@ class SystemTaskAgent:
         return pending.kind if pending else None
 
     def cancel(self, context_id: str) -> None:
-        self._pending.pop(context_id, None)
+        self._clear_pending(context_id)
 
     async def _run_script_and_record(self, pending: PendingSystemTask) -> dict[str, Any]:
         try:
@@ -525,7 +559,7 @@ class SystemTaskAgent:
 
     async def confirm(self, context_id: str, user_reply: str | None = None) -> dict[str, Any] | None:
         """Continua/ejecuta lo pendiente. `user_reply` es obligatorio si el pendiente es 'ask_user'."""
-        pending = self._pending.pop(context_id, None)
+        pending = self._clear_pending(context_id)
         if pending is None:
             return None
 

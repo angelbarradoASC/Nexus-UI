@@ -109,9 +109,10 @@ class RemoteOpsAgent(ConfirmableAgent):
     tools = _TOOLS
     prompt_key = "pepo.remote_ops_loop"
     agent_id = "remote_ops"
+    persistence_key = "remote_ops"
 
-    def __init__(self, cfg, *, llm_router=None, cmdb=None, vault=None, access=None) -> None:
-        super().__init__(cfg, llm_router=llm_router)
+    def __init__(self, cfg, *, llm_router=None, cmdb=None, vault=None, access=None, store=None) -> None:
+        super().__init__(cfg, llm_router=llm_router, store=store)
         self._cmdb = cmdb
         self._vault = vault
         self._access = access

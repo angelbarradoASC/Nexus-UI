@@ -98,16 +98,25 @@ def build_runtime(cfg) -> NexusRuntime:
         from desktop.runtime.agent_settings import AgentSettingsStore
         from desktop.storage.local_state import DesktopLocalState
         from desktop.storage.mcp_servers import DesktopMCPServerStore
+        from desktop.storage.pending_actions import DesktopPendingActionStore
         from nexus.mcp.manager import MCPManager
 
-        mouse_agent = MouseAgent()
+        # Store unico compartido por los 5 agentes con confirmacion en dos
+        # pasos — sin esto, un pendiente (por ejemplo una credencial a punto
+        # de guardarse en el Vault) se perdia sin avisar si el proceso se
+        # reiniciaba antes de que el usuario confirmara.
+        pending_store = DesktopPendingActionStore(desktop_settings.pending_actions_db_path)
+
+        mouse_agent = MouseAgent(store=pending_store)
         skill_library = SkillLibrary(desktop_settings.skill_library_db_path)
-        system_task_agent = SystemTaskAgent(cfg, llm_router=llm_router, skill_library=skill_library, cmdb=cmdb)
-        remote_ops_agent = RemoteOpsAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, access=access)
+        system_task_agent = SystemTaskAgent(cfg, llm_router=llm_router, skill_library=skill_library, cmdb=cmdb, store=pending_store)
+        remote_ops_agent = RemoteOpsAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, access=access, store=pending_store)
         desktop_local_state = DesktopLocalState(desktop_settings)
-        self_config_agent = SelfConfigAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, local_state=desktop_local_state)
+        self_config_agent = SelfConfigAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, local_state=desktop_local_state, store=pending_store)
         mcp_server_store = DesktopMCPServerStore(desktop_settings.mcp_servers_db_path)
-        mcp_agent = MCPAgent(cfg, llm_router=llm_router, manager=MCPManager(), store=mcp_server_store)
+        mcp_agent = MCPAgent(cfg, llm_router=llm_router, manager=MCPManager(), server_store=mcp_server_store, store=pending_store)
+        for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent):
+            _agent.load_pending_from_store()
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
         # Un unico DesktopSkillRouter (con el override de permisos ya cargado)
         # compartido entre NexusCoordinator y AssistantRuntimeCore — antes cada

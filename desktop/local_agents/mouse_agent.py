@@ -38,11 +38,25 @@ class PendingMouseChange:
     direction: str
 
 
+_PERSISTENCE_KEY = "mouse"
+
+
 class MouseAgent:
     """Lee y ajusta la velocidad del raton, con confirmacion en dos pasos."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, store=None) -> None:
+        self._store = store
         self._pending: dict[str, PendingMouseChange] = {}
+
+    def load_pending_from_store(self) -> None:
+        if self._store is None:
+            return
+        for row in self._store.list_for_agent(_PERSISTENCE_KEY):
+            self._pending[row.context_id] = PendingMouseChange(
+                current_value=row.payload.get("current_value", MOUSE_SPEED_DEFAULT),
+                target_value=row.payload.get("target_value", MOUSE_SPEED_DEFAULT),
+                direction=row.payload.get("direction", "reset"),
+            )
 
     def get_speed(self) -> int:
         """Devuelve la velocidad actual (1-20)."""
@@ -75,6 +89,11 @@ class MouseAgent:
         self._pending[context_id] = PendingMouseChange(
             current_value=current, target_value=target, direction=direction
         )
+        if self._store is not None:
+            self._store.save(
+                agent_id=_PERSISTENCE_KEY, context_id=context_id, kind="mouse_speed",
+                payload={"current_value": current, "target_value": target, "direction": direction},
+            )
         return {"current": current, "target": target, "direction": direction}
 
     def has_pending(self, context_id: str) -> bool:
@@ -101,6 +120,8 @@ class MouseAgent:
     def confirm(self, context_id: str) -> dict[str, Any] | None:
         """Aplica el cambio pendiente para este contexto, si existe."""
         pending = self._pending.pop(context_id, None)
+        if self._store is not None:
+            self._store.delete(agent_id=_PERSISTENCE_KEY, context_id=context_id)
         if pending is None:
             return None
         applied = self._set_speed(pending.target_value)
@@ -108,3 +129,5 @@ class MouseAgent:
 
     def cancel(self, context_id: str) -> None:
         self._pending.pop(context_id, None)
+        if self._store is not None:
+            self._store.delete(agent_id=_PERSISTENCE_KEY, context_id=context_id)

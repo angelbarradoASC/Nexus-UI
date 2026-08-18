@@ -122,17 +122,58 @@ class PendingAction:
 class ConfirmableAgent:
     """Bucle generico de tool-calling con confirmacion humana en dos pasos.
 
-    Subclases: RemoteOpsAgent, SelfConfigAgent."""
+    Subclases: RemoteOpsAgent, SelfConfigAgent, MCPAgent."""
 
     tools: list[dict[str, Any]] = []
     prompt_key: str = ""
     agent_id: str = "confirmable"
     max_loop_steps: int = 6
 
-    def __init__(self, cfg, *, llm_router=None) -> None:
+    # Identidad FIJA para persistencia — a diferencia de `agent_id` (que
+    # MCPAgent muta en tiempo real segun el servidor activo), esta nunca
+    # cambia, para poder encontrar el pendiente guardado sin importar el
+    # modo en el que estaba el agente cuando se guardo. Cada subclase la
+    # fija; si queda vacia, la persistencia queda desactivada (compatibilidad
+    # con tests que construyen el agente sin store).
+    persistence_key: str = ""
+
+    def __init__(self, cfg, *, llm_router=None, store=None) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
+        self._store = store
         self._pending: dict[str, PendingAction] = {}
+
+    # ── Persistencia (ver desktop/storage/pending_actions.py) ───────────────
+
+    def _persist(self, context_id: str, pending: PendingAction) -> None:
+        if self._store is None or not self.persistence_key:
+            return
+        self._store.save(
+            agent_id=self.persistence_key,
+            context_id=context_id,
+            kind=pending.kind,
+            task=pending.task,
+            payload=pending.payload,
+            messages=pending.messages,
+            tool_call_id=pending.tool_call_id,
+        )
+
+    def _forget(self, context_id: str) -> None:
+        if self._store is None or not self.persistence_key:
+            return
+        self._store.delete(agent_id=self.persistence_key, context_id=context_id)
+
+    def load_pending_from_store(self) -> None:
+        """Rehidrata `self._pending` desde el store al arrancar — sin esto,
+        un pendiente que sobrevivio a un reinicio del proceso queda huerfano
+        en SQLite pero invisible para has_pending()/list_pending()."""
+        if self._store is None or not self.persistence_key:
+            return
+        for row in self._store.list_for_agent(self.persistence_key):
+            self._pending[row.context_id] = PendingAction(
+                task=row.task, kind=row.kind, messages=row.messages,
+                tool_call_id=row.tool_call_id, payload=row.payload,
+            )
 
     # ── Hooks para las subclases ─────────────────────────────────────────────
 
@@ -232,19 +273,23 @@ class ConfirmableAgent:
             kind = "ask_user_secret"
 
         if kind in _ASK_KINDS:
-            self._pending[context_id] = PendingAction(
+            pending = PendingAction(
                 task=task, kind=kind, messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
             )
+            self._pending[context_id] = pending
+            self._persist(context_id, pending)
             return {"kind": kind, "task": task, "question": outcome["question"]}
 
         if kind == "finish":
             return {"kind": "finish", "task": task, "summary": outcome.get("summary", "Hecho.")}
 
         # cualquier otro kind viene de una ProposalOutcome de la subclase
-        self._pending[context_id] = PendingAction(
+        pending = PendingAction(
             task=task, kind=kind, messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
             payload=outcome.get("payload", {}),
         )
+        self._pending[context_id] = pending
+        self._persist(context_id, pending)
         return {"kind": kind, "task": task, "payload": outcome.get("payload", {})}
 
     # ── API publica ──────────────────────────────────────────────────────────
@@ -268,6 +313,7 @@ class ConfirmableAgent:
 
     def cancel(self, context_id: str) -> None:
         self._pending.pop(context_id, None)
+        self._forget(context_id)
 
     async def list_pending(self) -> list[dict[str, Any]]:
         """Solo lectura, para el gestor de agentes — nunca expone secretos ni
@@ -288,6 +334,11 @@ class ConfirmableAgent:
         pending = self._pending.pop(context_id, None)
         if pending is None:
             return None
+        # Se olvida ya — si el bucle vuelve a dejar algo pendiente (otra
+        # pregunta, u otra propuesta), _store_outcome() lo vuelve a guardar
+        # con su propio payload; si no, la accion queda resuelta de verdad
+        # (ejecutada o fallida) y no debe quedar nada huerfano en SQLite.
+        self._forget(context_id)
 
         if pending.kind in _ASK_KINDS:
             if pending.tool_call_id:

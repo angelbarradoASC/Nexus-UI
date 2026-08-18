@@ -2,13 +2,11 @@
 desktop/local_agents/remote_ops_agent.py
 --------------------------------------------
 RemoteOpsAgent — hermano de SystemTaskAgent para infraestructura REMOTA
-(servidores, no el PC local donde corre Nexus Desktop).
-
-Mismo patron: bucle generico de tool-calling, el LLM decide que herramienta
-llamar (lookup_cmdb, check_credentials, run_diagnostic, ask_user, finish).
-El determinismo viene del toolbox + bucle, no de codigo distinto por
-tecnologia — asi "BeaServer" se resuelve igual que cualquier otro nombre,
-consultando el CMDB real en vez de adivinar por palabras clave del mensaje.
+(servidores, no el PC local donde corre Nexus Desktop). Sobre
+ConfirmableAgent (confirmable_loop.py) — el bucle de tool-calling, la
+gestion de pendientes y la heuristica de ask_user_secret son compartidos
+con SelfConfigAgent; aqui solo viven las tools propias y que hacer con
+ellas.
 
 - lookup_cmdb: busca el dispositivo por nombre/ip/tipo en el CMDB real.
   Solo lectura, se ejecuta sin confirmar.
@@ -17,10 +15,8 @@ consultando el CMDB real en vez de adivinar por palabras clave del mensaje.
   Solo lectura, se ejecuta sin confirmar.
 - run_diagnostic: propone conectarse por SSH y ejecutar un whitelist fijo
   de comandos de solo lectura. Pendiente de confirmacion humana antes de
-  abrir la conexion — igual que run_script pide confirmacion antes de
-  tocar el PC local. Usa AgentAccessService (CMDB + Vault + SSHConnector
+  abrir la conexion. Usa AgentAccessService (CMDB + Vault + SSHConnector
   ya resueltos) — nunca las credenciales viejas de CredentialStore.
-- ask_user / finish: identico al patron de SystemTaskAgent.
 
 Solo soporta management_protocol == "ssh" (lo unico que AgentAccessService
 implementa hoy). Para otros protocolos responde con honestidad que no esta
@@ -29,14 +25,12 @@ soportado todavia — no se inventa una integracion que no existe.
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass, field
 from typing import Any
 
-logger = logging.getLogger("nexus.remote_ops_agent")
+from desktop.local_agents.confirmable_loop import ConfirmableAgent, PendingAction, ProposalOutcome
 
-_MAX_LOOP_STEPS = 6
+logger = logging.getLogger("nexus.remote_ops_agent")
 
 # Mismo whitelist de solo lectura que ya usaba el SSHAgent original —
 # nunca comandos que escriban o modifiquen nada en el servidor destino.
@@ -106,63 +100,38 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "ask_user",
-            "description": (
-                "Pregunta al usuario UN dato imprescindible que no se ha podido resolver "
-                "por lookup_cmdb (por ejemplo, si hay varios dispositivos que coinciden "
-                "y no esta claro cual). Una sola pregunta concreta cada vez."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"question": {"type": "string"}},
-                "required": ["question"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "finish",
-            "description": (
-                "Termina: ya se ha respondido con lo que sabes (incluye el caso de "
-                "'no encontrado en el CMDB' o 'sin credenciales en el Vault' — esos "
-                "tambien son respuestas finales, no fallos)."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"summary": {"type": "string"}},
-                "required": ["summary"],
-            },
-        },
-    },
 ]
 
 
-@dataclass(slots=True)
-class PendingRemoteOp:
-    task: str
-    kind: str  # "ask_user" | "run_diagnostic"
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    tool_call_id: str | None = None
-    device_id: str | None = None
-    device_name: str | None = None
-
-
-class RemoteOpsAgent:
+class RemoteOpsAgent(ConfirmableAgent):
     """Resuelve preguntas sobre infraestructura remota via CMDB + Vault + SSH real."""
 
+    tools = _TOOLS
+    prompt_key = "pepo.remote_ops_loop"
+    agent_id = "remote_ops"
+
     def __init__(self, cfg, *, llm_router=None, cmdb=None, vault=None, access=None) -> None:
-        self._cfg = cfg
-        self._llm_router = llm_router
+        super().__init__(cfg, llm_router=llm_router)
         self._cmdb = cmdb
         self._vault = vault
         self._access = access
-        self._pending: dict[str, PendingRemoteOp] = {}
 
-    # ── Tool: lookup_cmdb ────────────────────────────────────────────────────
+    # ── Tools propias ────────────────────────────────────────────────────────
+
+    async def dispatch_tool(self, name: str, args: dict[str, Any]) -> str | ProposalOutcome | None:
+        if name == "lookup_cmdb":
+            return await self._lookup_cmdb(args.get("query", ""))
+        if name == "check_credentials":
+            return await self._check_credentials(args.get("device_id", ""))
+        if name == "run_diagnostic":
+            return ProposalOutcome(
+                kind="run_diagnostic",
+                payload={
+                    "device_id": args.get("device_id", ""),
+                    "device_name": args.get("device_name") or args.get("device_id", ""),
+                },
+            )
+        return None
 
     async def _lookup_cmdb(self, query: str) -> str:
         from nexus.cmdb.lookup import search_devices
@@ -173,162 +142,36 @@ class RemoteOpsAgent:
             logger.exception("Fallo consultando CMDB")
             return "Error consultando el CMDB."
 
-    # ── Tool: check_credentials ──────────────────────────────────────────────
-
     async def _check_credentials(self, device_id: str) -> str:
         from nexus.vault.check import check_credentials
 
         return await check_credentials(self._vault, device_id)
 
-    # ── Bucle generico ───────────────────────────────────────────────────────
+    # ── list_pending: resumen con nombre de dispositivo ─────────────────────
 
-    async def _run_loop(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        from nexus.prompts import resolve_prompt_sync
+    def describe_pending(self, pending: PendingAction) -> str:
+        if pending.kind == "run_diagnostic":
+            return f"Diagnostico SSH pendiente de confirmar: {pending.payload.get('device_name')}"
+        return pending.task
 
-        if not messages or messages[0].get("role") != "system":
-            messages = [{"role": "system", "content": resolve_prompt_sync("pepo.remote_ops_loop")}, *messages]
+    # ── Ejecucion tras confirmar ─────────────────────────────────────────────
 
-        for _ in range(_MAX_LOOP_STEPS):
-            try:
-                response = await self._llm_router.call(
-                    messages=messages,
-                    tools=_TOOLS,
-                    tool_choice="auto",
-                    preferred_level=2,
-                    temperature=0.1,
-                    max_tokens=1400,
-                    timeout=30.0,
-                )
-            except Exception as exc:
-                logger.exception("Fallo en el bucle de operaciones remotas")
-                return {"kind": "finish", "summary": f"No pude continuar: {exc}"}
+    async def execute(self, pending: PendingAction) -> dict[str, Any]:
+        if pending.kind == "run_diagnostic":
+            return await self._run_diagnostic_and_record(pending)
+        return {"task": pending.task, "is_done": False, "content": None, "error": f"Pendiente desconocido: {pending.kind}"}
 
-            if response.error:
-                return {"kind": "finish", "summary": f"No pude continuar: {response.error}"}
+    async def _run_diagnostic_and_record(self, pending: PendingAction) -> dict[str, Any]:
+        device_id = pending.payload.get("device_id", "")
+        device_name = pending.payload.get("device_name", device_id)
 
-            if not response.tool_calls:
-                return {"kind": "finish", "summary": response.content or "Hecho."}
-
-            call = response.tool_calls[0]
-            fn = call.get("function", {})
-            name = fn.get("name", "")
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except json.JSONDecodeError:
-                args = {}
-
-            messages.append({
-                "role": "assistant",
-                "content": response.content or None,
-                "tool_calls": response.tool_calls,
-            })
-            for extra_call in response.tool_calls[1:]:
-                messages.append({
-                    "role": "tool", "tool_call_id": extra_call.get("id", ""),
-                    "content": "Ignorada — ya se proceso otra herramienta en este turno.",
-                })
-
-            if name == "lookup_cmdb":
-                result_text = await self._lookup_cmdb(args.get("query", ""))
-                messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
-                continue
-
-            if name == "check_credentials":
-                result_text = await self._check_credentials(args.get("device_id", ""))
-                messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
-                continue
-
-            if name == "run_diagnostic":
-                return {
-                    "kind": "run_diagnostic",
-                    "device_id": args.get("device_id", ""),
-                    "device_name": args.get("device_name") or args.get("device_id", ""),
-                    "messages": messages,
-                    "tool_call_id": call.get("id", ""),
-                }
-
-            if name == "ask_user":
-                return {
-                    "kind": "ask_user",
-                    "question": args.get("question", "?"),
-                    "messages": messages,
-                    "tool_call_id": call.get("id", ""),
-                }
-
-            if name == "finish":
-                return {"kind": "finish", "summary": args.get("summary", "Hecho.")}
-
-            return {"kind": "finish", "summary": f"Herramienta desconocida: {name}"}
-
-        return {"kind": "finish", "summary": "No he podido resolverlo en los pasos disponibles."}
-
-    def _store_outcome(self, context_id: str, task: str, outcome: dict[str, Any]) -> dict[str, Any]:
-        kind = outcome["kind"]
-
-        if kind == "ask_user":
-            self._pending[context_id] = PendingRemoteOp(
-                task=task, kind="ask_user", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
-            )
-            return {"kind": "ask_user", "task": task, "question": outcome["question"]}
-
-        if kind == "run_diagnostic":
-            self._pending[context_id] = PendingRemoteOp(
-                task=task, kind="run_diagnostic", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
-                device_id=outcome["device_id"], device_name=outcome["device_name"],
-            )
-            return {"kind": "run_diagnostic", "task": task, "device_id": outcome["device_id"], "device_name": outcome["device_name"]}
-
-        return {"kind": "finish", "task": task, "summary": outcome.get("summary", "Hecho.")}
-
-    # ── API publica ──────────────────────────────────────────────────────────
-
-    async def propose(self, context_id: str, task: str, *, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        if self._llm_router is None:
-            return {"kind": "finish", "task": task, "summary": "El razonamiento por LLM no esta disponible ahora mismo."}
-        # El historial de la conversacion (turnos previos usuario/asistente) se
-        # antepone a la tarea nueva — sin esto, "esa IP" o "el mismo servidor"
-        # en un mensaje de seguimiento no significan nada para el bucle, que
-        # arrancaria cada vez desde cero sin saber de que se hablaba antes.
-        seed_messages = [*(history or []), {"role": "user", "content": task}]
-        outcome = await self._run_loop(seed_messages)
-        return self._store_outcome(context_id, task, outcome)
-
-    def has_pending(self, context_id: str) -> bool:
-        return context_id in self._pending
-
-    async def list_pending(self) -> list[dict[str, Any]]:
-        """Solo lectura, para el gestor de agentes — nunca expone credenciales.
-
-        Async por consistencia con el resto de agentes (ver mouse_agent.py)."""
-        return [
-            {
-                "context_id": context_id,
-                "agent_id": "remote_ops",
-                "kind": pending.kind,
-                "summary": (
-                    f"Diagnostico SSH pendiente de confirmar: {pending.device_name}"
-                    if pending.kind == "run_diagnostic"
-                    else pending.task
-                ),
-            }
-            for context_id, pending in self._pending.items()
-        ]
-
-    def pending_kind(self, context_id: str) -> str | None:
-        pending = self._pending.get(context_id)
-        return pending.kind if pending else None
-
-    def cancel(self, context_id: str) -> None:
-        self._pending.pop(context_id, None)
-
-    async def _run_diagnostic_and_record(self, pending: PendingRemoteOp) -> dict[str, Any]:
         if self._access is None:
             return {"task": pending.task, "is_done": False, "content": None, "error": "El acceso a dispositivos no esta disponible."}
 
         try:
-            conn = await self._access.get_connection(pending.device_id)
+            conn = await self._access.get_connection(device_id)
         except KeyError:
-            return {"task": pending.task, "is_done": False, "content": None, "error": f"Ya no encuentro '{pending.device_name}' en el CMDB."}
+            return {"task": pending.task, "is_done": False, "content": None, "error": f"Ya no encuentro '{device_name}' en el CMDB."}
         except PermissionError:
             return {"task": pending.task, "is_done": False, "content": None, "error": "El Vault esta bloqueado — desbloquealo desde la pestana Vault e intenta de nuevo."}
         except RuntimeError as exc:
@@ -336,8 +179,8 @@ class RemoteOpsAgent:
         except ValueError as exc:
             return {"task": pending.task, "is_done": False, "content": None, "error": str(exc)}
         except Exception as exc:
-            logger.exception("Fallo conectando a %s", pending.device_id)
-            return {"task": pending.task, "is_done": False, "content": None, "error": f"No se pudo conectar a '{pending.device_name}': {exc}"}
+            logger.exception("Fallo conectando a %s", device_id)
+            return {"task": pending.task, "is_done": False, "content": None, "error": f"No se pudo conectar a '{device_name}': {exc}"}
 
         raw_sections: list[str] = []
         try:
@@ -349,7 +192,7 @@ class RemoteOpsAgent:
                     except Exception as exc:
                         raw_sections.append(f"### {label}\n[error: {exc}]")
         except Exception as exc:
-            logger.exception("Fallo durante el diagnostico de %s", pending.device_id)
+            logger.exception("Fallo durante el diagnostico de %s", device_id)
             return {"task": pending.task, "is_done": False, "content": None, "error": f"El diagnostico se interrumpio: {exc}"}
 
         raw_output = "\n\n".join(raw_sections) if raw_sections else "Sin output de los comandos."
@@ -361,7 +204,7 @@ class RemoteOpsAgent:
 
                 prompt = (
                     f"Eres un experto en administracion de sistemas Linux. "
-                    f"El usuario pregunto por el estado de '{pending.device_name}'.\n\n"
+                    f"El usuario pregunto por el estado de '{device_name}'.\n\n"
                     f"Analiza este output de diagnostico real y responde de forma clara y "
                     f"concisa. Si hay problemas, indicalos y sugiere acciones correctivas. "
                     f"No inventes nada que no este en el output.\n\n"
@@ -376,33 +219,6 @@ class RemoteOpsAgent:
         from utils.logger import hito
         hito(
             "pepo.remote_ops | dispositivo=\"{dispositivo}\" | resultado=OK",
-            dispositivo=pending.device_name,
+            dispositivo=device_name,
         )
         return {"task": pending.task, "is_done": True, "content": content, "error": None}
-
-    async def confirm(self, context_id: str, user_reply: str | None = None) -> dict[str, Any] | None:
-        """Continua/ejecuta lo pendiente. `user_reply` es obligatorio si el pendiente es 'ask_user'."""
-        pending = self._pending.pop(context_id, None)
-        if pending is None:
-            return None
-
-        if pending.kind == "run_diagnostic":
-            return await self._run_diagnostic_and_record(pending)
-
-        if pending.kind == "ask_user":
-            pending.messages.append({
-                "role": "tool", "tool_call_id": pending.tool_call_id, "content": user_reply or "",
-            })
-            outcome = await self._run_loop(pending.messages)
-            stored = self._store_outcome(context_id, pending.task, outcome)
-            if stored["kind"] == "finish":
-                return {"task": pending.task, "is_done": True, "content": stored["summary"], "error": None}
-            if stored["kind"] == "ask_user":
-                return {"task": pending.task, "is_done": False, "content": None, "error": None, "next_question": stored["question"]}
-            if stored["kind"] == "run_diagnostic":
-                return {
-                    "task": pending.task, "is_done": False, "content": None, "error": None,
-                    "next_device_id": stored["device_id"], "next_device_name": stored["device_name"],
-                }
-
-        return None

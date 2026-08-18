@@ -628,6 +628,7 @@ class NexusCoordinator:
     ) -> ChatResponse:
         proposal = await self._remote_ops_agent.propose(context_key, payload.message, history=history)
         response = self._render_remote_ops_proposal(proposal)
+        redact = proposal.get("kind") == "ask_user_secret"
 
         await self._audit(
             flow="chat",
@@ -649,14 +650,15 @@ class NexusCoordinator:
             agent="remote-ops-agent",
             flow="chat",
             audit_id=audit_id,
+            redact_next_reply=redact,
         )
 
     def _render_remote_ops_proposal(self, proposal: dict[str, Any]) -> str:
         kind = proposal.get("kind")
-        if kind == "ask_user":
+        if kind in {"ask_user", "ask_user_secret"}:
             return proposal.get("question", "¿Puedes darme mas detalles?")
         if kind == "run_diagnostic":
-            device_name = proposal.get("device_name", "el dispositivo")
+            device_name = proposal.get("payload", {}).get("device_name", "el dispositivo")
             return (
                 f"He encontrado '{device_name}' en el CMDB con credenciales confirmadas en el Vault. "
                 f"¿Confirmas que me conecte por SSH y revise su estado (uptime, memoria, disco, procesos, logs)?"
@@ -670,18 +672,17 @@ class NexusCoordinator:
         context_key: str,
     ) -> ChatResponse:
         pending_kind = self._remote_ops_agent.pending_kind(context_key)
+        redact = False
 
-        if pending_kind == "ask_user":
+        if pending_kind in {"ask_user", "ask_user_secret"}:
             result = await self._remote_ops_agent.confirm(context_key, payload.message)
             if result is None:
                 response = "No había ninguna consulta pendiente."
             elif result.get("next_question"):
                 response = result["next_question"]
-            elif result.get("next_device_id"):
-                response = (
-                    f"He encontrado '{result.get('next_device_name')}' en el CMDB con credenciales confirmadas en el Vault. "
-                    f"¿Confirmas que me conecte por SSH y revise su estado?"
-                )
+                redact = result.get("next_kind") == "ask_user_secret"
+            elif result.get("next_kind") == "run_diagnostic":
+                response = self._render_remote_ops_proposal({"kind": "run_diagnostic", "payload": result.get("next_payload", {})})
             elif result.get("error"):
                 response = f"No lo he conseguido: {result['error']}"
             else:
@@ -722,6 +723,7 @@ class NexusCoordinator:
             agent="remote-ops-agent",
             flow="chat",
             audit_id=audit_id,
+            redact_next_reply=redact,
         )
 
     async def _handle_self_config_propose(

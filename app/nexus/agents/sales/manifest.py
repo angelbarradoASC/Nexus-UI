@@ -25,6 +25,11 @@ SALES_MANIFEST = AgentManifest(
             description="Decide el orden de fuentes y el fallback discovery.",
         ),
         AgentCapability(
+            capability_id="brief.verify",
+            name="Brief Verifier",
+            description="Comprueba de ida y vuelta que el brief representa fielmente el texto original, via LLM local.",
+        ),
+        AgentCapability(
             capability_id="queries.plan",
             name="Query Architect",
             description="Genera queries de bajo ruido y cobertura controlada.",
@@ -48,6 +53,7 @@ SALES_MANIFEST = AgentManifest(
     skill_ids=[
         "prospecting.guardrails",
         "prospecting.refine",
+        "prospecting.verify",
         "prospecting.plan_sources",
         "prospecting.plan_queries",
         "prospecting.search",

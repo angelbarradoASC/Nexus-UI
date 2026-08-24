@@ -268,24 +268,24 @@ def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
     )
 
 
-@router.post("/prospecting/interpret")
-async def interpret_brief(
-    payload: InterpretRequest,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+async def _run_interpret_llm(
+    text: str,
+    verticals_block: str,
+    verticals,
+    *,
+    extra_context: str = "",
 ) -> dict:
-    """Interpreta texto libre y devuelve parámetros de prospección."""
-    if not payload.text.strip():
-        raise HTTPException(status_code=400, detail="text is required")
-
+    """Una pasada de extraccion LLM (con fallback heuristico). Separado de la
+    ruta para poder reintentar con feedback sin duplicar la logica de parseo."""
     llm = get_router()
-    verticals_block = _verticals_context_block(prospecting)
+    user_content = text if not extra_context else f"{text}\n\n{extra_context}"
     response = None
     try:
         response = await asyncio.wait_for(
             llm.call(
                 messages=[
                     {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret") + "\n\n" + verticals_block},
-                    {"role": "user", "content": payload.text.strip()},
+                    {"role": "user", "content": user_content},
                 ],
                 tools=_INTERPRET_BRIEF_TOOL,
                 tool_choice={"type": "function", "function": {"name": "set_prospecting_brief"}},
@@ -303,7 +303,6 @@ async def interpret_brief(
         logger.warning("interpret | llm.call timeout global (18s) — usando fallback heurístico")
 
     brief = None
-
     if response is not None and not response.error and response.tool_calls:
         try:
             brief = json.loads(response.tool_calls[0]["function"]["arguments"] or "{}")
@@ -312,20 +311,57 @@ async def interpret_brief(
 
     # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura.
     if brief is None:
-        brief = _fallback_parse(payload.text, prospecting.verticals)
+        brief = _fallback_parse(text, verticals)
     brief["vertical_created"] = False
     # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
     if "location" in brief and not brief.get("city"):
         brief["city"] = brief.pop("location")
     if "quantity" in brief and not brief.get("desired_count"):
         brief["desired_count"] = brief.pop("quantity")
+    return brief
+
+
+@router.post("/prospecting/interpret")
+async def interpret_brief(
+    payload: InterpretRequest,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    """Interpreta texto libre y devuelve parámetros de prospección.
+
+    Con verificacion de ida y vuelta: tras extraer y orquestar, se comprueba
+    (via LLM local, sales.prospecting.verify_decomposition) si el brief
+    representa fielmente el texto original. Si no — y solo una vez, para no
+    colgar la respuesta — se reintenta la extraccion pasandole al LLM los
+    problemas concretos detectados, en vez de devolver un brief que "se da
+    por bueno" sin serlo."""
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+
+    text = payload.text.strip()
+    verticals_block = _verticals_context_block(prospecting)
+
+    brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals)
     # Cierre canonico compartido con /prospecting/chat: resuelve vertical contra
     # BBDD (puerta unica) + orquesta. Ver ProspectingAgentService.finalize_brief.
-    orchestrated = await prospecting.finalize_brief(brief, original_text=payload.text.strip())
+    orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+    verification = orchestrated.get("orchestration", {}).get("verification", {})
+
+    retried = False
+    if verification.get("issues") and not verification.get("consistent", True):
+        logger.info("interpret | brief inconsistente con el texto original, reintentando 1 vez | issues={}", verification["issues"])
+        feedback = (
+            "La primera extraccion de este mismo texto tenia estos problemas — corrigelos:\n- "
+            + "\n- ".join(verification["issues"])
+        )
+        brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals, extra_context=feedback)
+        orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+        retried = True
+
     return {
         "status": "ok",
         "brief": orchestrated["brief"],
         "orchestration": orchestrated["orchestration"],
+        "retried_after_verification": retried,
     }
 
 

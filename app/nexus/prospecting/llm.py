@@ -73,6 +73,13 @@ class LocalLLMClient:
         }
         if self._settings.model:
             payload["model"] = self._settings.model
+        if self._settings.provider == "ollama":
+            # Qwen3 (y otros modelos hibridos de razonamiento) piensan por
+            # defecto — verificado en vivo: 21.9s y 206 tokens para responder
+            # "ok" a un prompt trivial, frente a 9.8s reales con think=False.
+            # Para extraccion/verificacion JSON no hace falta razonamiento
+            # visible, solo la respuesta final.
+            payload["think"] = False
 
         last_error: Exception | None = None
         for _ in range(max(self._settings.retries, 1)):

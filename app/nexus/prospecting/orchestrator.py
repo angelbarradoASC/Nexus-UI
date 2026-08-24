@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from nexus.prompts import resolve_prompt_sync
@@ -34,7 +35,17 @@ class ProspectingPromptOrchestrator:
         original_text: str = "",
     ) -> dict[str, Any]:
         orchestration_trace = self._autonomy.bootstrap(brief)
-        guardian = await self._assess_brief_guardrails(brief, original_text=original_text)
+
+        # guardian y refinement parten los dos del brief SIN refinar — no hay
+        # dependencia real entre ellos, solo se leian en serie. Con el LLM
+        # local del 150 tardando 10-20s+ por llamada real (verificado en
+        # vivo), encadenar 4 llamadas secuenciales revienta cualquier
+        # timeout razonable. En paralelo, la ronda tarda lo que tarde la mas
+        # lenta de las dos, no la suma.
+        guardian, refinement = await asyncio.gather(
+            self._assess_brief_guardrails(brief, original_text=original_text),
+            self._refine_with_guardrails(brief, original_text=original_text),
+        )
         orchestration_trace = self._autonomy.update_agent(
             orchestration_trace,
             brief=brief,
@@ -46,9 +57,14 @@ class ProspectingPromptOrchestrator:
             inputs={"original_text_present": bool(original_text.strip())},
             outputs={"geography_label": brief.geography_label, "represented_by": brief.represented_by},
         )
-        refinement = await self._refine_with_guardrails(brief, original_text=original_text)
         refined_brief = self._apply_refinement(brief, refinement)
-        source_strategy_notes = await self._explain_source_strategy(refined_brief)
+
+        # source_strategy y verify parten los dos del brief YA refinado, y
+        # tampoco dependen entre si — misma logica que arriba.
+        source_strategy_notes, verification = await asyncio.gather(
+            self._explain_source_strategy(refined_brief),
+            self.verify_brief(refined_brief, original_text=original_text),
+        )
         orchestration_trace = self._autonomy.update_agent(
             orchestration_trace,
             brief=refined_brief,
@@ -89,12 +105,32 @@ class ProspectingPromptOrchestrator:
                 "source_bias": source_strategy_notes.get("source_bias", ""),
             },
         )
+        orchestration_trace = self._autonomy.update_agent(
+            orchestration_trace,
+            brief=refined_brief,
+            agent_id="brief_verifier",
+            status="completed",
+            summary=(
+                "El brief representa fielmente lo pedido."
+                if verification["consistent"]
+                else "El brief NO coincide del todo con lo pedido — revisar antes de buscar."
+            ),
+            warnings=verification["issues"],
+            guardrails_applied=["Verificacion de ida y vuelta contra el texto original, vía LLM local (192.168.68.150)."],
+            inputs={"original_text_present": bool(original_text.strip())},
+            outputs={
+                "consistent": verification["consistent"],
+                "missing_info": verification["missing_info"],
+                "confidence": verification["confidence"],
+            },
+        )
         return {
             "brief": refined_brief.to_dict(),
             "orchestration": {
                 "refinement_applied": bool(refinement.get("_applied")),
                 "refinement_notes": refinement.get("notes", ""),
                 "source_plan": source_plan,
+                "verification": verification,
                 "autonomous_agents": self._autonomy.snapshot(orchestration_trace),
                 "preserved_fields": [
                     "vertical",
@@ -107,6 +143,48 @@ class ProspectingPromptOrchestrator:
                     "dry_run",
                 ],
             },
+        }
+
+    async def verify_brief(self, brief: ProspectingBrief, *, original_text: str = "") -> dict[str, Any]:
+        """Verificacion de ida y vuelta: le devuelve al LLM local (qwen3:8b en
+        el servidor 150 — barato, ya conectado) el brief estructurado junto
+        con el texto original y le pide que juzgue si de verdad representa lo
+        pedido, no que lo mejore. Es un segundo juicio independiente del
+        modelo que hizo la extraccion (interpret, en Groq L2) — reduce que
+        "se den las cosas por buenas" porque ahora hay una segunda opinion
+        real, no solo el mismo modelo revisando su propio trabajo."""
+        default = {"consistent": True, "issues": [], "missing_info": [], "confidence": 1.0}
+        if not original_text.strip() or not getattr(self._llm, "enabled", False):
+            return default
+
+        response = await self._llm.extract_json(
+            system_prompt=resolve_prompt_sync("sales.prospecting.verify_decomposition"),
+            user_prompt=(
+                f"Texto original del usuario:\n{original_text}\n\n"
+                f"Brief estructurado extraido:\n{brief.to_dict()}"
+            ),
+            schema_hint={
+                "consistent": True,
+                "issues": [],
+                "missing_info": ["ciudad no especificada"],
+                "confidence": 0.8,
+            },
+        )
+        if not response:
+            # El LLM local no respondio (timeout, modelo caido...) — no se
+            # puede verificar, pero eso no es lo mismo que "esta mal". Se
+            # marca con confianza baja para que quede visible, no se oculta.
+            return {"consistent": True, "issues": [], "missing_info": [], "confidence": 0.0}
+
+        try:
+            confidence = float(response.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        return {
+            "consistent": bool(response.get("consistent", True)),
+            "issues": self._dedupe_strings(response.get("issues") or []),
+            "missing_info": self._dedupe_strings(response.get("missing_info") or []),
+            "confidence": max(0.0, min(1.0, confidence)),
         }
 
     def plan_sources(

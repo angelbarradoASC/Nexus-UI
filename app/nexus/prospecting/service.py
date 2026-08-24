@@ -215,12 +215,16 @@ class ProspectingAgentService:
         raw_brief.setdefault("dry_run", True)
         raw_brief.setdefault("must_have", [])
         try:
+            # orchestrate() lanza 4 llamadas LLM en 2 rondas paralelas
+            # (guardian+refiner, luego source_strategy+verifier) — con
+            # LOCAL_LLM_TIMEOUT=30s por llamada, el peor caso real son 2
+            # rondas de 30s = 60s, no 4 llamadas en serie. 75s da margen.
             return await asyncio.wait_for(
                 self.orchestrate_brief(raw_brief, original_text=original_text),
-                timeout=4.0,
+                timeout=75.0,
             )
         except asyncio.TimeoutError:
-            _logger.warning("finalize_brief | orchestrate_brief timeout (4s) — devolviendo brief base")
+            _logger.warning("finalize_brief | orchestrate_brief timeout (75s) — devolviendo brief base")
             return {
                 "brief": raw_brief,
                 "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []},

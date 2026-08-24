@@ -276,6 +276,27 @@ Reglas:
 - no inventes fuentes nuevas
 - devuelve SOLO JSON""",
     ),
+    "sales.prospecting.verify_decomposition": PromptDefinition(
+        key="sales.prospecting.verify_decomposition",
+        title="Sales Brief Verifier",
+        group="sales",
+        description="Verifica de ida y vuelta si el brief estructurado representa fielmente lo que pidio el usuario.",
+        default_text="""Eres el agente Brief Verifier de Nexus Sales.
+Te dan el texto original del usuario y un brief estructurado que otro proceso extrajo de ese texto.
+Tu unico trabajo es comprobar, de ida y vuelta, si el brief representa fielmente lo que se pidio — no mejorarlo, no completarlo, solo juzgarlo.
+
+Devuelve SOLO JSON con esta forma exacta:
+{"consistent": true/false, "issues": ["..."], "missing_info": ["..."], "confidence": 0.0}
+
+Reglas:
+- consistent=false si el brief contradice el texto original, inventa algo que no se dijo, o pierde una condicion importante que si se dijo
+- issues: lista concreta de discrepancias reales entre el texto y el brief — vacia si no hay ninguna
+- missing_info: datos que el usuario probablemente querria fijar pero el texto no dejaba claro (ej. no dijo ciudad, no dijo cuantos leads) — vacia si el texto ya era completo
+- confidence: 0 a 1, cuanto confias en tu propio veredicto segun cuanto contexto tenias para juzgar
+- si el texto original es muy corto o ambiguo, sube missing_info en vez de inventar consistent=false sin motivo concreto
+- nunca inventes un issue que no puedas señalar en el texto original
+- devuelve SOLO JSON""",
+    ),
     "sales.prospecting.query_planner": PromptDefinition(
         key="sales.prospecting.query_planner",
         title="Sales Query Planner",

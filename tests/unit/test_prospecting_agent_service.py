@@ -823,8 +823,10 @@ async def test_orchestrate_brief_refines_prompt_and_plans_sources(prospecting_cf
     assert orchestrated["brief"]["must_have"] == ["Reservas online", "Email directo"]
     assert orchestrated["orchestration"]["refinement_applied"] is True
     assert orchestrated["orchestration"]["source_plan"]["sources"][0]["name"] == "google_places"
-    assert orchestrated["orchestration"]["autonomous_agents"]["completed_agents"] == 3
+    # 4 desde que se añadió brief_verifier (verificación de ida y vuelta contra el texto original).
+    assert orchestrated["orchestration"]["autonomous_agents"]["completed_agents"] == 4
     assert any(agent["agent_id"] == "brief_guardian" for agent in orchestrated["orchestration"]["autonomous_agents"]["agents"])
+    assert any(agent["agent_id"] == "brief_verifier" for agent in orchestrated["orchestration"]["autonomous_agents"]["agents"])
 
 
 @pytest.mark.asyncio

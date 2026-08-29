@@ -77,8 +77,13 @@ class DesktopSkillRouter:
     _SKILL_PERMISSION = {
         "fichaje.entrada": PermissionLevel.ASSIST,
         "fichaje.salida": PermissionLevel.ASSIST,
-        "assets.crear_ticket_operador": PermissionLevel.ASSIST,
-        "jira.crear_ticket": PermissionLevel.ASSIST,
+        # OPERATE (no ASSIST): crear un ticket escribe en un sistema externo
+        # visible para un humano — mismo nivel que mouse_speed/system_task,
+        # que si piden confirmacion antes de ejecutar. Bug real detectado:
+        # una pregunta de "que permisos tienes" se clasifico como esto y
+        # creo un ticket real sin que nadie lo pidiera ni confirmara.
+        "assets.crear_ticket_operador": PermissionLevel.OPERATE,
+        "jira.crear_ticket": PermissionLevel.OPERATE,
         "jira.consultar_ticket": PermissionLevel.ASSIST,
         "monitoring.estado": PermissionLevel.OBSERVE,
         "ssh.diagnostico": PermissionLevel.OPERATE,

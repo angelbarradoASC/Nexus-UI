@@ -24,13 +24,15 @@ from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
-from nexus.prospecting.api_budget import BudgetExceededError, PlacesApiBudget
+from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, PlacesApiBudget
 from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES
 from nexus.utils.geocoding import GeocodeCache, haversine_km
 from nexus.utils.text import normalize_text as _normalize_text
+from nexus.prospecting.opportunity_scoring import OpportunityScorer
 from nexus.prospecting.repository import ProspectingRepository
 from nexus.prospecting.scoring import ProspectScorer
 from nexus.prospecting.validators import DomainValidator, EmailValidator, MXValidator
+from nexus.prospecting.web_audit import WebAuditor
 
 
 class ProspectingAgentService:
@@ -51,6 +53,8 @@ class ProspectingAgentService:
         domain_validator: DomainValidator | None = None,
         mx_validator: MXValidator | None = None,
         scorer: ProspectScorer | None = None,
+        auditor: WebAuditor | None = None,
+        opportunity_scorer: OpportunityScorer | None = None,
     ) -> None:
         self._cfg = cfg
         self._repository = repository or ProspectingRepository(cfg.prospecting_data_dir)
@@ -106,7 +110,17 @@ class ProspectingAgentService:
         self._domain_validator = domain_validator or DomainValidator()
         self._mx_validator = mx_validator or MXValidator()
         self._scorer = scorer or ProspectScorer()
+        self._auditor = auditor or WebAuditor(
+            timeout_seconds=float(cfg.prospecting_http_timeout_seconds),
+            obscura_binary_path=getattr(cfg, "obscura_binary_path", "") or "",
+        )
+        self._opportunity_scorer = opportunity_scorer or OpportunityScorer()
         self._budget = PlacesApiBudget(cfg.prospecting_data_dir)
+        self._brave_budget = BraveApiBudget(
+            cfg.prospecting_data_dir,
+            soft_limit=getattr(cfg, "brave_search_soft_limit", None),
+            hard_limit=getattr(cfg, "brave_search_hard_limit", None),
+        )
         self._orchestrator = ProspectingPromptOrchestrator(
             llm_client=self._llm,
             brave_enabled=self._brave.enabled,
@@ -125,6 +139,12 @@ class ProspectingAgentService:
         models.py y el listado en vivo contra el CRM.
         """
         return self._verticals
+
+    @property
+    def local_llm(self) -> LocalLLMClient:
+        """Expuesto para que otros consumidores (ej. CampaignDecomposer) reutilicen
+        la misma conexion al LLM local en vez de construir una segunda."""
+        return self._llm
 
     # ── Logging ──────────────────────────────────────────────────────────────
 
@@ -191,6 +211,42 @@ class ProspectingAgentService:
         brief = self._normalize_brief(request)
         return await self._orchestrator.orchestrate(brief, original_text=original_text)
 
+    async def finalize_brief(self, raw_brief: dict[str, Any], *, original_text: str) -> dict[str, Any]:
+        """Punto único de cierre de un brief crudo, venga de /interpret o de
+        /chat: resuelve el vertical contra BBDD (nunca confía en el slug que
+        haya decidido el LLM o la heurística tal cual — "puerta única"),
+        rellena los defaults mínimos, y pasa por orchestrate_brief para que
+        ambos caminos reciban el mismo refinamiento de guardrails/fuentes.
+        Antes solo /interpret hacía esto — /chat construía su propio brief
+        ad-hoc sin resolver vertical contra BBDD ni orquestar."""
+        raw_brief["vertical"] = self.verticals.resolve(raw_brief.get("vertical", ""), fallback_text=original_text).slug
+        raw_brief.setdefault("desired_count", 20)
+        raw_brief.setdefault("minimum_score", 40)
+        raw_brief.setdefault("represented_by", "assets")
+        raw_brief.setdefault("dry_run", True)
+        raw_brief.setdefault("must_have", [])
+        try:
+            # orchestrate() lanza 4 llamadas LLM en 2 rondas paralelas
+            # (guardian+refiner, luego source_strategy+verifier) — con
+            # LOCAL_LLM_TIMEOUT=30s por llamada, el peor caso real son 2
+            # rondas de 30s = 60s, no 4 llamadas en serie. 75s da margen.
+            return await asyncio.wait_for(
+                self.orchestrate_brief(raw_brief, original_text=original_text),
+                timeout=75.0,
+            )
+        except asyncio.TimeoutError:
+            _logger.warning("finalize_brief | orchestrate_brief timeout (75s) — devolviendo brief base")
+            return {
+                "brief": raw_brief,
+                "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []},
+            }
+        except Exception as exc:
+            _logger.error("finalize_brief | orchestrate_brief error — {}", exc)
+            return {
+                "brief": raw_brief,
+                "orchestration": {"refinement_applied": False, "refinement_notes": str(exc)[:100], "source_plan": {}, "autonomous_agents": [], "preserved_fields": []},
+            }
+
     async def resume_run(self, run_id: str) -> dict[str, Any]:
         run = await self._repository.get_run(run_id)
         if run is None:
@@ -211,8 +267,14 @@ class ProspectingAgentService:
         return self._run_summary(run)
 
     def get_budget(self) -> dict:
-        """Return current month's API budget status (synchronous snapshot)."""
-        return self._budget.status()
+        """Return current month's API budget status (synchronous snapshot).
+
+        Places se mantiene en el nivel superior (compatibilidad con el JS
+        existente, que ya lee calls/hard_limit/remaining/status de aqui
+        directamente) — Brave se añade anidado bajo "brave", mismo shape."""
+        status = self._budget.status()
+        status["brave"] = self._brave_budget.status()
+        return status
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         run = await self._repository.get_run(run_id)
@@ -245,6 +307,7 @@ class ProspectingAgentService:
         min_score: int | None = None,
         crm_state: str | None = None,
         vertical: str | None = None,
+        lead_stage: str | None = None,
     ) -> dict[str, Any]:
         runs = await self._repository.load_runs()
         results: list[dict[str, Any]] = []
@@ -253,11 +316,13 @@ class ProspectingAgentService:
                 continue
             if vertical and (run.get("brief") or {}).get("vertical") != vertical:
                 continue
-            results.extend(run.get("results", []))
+            results.extend({**item, "run_id": run.get("run_id")} for item in run.get("results", []))
         if min_score is not None:
             results = [item for item in results if int(item.get("score", 0)) >= min_score]
         if crm_state:
             results = [item for item in results if str(item.get("crm_state", "")).lower() == crm_state.lower()]
+        if lead_stage:
+            results = [item for item in results if str(item.get("lead_stage", "")).upper() == lead_stage.upper()]
         return {"status": "success", "results": results}
 
     async def list_discarded(self, *, run_id: str | None = None, vertical: str | None = None) -> dict[str, Any]:
@@ -270,6 +335,20 @@ class ProspectingAgentService:
                 continue
             discarded.extend(run.get("discarded", []))
         return {"status": "success", "discarded": discarded}
+
+    async def mark_lead_stage(self, result_id: str, lead_stage: str) -> dict[str, Any]:
+        """Fija lead_stage (CONTACTED, REPLIED, OPPORTUNITY...) sobre un result ya
+        existente. Unico punto donde algo externo a _execute_run (hoy:
+        CampaignAgent tras un envio outreach) puede avanzar la etapa de un lead —
+        mantiene el campo gobernado desde un solo sitio."""
+        runs = await self._repository.load_runs()
+        located = self._locate_result(runs, result_id)
+        if located is None:
+            return {"status": "not_found", "result_id": result_id}
+        _, _, result = located
+        result["lead_stage"] = lead_stage
+        await self._repository.save_runs(runs)
+        return {"status": "ok", "result_id": result_id, "lead_stage": lead_stage}
 
     async def push_result_to_crm(self, result_id: str, *, dry_run: bool = True) -> dict[str, Any]:
         runs = await self._repository.load_runs()
@@ -605,7 +684,8 @@ class ProspectingAgentService:
                     self._log(run, f"Duplicado CRM: {cname[:50]}", level="warning")
 
                 run["status"] = "scoring"
-                score_payload = self._scorer.score(extracted, vertical=brief.vertical, minimum_score=brief.minimum_score)
+                scoring_vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+                score_payload = self._scorer.score(extracted, vertical=scoring_vertical, minimum_score=brief.minimum_score)
                 extracted.update(score_payload)
                 extracted["crm_blockers"] = self._crm_blockers(extracted, brief)
                 extracted["crm_ready"] = not extracted["crm_blockers"] and bool(extracted.get("accepted"))
@@ -618,11 +698,17 @@ class ProspectingAgentService:
                     run["summary"]["crm_ready"] += 1
 
                 if extracted["accepted"]:
+                    extracted["lead_stage"] = "DISCOVERED"
+                    if brief.enrich_candidates:
+                        await self._enrich_accepted_candidate(run, extracted, brief)
+                    else:
+                        extracted["lead_stage"] = "QUALIFIED"
                     run["results"].append(extracted)
                     run["summary"]["usable_results"] += 1
                     self._log(
                         run,
-                        f"Aceptado: {extracted.get('name', cname)[:50]} | score={score} | {priority} | email={bool(extracted.get('email'))} | phone={bool(extracted.get('phone'))}",
+                        f"Aceptado: {extracted.get('name', cname)[:50]} | score={score} | {priority} | email={bool(extracted.get('email'))} | phone={bool(extracted.get('phone'))}"
+                        + (f" | oportunidad={extracted.get('opportunity_score')}" if brief.enrich_candidates else ""),
                         crm_ready=extracted.get("crm_ready"),
                     )
                 else:
@@ -814,6 +900,170 @@ class ProspectingAgentService:
                 result.setdefault("notes", [])
                 if isinstance(result["notes"], list):
                     result["notes"].append(f"Contacto LinkedIn (DDG snippet): {contact.get('source_url','')}")
+                # Interfaz preparada para el "decisor" (paso 8 del flujo de campaña) —
+                # linkedin_url ya venia en el snippet DDG pero se tiraba; ahora se deja
+                # estructurado. Sin navegacion real de LinkedIn: confidence solo puede
+                # ser "scraped" (snippet real) o "unknown", nunca "inferred" por LLM.
+                result["decision_maker"] = {
+                    "name": contact.get("name", ""),
+                    "role": contact.get("role", ""),
+                    "linkedin_url": contact.get("linkedin_url", ""),
+                    "confidence": "scraped",
+                    "source": contact.get("source_url", ""),
+                }
+
+    # ── Auditoria tecnica + perfil + propuesta + score de oportunidad ─────────
+    # Solo se ejecuta si brief.enrich_candidates es True (lo activa la campana
+    # autonoma, no el uso normal de Sales) — cada paso va en su propio
+    # try/except, igual que _extract_candidate: un fallo aqui degrada el
+    # candidato pero nunca tumba el run completo.
+
+    async def _enrich_accepted_candidate(
+        self,
+        run: dict[str, Any],
+        extracted: dict[str, Any],
+        brief: ProspectingBrief,
+    ) -> None:
+        cname = extracted.get("name", "?")[:50]
+        extracted["lead_stage"] = "AUDITING"
+        technical_audit = await self._run_technical_audit(extracted)
+        extracted["technical_audit"] = technical_audit
+        if technical_audit:
+            self._log(run, f"Auditoria tecnica: {cname} | {len(technical_audit.get('findings', []))} hallazgos")
+        else:
+            self._log(run, f"Auditoria tecnica no disponible para {cname}", level="warning")
+
+        extracted["lead_stage"] = "ANALYZED"
+        business_profile = await self._build_business_profile(extracted, technical_audit, brief)
+        extracted["business_profile"] = business_profile
+        proposal = await self._draft_proposal(extracted, technical_audit, business_profile, brief)
+        extracted["proposal"] = proposal
+
+        opportunity = self._opportunity_scorer.score(
+            data_quality_score=int(extracted.get("score", 0)),
+            technical_audit=technical_audit,
+            business_profile=business_profile,
+            proposal=proposal,
+        )
+        extracted.update(opportunity)
+        if opportunity["opportunity_score"] >= brief.opportunity_threshold:
+            extracted["lead_stage"] = "QUALIFIED"
+        else:
+            extracted["lead_stage"] = "REJECTED"
+        self._log(
+            run,
+            f"Score de oportunidad: {cname} | {opportunity['opportunity_score']} ({opportunity['opportunity_confidence']}) | umbral={brief.opportunity_threshold}",
+        )
+
+    async def _run_technical_audit(self, extracted: dict[str, Any]) -> dict[str, Any] | None:
+        website = extracted.get("website") or ""
+        if not website:
+            return None
+        try:
+            return await self._auditor.audit(website)
+        except Exception:
+            return None
+
+    async def _build_business_profile(
+        self,
+        extracted: dict[str, Any],
+        technical_audit: dict[str, Any] | None,
+        brief: ProspectingBrief,
+    ) -> dict[str, Any]:
+        empty = {
+            "what_they_do": "", "target_audience": "", "value_prop": "",
+            "friction_points": [], "digital_maturity": "", "improvement_opportunities": [],
+        }
+        if not self._llm.enabled:
+            return empty
+        try:
+            response = await self._llm.extract_json(
+                system_prompt=resolve_prompt_sync("sales.prospecting.business_profile"),
+                user_prompt=(
+                    f"Empresa: {extracted.get('name', '')}\n"
+                    f"Vertical: {brief.vertical}\n"
+                    f"Texto extraido de la web: {' '.join(extracted.get('notes', []))[:1500]}\n"
+                    f"Señales de calidad: {extracted.get('quality_signals', [])}\n"
+                    f"Auditoria tecnica: {technical_audit or 'no disponible'}\n"
+                ),
+                schema_hint=empty,
+            )
+        except Exception:
+            return empty
+        if not response:
+            return empty
+        return {
+            "what_they_do": str(response.get("what_they_do") or "").strip(),
+            "target_audience": str(response.get("target_audience") or "").strip(),
+            "value_prop": str(response.get("value_prop") or "").strip(),
+            "friction_points": self._parse_list(response.get("friction_points")),
+            "digital_maturity": str(response.get("digital_maturity") or "").strip().lower(),
+            "improvement_opportunities": self._parse_list(response.get("improvement_opportunities")),
+        }
+
+    _PROPOSAL_TYPES = {
+        "renovacion_visual", "mejora_ux", "optimizacion_movil", "mejora_velocidad",
+        "mejores_ctas", "formularios", "captacion_leads", "chatbot",
+        "automatizacion_whatsapp", "respuestas_llm", "reservas", "faqs_automaticas",
+        "mejora_seo",
+    }
+
+    async def _draft_proposal(
+        self,
+        extracted: dict[str, Any],
+        technical_audit: dict[str, Any] | None,
+        business_profile: dict[str, Any],
+        brief: ProspectingBrief,
+    ) -> dict[str, Any]:
+        empty = {"items": [], "summary": ""}
+        if not self._llm.enabled:
+            return empty
+        findings = (technical_audit or {}).get("findings") or []
+        friction = business_profile.get("friction_points") or []
+        available_evidence = [*findings, *friction]
+        if not available_evidence:
+            # Sin hallazgos reales no hay nada que proponer — prohibido inventar
+            # problemas (restriccion explicita del usuario).
+            return empty
+        try:
+            response = await self._llm.extract_json(
+                system_prompt=resolve_prompt_sync("sales.prospecting.proposal"),
+                user_prompt=(
+                    f"Empresa: {extracted.get('name', '')}\n"
+                    f"Perfil de negocio: {business_profile}\n"
+                    f"Hallazgos tecnicos: {findings}\n"
+                    f"Fricciones detectadas: {friction}\n"
+                ),
+                schema_hint={"items": [{"type": "mejora_ux", "observation": "", "recommendation": ""}], "summary": ""},
+            )
+        except Exception:
+            return empty
+        if not response:
+            return empty
+        evidence_blob = _normalize_text(" ".join(str(item) for item in available_evidence))
+        items: list[dict[str, Any]] = []
+        for raw_item in (response.get("items") or [])[:4]:
+            if not isinstance(raw_item, dict):
+                continue
+            item_type = str(raw_item.get("type") or "").strip()
+            observation = str(raw_item.get("observation") or "").strip()
+            recommendation = str(raw_item.get("recommendation") or "").strip()
+            if item_type not in self._PROPOSAL_TYPES or not observation or not recommendation:
+                continue
+            # Grounding: la observacion debe citar algo que de verdad esta en los
+            # hallazgos — si no, se descarta (evita propuestas genericas o inventadas).
+            observation_tokens = [tok for tok in _normalize_text(observation).split() if len(tok) > 4]
+            grounded = any(tok in evidence_blob for tok in observation_tokens)
+            items.append({
+                "type": item_type,
+                "observation": observation,
+                "recommendation": recommendation,
+                "grounded": grounded,
+            })
+        return {
+            "items": [item for item in items if item["grounded"]],
+            "summary": str(response.get("summary") or "").strip(),
+        }
 
     async def _discover_with_places(
         self,
@@ -873,6 +1123,11 @@ class ProspectingAgentService:
         self._log(run, f"Brave Search: {len(queries)} queries", queries=queries[:5])
         raw_hits: list[dict[str, Any]] = []
         for query in queries:
+            try:
+                self._brave_budget.check_or_raise()
+            except BudgetExceededError as exc:
+                self._log(run, f"{exc} — se detiene el discovery de Brave, se conserva lo ya encontrado.", level="error")
+                break
             payload = await self._brave.search(
                 run_id=run_id,
                 query=query,
@@ -880,6 +1135,7 @@ class ProspectingAgentService:
                 language=brief.language,
                 count=min(max(brief.desired_count, 5), 20),
             )
+            await self._brave_budget.increment(1)
             batch = [
                 {
                     "query": query,
@@ -1064,6 +1320,12 @@ class ProspectingAgentService:
         if not query:
             return {}
 
+        try:
+            self._brave_budget.check_or_raise()
+        except BudgetExceededError as exc:
+            self._log(run, f"{exc} — se salta el enriquecimiento Brave de '{base_name[:50]}'.", level="error")
+            return {}
+
         payload = await self._brave.search(
             run_id=run_id,
             query=query,
@@ -1071,6 +1333,7 @@ class ProspectingAgentService:
             language=brief.language,
             count=5,
         )
+        await self._brave_budget.increment(1)
         results = list(payload.get("results", []))[:3]
         run.setdefault("enrichment_queries", [])
         if query not in run["enrichment_queries"]:
@@ -1404,6 +1667,8 @@ class ProspectingAgentService:
             max_employees=payload.max_employees,
             industrial_zone=payload.industrial_zone.strip(),
             max_run_minutes=max(2, min(payload.max_run_minutes, 30)),
+            opportunity_threshold=max(0, min(payload.opportunity_threshold, 100)),
+            enrich_candidates=payload.enrich_candidates,
         )
 
     def _parse_list(self, value: Any) -> list[str]:

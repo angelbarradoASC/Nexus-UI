@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from desktop.runtime.capabilities import PermissionLevel
 from desktop.runtime.skills import DesktopSkill, DesktopSkillCatalogue
@@ -54,6 +55,7 @@ class DesktopSkillRouter:
         "assets.crear_ticket_operador": [],
         "jira.crear_ticket": [],
         "jira.consultar_ticket": [],
+        "monitoring.estado": [],
         "ssh.diagnostico": ["desktop.commands.run"],
         "docker.prediagnostico": ["desktop.docker.inspect"],
         "linux.prediagnostico": ["infra.linux.observe"],
@@ -64,6 +66,10 @@ class DesktopSkillRouter:
         "sales.prospecting": [],
         "desktop.mouse_speed": ["desktop.system.control"],
         "desktop.system_task": ["desktop.system.control"],
+        "vault.add_credential": ["vault.write"],
+        "crm.configurar": ["crm.configure"],
+        "mcp.conectar": ["mcp.connect"],
+        "mcp.usar": ["mcp.call"],
         "general.respuesta": [],
     }
 
@@ -73,6 +79,7 @@ class DesktopSkillRouter:
         "assets.crear_ticket_operador": PermissionLevel.ASSIST,
         "jira.crear_ticket": PermissionLevel.ASSIST,
         "jira.consultar_ticket": PermissionLevel.ASSIST,
+        "monitoring.estado": PermissionLevel.OBSERVE,
         "ssh.diagnostico": PermissionLevel.OPERATE,
         "docker.prediagnostico": PermissionLevel.ASSIST,
         "linux.prediagnostico": PermissionLevel.ASSIST,
@@ -83,11 +90,21 @@ class DesktopSkillRouter:
         "sales.prospecting": PermissionLevel.ASSIST,
         "desktop.mouse_speed": PermissionLevel.OPERATE,
         "desktop.system_task": PermissionLevel.OPERATE,
+        "vault.add_credential": PermissionLevel.ADMIN,
+        "crm.configurar": PermissionLevel.ADMIN,
+        "mcp.conectar": PermissionLevel.ADMIN,
+        "mcp.usar": PermissionLevel.OPERATE,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
-    def __init__(self, catalogue: DesktopSkillCatalogue | None = None) -> None:
+    def __init__(
+        self,
+        catalogue: DesktopSkillCatalogue | None = None,
+        *,
+        settings_store: Any | None = None,
+    ) -> None:
         self.catalogue = catalogue or DesktopSkillCatalogue()
+        self._settings_store = settings_store
 
     def resolve(self, user_input: str) -> SkillResolution:
         text = user_input.strip()
@@ -124,7 +141,10 @@ class DesktopSkillRouter:
         """
         text = user_input.strip()
         entities = self._extract_entities(text)
-        messages = [{"role": "system", "content": resolve_prompt_sync("pepo.skill_intention")}]
+        system_prompt = resolve_prompt_sync("pepo.skill_intention").replace(
+            "__SKILLS_CATALOGUE__", self.catalogue.as_prompt_options()
+        )
+        messages = [{"role": "system", "content": system_prompt}]
         if history:
             messages.extend(history[-6:])
         messages.append({"role": "user", "content": text})
@@ -174,6 +194,8 @@ class DesktopSkillRouter:
             return "fichaje.salida", 0.98, "La peticion encaja con una accion de fichaje de salida."
         if entities.get("ticket_id") and any(term in lowered for term in ("ticket", "estado", "como esta", "como esta", "consulta")):
             return "jira.consultar_ticket", 0.97, "Se ha detectado una consulta clara sobre un ticket existente."
+        if any(term in lowered for term in ("hay incidentes", "hay alertas", "hay alarmas", "que incidentes", "que alertas", "algun incidente", "alguna alerta", "estado de las alertas", "estado de los incidentes")):
+            return "monitoring.estado", 0.93, "Pregunta por el estado actual de alertas/incidentes, sin pedir crear nada."
         if any(term in lowered for term in ("crear ticket", "crea ticket", "crea un ticket", "abre ticket", "abre un ticket", "abrir ticket", "abre una incidencia", "registra incidencia", "escalalo a ticket", "escalalo como ticket")) and any(
             term in lowered
             for term in (
@@ -231,6 +253,20 @@ class DesktopSkillRouter:
             term in lowered for term in ("velocidad", "sensibilidad", "rapido", "rápido", "lento", "va lento", "va rapido")
         ):
             return "desktop.mouse_speed", 0.85, "La peticion pide ajustar la velocidad del raton de este ordenador."
+        if any(term in lowered for term in ("vault", "credenciales", "contraseña de", "usuario y contraseña")) and any(
+            term in lowered for term in ("añade", "anade", "guarda", "registra", "da de alta", "mete", "añadir", "anadir")
+        ):
+            return "vault.add_credential", 0.92, "La peticion pide guardar credenciales/dispositivo en el Vault."
+        if "crm" in lowered and any(
+            term in lowered for term in ("conecta", "conéctate", "conectate", "configura", "configurar", "credenciales del crm", "cambia la conexion", "cambia la conexión")
+        ):
+            return "crm.configurar", 0.92, "La peticion pide configurar la conexion a un CRM."
+        if "mcp" in lowered and any(
+            term in lowered for term in ("conecta", "conéctate", "conectate", "añade", "anade", "agrega", "da de alta", "registra", "nuevo servidor")
+        ):
+            return "mcp.conectar", 0.92, "La peticion pide conectar un servidor MCP nuevo."
+        if "mcp" in lowered:
+            return "mcp.usar", 0.85, "La peticion menciona MCP sin pedir conectar uno nuevo — se interpreta como usar un servidor ya conectado."
         if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
             "cerca de" in lowered
             or any(
@@ -316,7 +352,20 @@ class DesktopSkillRouter:
         rationale: str,
         entities: dict,
     ) -> SkillResolution:
-        permission = self._SKILL_PERMISSION.get(skill_id, PermissionLevel.ASSIST)
+        override = self._settings_store.get_override(skill_id) if self._settings_store else None
+        if override and override.get("enabled") is False and skill_id != "general.respuesta":
+            return self._build_resolution(
+                "general.respuesta", 0.35,
+                f"Skill '{skill_id}' desactivado desde el gestor de agentes.",
+                entities,
+            )
+
+        permission_value = override.get("permission_level") if override else None
+        permission = (
+            PermissionLevel(permission_value)
+            if permission_value is not None
+            else self._SKILL_PERMISSION.get(skill_id, PermissionLevel.ASSIST)
+        )
         capabilities = list(self._SKILL_CAPABILITIES.get(skill_id, []))
         execution_mode = "assist"
         needs_confirmation = False

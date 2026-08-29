@@ -35,6 +35,7 @@ class AssistantExecutionResponse:
     resolution: dict[str, Any]
     source_surface: str
     run_id: str | None = None
+    redact_next_reply: bool = False
 
     @classmethod
     def from_chat_response(
@@ -54,6 +55,7 @@ class AssistantExecutionResponse:
                 resolution=resolution,
                 source_surface=source_surface,
                 run_id=response.get("run_id"),
+                redact_next_reply=response.get("redact_next_reply", False),
             )
         return cls(
             status=response.status,
@@ -64,6 +66,7 @@ class AssistantExecutionResponse:
             resolution=resolution,
             source_surface=source_surface,
             run_id=getattr(response, "run_id", None),
+            redact_next_reply=getattr(response, "redact_next_reply", False),
         )
 
 

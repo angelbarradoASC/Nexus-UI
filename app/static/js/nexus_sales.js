@@ -684,40 +684,45 @@ async function loadDiscarded() {
     }
 }
 
+function _renderBudgetBanner(bannerId, providerLabel, statusData) {
+    const banner = document.getElementById(bannerId);
+    if (!banner || !statusData) return;
+    const { calls, hard_limit, remaining, status } = statusData;
+
+    if (status === "ok") {
+        banner.className = "api-budget-banner hidden-btn";
+        banner.innerHTML = "";
+        return;
+    }
+
+    const pct = Math.min(100, Math.round((calls / hard_limit) * 100));
+    const isBlocked = status === "blocked";
+    const icon = isBlocked ? "🚫" : "⚠️";
+    const title = isBlocked
+        ? `PROSPECCIÓN BLOQUEADA — Límite mensual alcanzado (${calls}/${hard_limit} llamadas)`
+        : `AVISO: ${calls} de ${hard_limit} llamadas a ${providerLabel} este mes`;
+    const subtitle = isBlocked
+        ? `Se han consumido todas las llamadas del mes. La prospección con ${providerLabel} está desactivada hasta el mes siguiente.`
+        : `Quedan ${remaining} llamadas. Límite de corte en ${hard_limit}.`;
+
+    banner.innerHTML = `
+        <span class="budget-banner-icon">${icon}</span>
+        <span class="budget-banner-text">
+            <strong>${title}</strong>
+            ${subtitle}
+        </span>
+        <span class="budget-banner-bar">
+            <span class="budget-banner-fill" style="width:${pct}%"></span>
+        </span>
+    `;
+    banner.className = `api-budget-banner budget-${status}`;
+}
+
 async function checkApiBudget() {
-    const banner = document.getElementById("apiBudgetBanner");
-    if (!banner) return;
     try {
         const data = await requestJson("/api/nexus/prospecting/api-budget");
-        const { calls, hard_limit, remaining, status } = data;
-
-        if (status === "ok") {
-            banner.className = "api-budget-banner hidden-btn";
-            banner.innerHTML = "";
-            return;
-        }
-
-        const pct = Math.min(100, Math.round((calls / hard_limit) * 100));
-        const isBlocked = status === "blocked";
-        const icon = isBlocked ? "🚫" : "⚠️";
-        const title = isBlocked
-            ? `PROSPECCIÓN BLOQUEADA — Límite mensual alcanzado (${calls}/${hard_limit} llamadas)`
-            : `AVISO: ${calls} de ${hard_limit} llamadas a Google Places este mes`;
-        const subtitle = isBlocked
-            ? `Se han consumido todas las llamadas gratuitas. La prospección está desactivada hasta el mes siguiente.`
-            : `Quedan ${remaining} llamadas. Límite de corte en ${hard_limit}.`;
-
-        banner.innerHTML = `
-            <span class="budget-banner-icon">${icon}</span>
-            <span class="budget-banner-text">
-                <strong>${title}</strong>
-                ${subtitle}
-            </span>
-            <span class="budget-banner-bar">
-                <span class="budget-banner-fill" style="width:${pct}%"></span>
-            </span>
-        `;
-        banner.className = `api-budget-banner budget-${status}`;
+        _renderBudgetBanner("apiBudgetBanner", "Google Places", data);
+        _renderBudgetBanner("braveApiBudgetBanner", "Brave Search", data.brave);
     } catch (_) { /* silencioso */ }
 }
 

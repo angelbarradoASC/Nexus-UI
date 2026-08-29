@@ -1,0 +1,34 @@
+{
+  "id": "monitoring.estado",
+  "name": "Estado de alertas e incidentes",
+  "description": "Pregunta informativa sobre si HAY alertas activas o incidentes abiertos ahora mismo, o pide un resumen del estado. Es SOLO LECTURA, nunca crea nada. Preguntar si hay incidentes/alertas NO es crear un ticket — eso es assets.crear_ticket_operador, que requiere intención explícita de crear/abrir/registrar algo nuevo.",
+  "execution": {
+    "where": "server",
+    "timeout": 15,
+    "retry": 0
+  },
+  "llm": {
+    "required": false
+  },
+  "outputs": {
+    "alerts_active": "int",
+    "incidents_open": "int"
+  },
+  "triggers": [
+    "hay incidentes",
+    "hay alertas",
+    "hay alarmas",
+    "que incidentes",
+    "que alertas",
+    "algun incidente",
+    "alguna alerta",
+    "estado de las alertas",
+    "estado de los incidentes",
+    "como esta todo"
+  ],
+  "examples": [
+    "¿hay incidentes o alertas que requieran atencion inmediata?",
+    "¿como esta todo ahora mismo?",
+    "¿algo urgente?"
+  ]
+}

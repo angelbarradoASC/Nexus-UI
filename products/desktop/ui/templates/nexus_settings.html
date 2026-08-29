@@ -7,14 +7,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
-    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260715g">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
+    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260829a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
 </head>
 <body>
-    <main class="shell">
+    <main class="workspace workspace-settings">
         <header class="shell-topbar">
-            <div class="shell-titlebar">
+            <div class="brand-cluster brand-cluster-compact">
                 <h1>Configuracion</h1>
             </div>
             {% include "partials/desktop_nav.html" %}
@@ -405,6 +405,15 @@
                                     <span>Rate limit (req/s)</span>
                                     <input id="braveRateLimit" type="number" step="0.1" min="0" max="60" placeholder="1.0" />
                                 </label>
+                                <label class="field">
+                                    <span>Límite aviso (llamadas/mes)</span>
+                                    <input id="braveSoftLimit" type="number" step="1" min="0" placeholder="800 (defecto)" />
+                                </label>
+                                <label class="field">
+                                    <span>Límite corte (llamadas/mes)</span>
+                                    <input id="braveHardLimit" type="number" step="1" min="0" placeholder="1000 (defecto)" />
+                                </label>
+                                <p class="field-hint">Brave ya no da un nivel gratis universal — estos límites bloquean la prospección con Brave al alcanzarlos, para no consumir crédito de más.</p>
                             </div>
                         </div>
                         <div class="module-section">

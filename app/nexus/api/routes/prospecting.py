@@ -43,6 +43,55 @@ class InterpretRequest(BaseModel):
     text: str
 
 
+# Propiedades del "brief de prospección" compartidas por las dos vías de
+# extracción por LLM (tool-call único de /interpret y tool finish_brief del
+# bucle de /chat) — antes cada una definía su propia copia del mismo esquema,
+# ya desincronizadas entre si (finish_brief no tenia las descripciones
+# detalladas de interpret). Una sola definicion, cada tool añade solo lo que
+# le es propio (interpret: rango de empleados/poligono/dry_run; chat: reply).
+_PROSPECTING_BRIEF_CORE_PROPERTIES: dict[str, dict] = {
+    "vertical": {
+        "type": "string",
+        "description": (
+            "Usa EXACTAMENTE uno de los slugs listados en 'VERTICALES DISPONIBLES' "
+            "del contexto de este mensaje. Nunca inventes un slug nuevo — si ninguno "
+            "encaja de verdad, usa 'custom'."
+        ),
+    },
+    "target_description": {
+        "type": "string",
+        "description": (
+            "SOLO el sintagma nominal que describe el tipo de negocio, "
+            "ej. 'restaurantes de lujo', 'asesorias fiscales'. NUNCA copies la frase completa "
+            "del usuario ni incluyas verbos de instruccion (quiero que, busca, dame...) "
+            "ni la geografia ni la marca representada."
+        ),
+    },
+    "city": {
+        "type": "string",
+        "description": (
+            "SOLO el nombre propio de la ciudad/localidad, capitalizado (ej. 'Salamanca', 'Toledo'). "
+            "Si el texto dice 'la zona de X' o 'cerca de X', la ciudad es X, nunca la palabra 'zona'."
+        ),
+    },
+    "province": {
+        "type": "string",
+        "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
+    },
+    "region": {"type": "string"},
+    "radius_km": {
+        "type": "integer",
+        "description": (
+            "SOLO si el usuario menciona explicitamente un radio o distancia "
+            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
+            "entre 1 y 250. Si no lo menciona, omite este campo."
+        ),
+    },
+    "desired_count": {"type": "integer"},
+    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
+    "must_have": {"type": "array", "items": {"type": "string"}},
+}
+
 # Mismo mecanismo que el bucle de PEPO (desktop/local_agents/system_task_agent.py):
 # tool calling forzado en vez de "pedir JSON en texto y esperar" — mas robusto con
 # modelos de razonamiento (el contenido de razonamiento no puede corromper el JSON
@@ -56,46 +105,7 @@ _INTERPRET_BRIEF_TOOL = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "vertical": {
-                        "type": "string",
-                        "description": (
-                            "Usa EXACTAMENTE uno de los slugs listados en 'VERTICALES DISPONIBLES' "
-                            "del contexto de este mensaje. Nunca inventes un slug nuevo — si ninguno "
-                            "encaja de verdad, usa 'custom'."
-                        ),
-                    },
-                    "target_description": {
-                        "type": "string",
-                        "description": (
-                            "SOLO el sintagma nominal que describe el tipo de negocio, "
-                            "ej. 'restaurantes de lujo', 'asesorias fiscales'. NUNCA copies la frase completa "
-                            "del usuario ni incluyas verbos de instruccion (quiero que, busca, dame...) "
-                            "ni la geografia ni la marca representada."
-                        ),
-                    },
-                    "city": {
-                        "type": "string",
-                        "description": (
-                            "SOLO el nombre propio de la ciudad/localidad, capitalizado (ej. 'Salamanca', 'Toledo'). "
-                            "Si el texto dice 'la zona de X' o 'cerca de X', la ciudad es X, nunca la palabra 'zona'."
-                        ),
-                    },
-                    "province": {
-                        "type": "string",
-                        "description": "SOLO el nombre propio de la provincia. Nunca la marca representada (ej. 'Automato', 'Assets') ni un verbo.",
-                    },
-                    "region": {"type": "string"},
-                    "radius_km": {
-                        "type": "integer",
-                        "description": (
-                            "SOLO si el usuario menciona explicitamente un radio o distancia "
-                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
-                            "entre 1 y 250. Si no lo menciona, omite este campo."
-                        ),
-                    },
-                    "desired_count": {"type": "integer"},
-                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
-                    "must_have": {"type": "array", "items": {"type": "string"}},
+                    **_PROSPECTING_BRIEF_CORE_PROPERTIES,
                     "min_employees": {"type": "integer"},
                     "max_employees": {"type": "integer"},
                     "industrial_zone": {"type": "string"},
@@ -258,24 +268,24 @@ def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
     )
 
 
-@router.post("/prospecting/interpret")
-async def interpret_brief(
-    payload: InterpretRequest,
-    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+async def _run_interpret_llm(
+    text: str,
+    verticals_block: str,
+    verticals,
+    *,
+    extra_context: str = "",
 ) -> dict:
-    """Interpreta texto libre y devuelve parámetros de prospección."""
-    if not payload.text.strip():
-        raise HTTPException(status_code=400, detail="text is required")
-
+    """Una pasada de extraccion LLM (con fallback heuristico). Separado de la
+    ruta para poder reintentar con feedback sin duplicar la logica de parseo."""
     llm = get_router()
-    verticals_block = _verticals_context_block(prospecting)
+    user_content = text if not extra_context else f"{text}\n\n{extra_context}"
     response = None
     try:
         response = await asyncio.wait_for(
             llm.call(
                 messages=[
                     {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret") + "\n\n" + verticals_block},
-                    {"role": "user", "content": payload.text.strip()},
+                    {"role": "user", "content": user_content},
                 ],
                 tools=_INTERPRET_BRIEF_TOOL,
                 tool_choice={"type": "function", "function": {"name": "set_prospecting_brief"}},
@@ -293,7 +303,6 @@ async def interpret_brief(
         logger.warning("interpret | llm.call timeout global (18s) — usando fallback heurístico")
 
     brief = None
-
     if response is not None and not response.error and response.tool_calls:
         try:
             brief = json.loads(response.tool_calls[0]["function"]["arguments"] or "{}")
@@ -302,38 +311,57 @@ async def interpret_brief(
 
     # Fallback por reglas si el LLM falla, no llama a la tool, o devuelve basura.
     if brief is None:
-        brief = _fallback_parse(payload.text, prospecting.verticals)
-    # Puerta unica: aunque el LLM SI haya respondido, su slug se resuelve contra
-    # BBDD igualmente — asi nunca puede colar un vertical inventado que no
-    # exista en sales_verticals (resolve() respeta el slug tal cual si ya es
-    # exacto, asi que esto no cambia nada cuando el LLM elige bien).
-    brief["vertical"] = prospecting.verticals.resolve(brief.get("vertical", ""), fallback_text=payload.text).slug
+        brief = _fallback_parse(text, verticals)
     brief["vertical_created"] = False
     # Mapear campos del LLM (location/quantity) a los que espera _normalize_brief
     if "location" in brief and not brief.get("city"):
         brief["city"] = brief.pop("location")
     if "quantity" in brief and not brief.get("desired_count"):
         brief["desired_count"] = brief.pop("quantity")
-    brief.setdefault("desired_count", 20)
-    brief.setdefault("minimum_score", 40)
-    brief.setdefault("represented_by", "assets")
-    brief.setdefault("dry_run", True)
-    brief.setdefault("must_have", [])
-    try:
-        orchestrated = await asyncio.wait_for(
-            prospecting.orchestrate_brief(brief, original_text=payload.text.strip()),
-            timeout=4.0,
+    return brief
+
+
+@router.post("/prospecting/interpret")
+async def interpret_brief(
+    payload: InterpretRequest,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict:
+    """Interpreta texto libre y devuelve parámetros de prospección.
+
+    Con verificacion de ida y vuelta: tras extraer y orquestar, se comprueba
+    (via LLM local, sales.prospecting.verify_decomposition) si el brief
+    representa fielmente el texto original. Si no — y solo una vez, para no
+    colgar la respuesta — se reintenta la extraccion pasandole al LLM los
+    problemas concretos detectados, en vez de devolver un brief que "se da
+    por bueno" sin serlo."""
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text is required")
+
+    text = payload.text.strip()
+    verticals_block = _verticals_context_block(prospecting)
+
+    brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals)
+    # Cierre canonico compartido con /prospecting/chat: resuelve vertical contra
+    # BBDD (puerta unica) + orquesta. Ver ProspectingAgentService.finalize_brief.
+    orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+    verification = orchestrated.get("orchestration", {}).get("verification", {})
+
+    retried = False
+    if verification.get("issues") and not verification.get("consistent", True):
+        logger.info("interpret | brief inconsistente con el texto original, reintentando 1 vez | issues={}", verification["issues"])
+        feedback = (
+            "La primera extraccion de este mismo texto tenia estos problemas — corrigelos:\n- "
+            + "\n- ".join(verification["issues"])
         )
-    except asyncio.TimeoutError:
-        logger.warning("interpret | orchestrate_brief timeout (4s) — devolviendo brief base")
-        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": "timeout", "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
-    except Exception as exc:
-        logger.error("interpret | orchestrate_brief error — {}", exc)
-        orchestrated = {"brief": brief, "orchestration": {"refinement_applied": False, "refinement_notes": str(exc)[:100], "source_plan": {}, "autonomous_agents": [], "preserved_fields": []}}
+        brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals, extra_context=feedback)
+        orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+        retried = True
+
     return {
         "status": "ok",
         "brief": orchestrated["brief"],
         "orchestration": orchestrated["orchestration"],
+        "retried_after_verification": retried,
     }
 
 
@@ -377,23 +405,8 @@ _PROSPECTING_CHAT_TOOLS = [
                 "type": "object",
                 "properties": {
                     "reply": {"type": "string", "description": "Resumen breve y natural de lo que se va a buscar."},
-                    "vertical": {"type": "string"},
-                    "city": {"type": "string"},
-                    "province": {"type": "string"},
-                    "region": {"type": "string"},
-                    "target_description": {"type": "string"},
-                    "radius_km": {
-                        "type": "integer",
-                        "description": (
-                            "SOLO si el usuario menciona explicitamente un radio o distancia "
-                            "('en un radio de 20km', 'a menos de 15km de X'). Numero en kilometros, "
-                            "entre 1 y 250. Si no lo menciona, omite este campo."
-                        ),
-                    },
-                    "desired_count": {"type": "integer"},
+                    **_PROSPECTING_BRIEF_CORE_PROPERTIES,
                     "minimum_score": {"type": "integer"},
-                    "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
-                    "must_have": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["reply", "vertical", "city"],
             },
@@ -547,14 +560,15 @@ async def prospecting_chat(
             reply += " ⚠ La búsqueda de prueba encontró pocos resultados directos — puede que la zona tenga poca presencia online o que el run sea corto."
 
     if status == "ready" and brief:
+        # Fallback de UX propio de chat (no de /interpret): si no hay provincia,
+        # usar la ciudad — se conserva tal cual, es previo a este refactor.
         brief.setdefault("province", brief.get("city", ""))
-        brief.setdefault("region", "")
-        brief.setdefault("target_description", "")
-        brief.setdefault("desired_count", 20)
-        brief.setdefault("minimum_score", 40)
-        brief.setdefault("represented_by", "assets")
-        brief.setdefault("must_have", [])
-        brief.setdefault("dry_run", True)
+        # Cierre canonico compartido con /prospecting/interpret: resuelve vertical
+        # contra BBDD (puerta unica, antes solo lo hacia /interpret) + orquesta
+        # (antes /chat nunca pasaba por el refinamiento de guardrails/fuentes).
+        combined_text = " ".join(m["content"] for m in history if m["role"] == "user")
+        finalized = await prospecting.finalize_brief(brief, original_text=combined_text)
+        brief = finalized["brief"]
 
     from utils.logger import hito
     if status == "ready" and brief:
@@ -635,9 +649,12 @@ async def list_results(
     min_score: int | None = Query(default=None, ge=0, le=100),
     crm_state: str | None = Query(default=None),
     vertical: str | None = Query(default=None),
+    lead_stage: str | None = Query(default=None),
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> ProspectingResultListResponse:
-    return await prospecting.list_results(run_id=run_id, min_score=min_score, crm_state=crm_state, vertical=vertical)
+    return await prospecting.list_results(
+        run_id=run_id, min_score=min_score, crm_state=crm_state, vertical=vertical, lead_stage=lead_stage
+    )
 
 
 @router.get("/prospecting/discarded", response_model=ProspectingDiscardedListResponse)
@@ -672,30 +689,6 @@ async def push_valid_results_to_crm(
     if response.get("status") == "not_found":
         raise HTTPException(status_code=404, detail=f"Run {payload.run_id} not found")
     return response
-
-
-# ── Search Decomposer (Fase 1 del pipeline agéntico) ─────────────────────────
-
-class DecomposeRequest(BaseModel):
-    text: str
-    requested_by: str = "anonymous"
-
-
-@router.post("/prospecting/decompose")
-async def decompose_search(payload: DecomposeRequest) -> dict:
-    """Descompone una petición en lenguaje natural en un search intent estructurado.
-
-    Nuevo endpoint standalone — no toca el pipeline existente.
-    Fase 1 del pipeline agéntico de búsqueda.
-    """
-    from agents.search_decomposer_agent import SearchDecomposerAgent
-
-    if not payload.text.strip():
-        raise HTTPException(status_code=400, detail="text is required")
-
-    agent = SearchDecomposerAgent()
-    result = await agent.decompose(payload.text, requested_by=payload.requested_by)
-    return {"status": "ok", **result}
 
 
 # ── Verticales comerciales (CRUD) ─────────────────────────────────────────────

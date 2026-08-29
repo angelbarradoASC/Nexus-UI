@@ -186,6 +186,14 @@ class OutreachManager:
                     "job_title": str(item.get("job_title", "")).strip(),
                     "company_domain": str(item.get("company_domain", "")).strip(),
                     "notes": str(item.get("notes", "")).strip(),
+                    # Opcionales — solo presentes cuando el prospecto viene de una
+                    # campana autonoma (ver CampaignAgent._map_prospect). Permiten
+                    # personalizar el mensaje con un hallazgo real en vez de solo
+                    # la proposition/cta generica de la campana.
+                    "run_id": str(item.get("run_id", "")).strip(),
+                    "result_id": str(item.get("result_id", "")).strip(),
+                    "business_profile": item.get("business_profile") or {},
+                    "proposal_items": item.get("proposal_items") or [],
                 }
             )
         if not cleaned:
@@ -230,6 +238,8 @@ class OutreachManager:
             for event in prospect.get("history", [])
         ]
 
+        personalization = self._personalization_block(prospect)
+
         messages = [
             {"role": "system", "content": resolve_prompt_sync("outreach.system")},
             {
@@ -246,6 +256,7 @@ class OutreachManager:
                     f"Cargo: {prospect.get('job_title') or 'sin dato'}\n"
                     f"Dominio: {prospect.get('company_domain') or 'sin dato'}\n"
                     f"Notas: {prospect.get('notes') or 'sin notas'}\n\n"
+                    f"{personalization}"
                     f"Historial de contactos previos: {json.dumps(safe_history, ensure_ascii=False)}"
                 ),
             },
@@ -261,6 +272,39 @@ class OutreachManager:
         if result.error:
             return self._fallback_draft(campaign, prospect, step_index)
         return self._parse_draft_content(result.content) or self._fallback_draft(campaign, prospect, step_index)
+
+    def _personalization_block(self, prospect: dict[str, Any]) -> str:
+        """Bloque opcional con hallazgo real + propuesta concreta, solo presente
+        cuando el prospecto viene de una campana autonoma (ver
+        CampaignAgent._map_prospect en prospecting/campaign_agent.py). Sin esto,
+        el mensaje se apoya solo en la proposition/cta generica de la campana —
+        este bloque es lo que permite el tono "he visto vuestra web y hay cosas
+        mejorables" en vez de una plantilla generica.
+        """
+        profile = prospect.get("business_profile") or {}
+        proposal_items = prospect.get("proposal_items") or []
+        if not profile and not proposal_items:
+            return ""
+
+        lines = ["Hallazgo real sobre este negocio (usalo, no lo ignores ni lo generalices):"]
+        what_they_do = str(profile.get("what_they_do") or "").strip()
+        if what_they_do:
+            lines.append(f"- Que hacen: {what_they_do}")
+        friction = profile.get("friction_points") or []
+        for item in friction[:2]:
+            lines.append(f"- Friccion detectada: {item}")
+        for item in proposal_items[:2]:
+            observation = str(item.get("observation") or "").strip()
+            recommendation = str(item.get("recommendation") or "").strip()
+            if observation:
+                lines.append(f"- Observacion concreta: {observation}")
+            if recommendation:
+                lines.append(f"- Propuesta concreta: {recommendation}")
+        lines.append(
+            "Usa como maximo UNO de estos hallazgos, el mas relevante, de forma natural — "
+            "no los listes todos ni suenes a informe tecnico.\n"
+        )
+        return "\n".join(lines) + "\n\n"
 
     def _parse_draft_content(self, content: str) -> dict[str, str] | None:
         try:

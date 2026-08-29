@@ -1,0 +1,32 @@
+{
+  "id": "desktop.mouse_speed",
+  "name": "Ajustar velocidad del ratón",
+  "description": "Sube, baja, maximiza, minimiza o resetea la velocidad del puntero del ratón/mouse de ESTE ordenador (el PC donde corre Nexus Desktop). Solo la velocidad del ratón — cualquier otra cosa sobre este PC es desktop.system_task.",
+  "execution": {
+    "where": "desktop",
+    "timeout": 5,
+    "retry": 0
+  },
+  "llm": {
+    "required": false
+  },
+  "inputs": {
+    "direction": {"type": "str", "required": true, "options": ["up", "down", "max", "min", "reset"]}
+  },
+  "outputs": {
+    "previous": "int",
+    "applied": "int"
+  },
+  "triggers": [
+    "baja la velocidad de mi raton",
+    "sube la velocidad del raton",
+    "el cursor va muy lento",
+    "sube la sensibilidad del mouse",
+    "resetea la velocidad del raton",
+    "el puntero va muy rapido"
+  ],
+  "examples": [
+    "puedes bajar un poco la velocidad de mi raton?",
+    "sube al maximo la velocidad del cursor"
+  ]
+}

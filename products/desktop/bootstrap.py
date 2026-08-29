@@ -11,6 +11,7 @@ from config import cfg
 from nexus.api.dependencies.auth import build_runtime
 from nexus.api.routes.audit import router as audit_router
 from nexus.api.routes.agents import router as agents_router
+from nexus.api.routes.campaign import router as campaign_router
 from nexus.api.routes.chat import router as chat_router
 from nexus.api.routes.crm import router as crm_router
 from nexus.api.routes.assets_ops import router as assets_ops_router
@@ -50,6 +51,7 @@ def register_desktop_product(app: FastAPI) -> None:
     app.include_router(crm_router, prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(outreach_router, prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(prospecting_router, prefix="/api/nexus", tags=["desktop-nexus"])
+    app.include_router(campaign_router, prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(prompts_router,  prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(approvals_router, prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(cmdb_router,      prefix="/api/nexus", tags=["desktop-nexus"])

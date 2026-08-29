@@ -148,9 +148,28 @@ class AppConfig(BaseSettings):
     local_llm_api_key: str = "not-needed"
     local_llm_timeout: int = Field(default=60, ge=5, le=600)
     local_llm_retries: int = Field(default=2, ge=0, le=10)
+    # Mismo servidor que local_llm_* (192.168.68.150) pero un modelo
+    # DISTINTO — nomic-embed-text genera embeddings, qwen3:8b no. Se usa
+    # para el chequeo de ida y vuelta de la Campaña (similitud coseno
+    # entre la intencion limpia y lo que el LLM local reconstruye).
+    local_embeddings_enabled: bool = False
+    local_embeddings_model: str = "nomic-embed-text"
+    local_embeddings_timeout: int = Field(default=120, ge=5, le=600)
+    # Timeout PROPIO para la reconstruccion de la Campaña (verify_decompose) —
+    # deliberadamente separado de local_llm_timeout (30s, ajustado para el
+    # chat interactivo de Sales, donde alguien espera). Aqui el usuario dijo
+    # explicitamente que no le importa esperar — la GPU compartida del 150
+    # a veces tarda mas de 30s bajo carga (verificado en vivo).
+    local_llm_campaign_timeout: int = Field(default=300, ge=5, le=1800)
     brave_search_api_key: str | None = None
     brave_search_enabled: bool = False
     brave_search_rate_limit: float = Field(default=1.0, ge=0.0, le=60.0)
+    # Brave dejo de dar un nivel gratis universal en 2026 (verificado en
+    # vivo: cuentas nuevas solo tienen $5/mes en creditos, ~1000 queries) —
+    # control ferreo de volumen, configurable desde /nexus/settings, no fijo
+    # en codigo. None = usa los defaults de api_budget.py.
+    brave_search_soft_limit: int | None = Field(default=None, ge=0, le=1_000_000)
+    brave_search_hard_limit: int | None = Field(default=None, ge=0, le=1_000_000)
     google_places_api_key: str | None = None
     google_places_enabled: bool = False
     google_places_rate_limit: float = Field(default=0.5, ge=0.0, le=10.0)

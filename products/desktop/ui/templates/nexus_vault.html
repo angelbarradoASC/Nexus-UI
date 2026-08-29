@@ -8,81 +8,84 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
-    <link rel="stylesheet" href="/static/css/nexus_vault.css?v=20260611">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
+    <link rel="stylesheet" href="/static/css/nexus_vault.css?v=20260810c">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
 </head>
 <body>
-    <main class="shell">
+    <main class="workspace workspace-vault">
         <header class="shell-topbar">
-            <div class="shell-titlebar">
-                <h1>Open-Nexus</h1>
+            <div class="brand-cluster brand-cluster-compact">
+                <h1>Vault</h1>
             </div>
             {% include "partials/desktop_nav.html" %}
         </header>
 
-        <!-- ── Vault bloqueado / sin inicializar ── -->
-        <div id="vaultLockScreen" class="vault-lock-screen" style="display:none">
-            <div class="vault-lock-card">
-                <div class="vault-lock-icon" id="vaultLockIcon">🔒</div>
-                <h2 id="vaultLockTitle">Vault bloqueado</h2>
-                <p id="vaultLockDesc">Introduce la contraseña maestra para acceder a las credenciales.</p>
-                <form id="vaultUnlockForm" autocomplete="off">
-                    <input
-                        id="masterPasswordInput"
-                        type="password"
-                        class="vault-master-input"
-                        placeholder="Contraseña maestra"
-                        autocomplete="new-password"
-                        spellcheck="false"
-                    />
-                    <button type="submit" class="btn btn-primary" id="vaultUnlockBtn">
-                        Desbloquear
-                    </button>
-                    <p id="vaultUnlockError" class="vault-error" style="display:none"></p>
-                </form>
-            </div>
-        </div>
+        <div class="vault-content-area">
 
-        <!-- ── Vault desbloqueado ── -->
-        <div id="vaultMain" class="vault-body" style="display:none">
-
-            <!-- Barra de estado del vault -->
-            <div class="vault-statusbar">
-                <span class="vault-status-badge unlocked">DESBLOQUEADO</span>
-                <span class="vault-statusbar-info">Credenciales cifradas con AES-256 · Solo accesibles en memoria</span>
-                <div class="vault-statusbar-actions">
-                    <button class="btn btn-sm btn-ghost" onclick="openDeviceModal()">+ Añadir dispositivo</button>
-                    <button class="btn btn-sm btn-danger" onclick="lockVault()">Bloquear vault</button>
+            <!-- ── Vault bloqueado / sin inicializar ── -->
+            <div id="vaultLockScreen" class="vault-lock-screen" style="display:none">
+                <div class="vault-lock-card">
+                    <div class="vault-lock-icon" id="vaultLockIcon">🔒</div>
+                    <h2 id="vaultLockTitle">Vault bloqueado</h2>
+                    <p id="vaultLockDesc">Introduce la contraseña maestra para acceder a las credenciales.</p>
+                    <form id="vaultUnlockForm" autocomplete="off">
+                        <input
+                            id="masterPasswordInput"
+                            type="password"
+                            class="vault-master-input"
+                            placeholder="Contraseña maestra"
+                            autocomplete="new-password"
+                            spellcheck="false"
+                        />
+                        <button type="submit" class="btn btn-primary" id="vaultUnlockBtn">
+                            Desbloquear
+                        </button>
+                        <p id="vaultUnlockError" class="vault-error" style="display:none"></p>
+                    </form>
                 </div>
             </div>
 
-            <!-- Tabla de dispositivos -->
-            <section class="vault-section">
-                <div class="vault-section-head">
-                    <h2>Inventario de dispositivos</h2>
-                    <span id="deviceCount" class="vault-count">—</span>
-                </div>
-                <div class="vault-table-wrap">
-                    <table class="vault-table" id="devicesTable">
-                        <thead>
-                            <tr>
-                                <th>Nombre</th>
-                                <th>IP</th>
-                                <th>Tipo</th>
-                                <th>Protocolo</th>
-                                <th>OS</th>
-                                <th>Credencial</th>
-                                <th>Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody id="devicesBody">
-                            <tr><td colspan="7" class="vault-empty">Cargando dispositivos...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+            <!-- ── Vault desbloqueado ── -->
+            <div id="vaultMain" class="vault-body" style="display:none">
 
+                <!-- Barra de estado del vault -->
+                <div class="vault-statusbar">
+                    <span class="vault-status-badge unlocked">DESBLOQUEADO</span>
+                    <span class="vault-statusbar-info">Credenciales cifradas con AES-256 · Solo accesibles en memoria</span>
+                    <div class="vault-statusbar-actions">
+                        <button class="btn btn-sm btn-ghost" onclick="openDeviceModal()">+ Añadir dispositivo</button>
+                        <button class="btn btn-sm btn-danger" onclick="lockVault()">Bloquear vault</button>
+                    </div>
+                </div>
+
+                <!-- Tabla de dispositivos -->
+                <section class="vault-section">
+                    <div class="vault-section-head">
+                        <h2>Inventario de dispositivos</h2>
+                        <span id="deviceCount" class="vault-count">—</span>
+                    </div>
+                    <div class="vault-table-wrap">
+                        <table class="vault-table" id="devicesTable">
+                            <thead>
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>IP</th>
+                                    <th>Tipo</th>
+                                    <th>Protocolo</th>
+                                    <th>OS</th>
+                                    <th>Credencial</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="devicesBody">
+                                <tr><td colspan="7" class="vault-empty">Cargando dispositivos...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
         </div>
 
         <!-- ── Modal: Añadir / Editar dispositivo ── -->

@@ -8,25 +8,24 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/open_nexus.css?v=20260610">
+    <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
+    <link rel="stylesheet" href="/static/css/nexus_shell.css?v=20260810c">
 </head>
 <body>
-    <main class="shell">
+    <main class="workspace workspace-shell">
         <header class="shell-topbar">
-            <div class="shell-titlebar">
-                <div class="shell-brand">
-                    <img src="/static/nexus_anchor.png" alt="JAINA" class="shell-brand-mark" onerror="this.style.display='none'">
-                    <div class="shell-brand-copy">
-                        <p class="eyebrow eyebrow-tight">Part Of JAINA</p>
-                        <h1>Open-Nexus</h1>
-                    </div>
+            <div class="shell-brand">
+                <img src="/static/nexus_anchor.png" alt="JAINA" class="shell-brand-mark" onerror="this.style.display='none'">
+                <div class="shell-brand-copy">
+                    <p class="eyebrow eyebrow-tight">Part Of JAINA</p>
+                    <h1>Open-Nexus</h1>
                 </div>
             </div>
             {% include "partials/desktop_nav.html" %}
         </header>
 
-        <div class="shell-body">
+        <div class="shell-content-layout">
 
             <!-- Zona libre — pendiente de asignar -->
             <section class="zone-placeholder">
@@ -34,7 +33,7 @@
             </section>
 
             <!-- Mini chat IA -->
-            <section class="card mini-chat-panel">
+            <section class="shell-panel mini-chat-panel">
                 <div class="mini-chat-head">
                     <div>
                         <p class="eyebrow eyebrow-tight">Asistente</p>
@@ -51,7 +50,7 @@
 
             <!-- Panel de monitorizacion -->
             <aside class="monitoring-rail">
-                <section class="card monitoring-status-panel">
+                <section class="shell-panel monitoring-status-panel">
                     <p class="eyebrow eyebrow-tight">Recoleccion</p>
                     <h2>Estado</h2>
                     <div id="serviceStatusList" class="service-status-list">
@@ -59,7 +58,7 @@
                     </div>
                 </section>
 
-                <section class="card monitoring-alarms-panel">
+                <section class="shell-panel monitoring-alarms-panel">
                     <p class="eyebrow eyebrow-tight">Ultimas 5 alarmas</p>
                     <h2>Grafana</h2>
                     <div id="alarmsList" class="alarms-list">

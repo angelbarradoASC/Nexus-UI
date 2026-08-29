@@ -28,6 +28,12 @@ AUTONOMOUS_AGENT_SPECS: list[dict[str, Any]] = [
         "purpose": "Decide el orden y el papel de cada fuente de descubrimiento.",
     },
     {
+        "agent_id": "brief_verifier",
+        "title": "Brief Verifier",
+        "kind": "guardrail",
+        "purpose": "Comprueba de ida y vuelta que el brief representa fielmente lo pedido, antes de buscar nada.",
+    },
+    {
         "agent_id": "query_architect",
         "title": "Query Architect",
         "kind": "planner",

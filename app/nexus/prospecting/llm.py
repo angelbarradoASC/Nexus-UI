@@ -63,26 +63,41 @@ class LocalLLMClient:
         if self._dry_run or not self.enabled:
             return ""
 
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature if temperature is not None else self._settings.temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self._settings.max_tokens,
-        }
-        if self._settings.model:
-            payload["model"] = self._settings.model
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        temp = temperature if temperature is not None else self._settings.temperature
+        tokens = max_tokens if max_tokens is not None else self._settings.max_tokens
+
+        if self._settings.provider == "ollama":
+            # Endpoint NATIVO de Ollama, NO el compatible con OpenAI —
+            # verificado en vivo con una respuesta real (no solo un "ok"
+            # trivial): think=False via /v1/chat/completions NO elimina el
+            # razonamiento del todo, se cuela dentro de "content" y agota
+            # max_tokens ANTES de llegar a la respuesta real (bug real,
+            # encontrado 2026-08-29). Via /api/chat nativo, think=False lo
+            # elimina limpio — mismo modelo, misma llamada, cero fugas.
+            base = (self._settings.base_url or "").rstrip("/").removesuffix("/v1")
+            endpoint = f"{base}/api/chat"
+            payload: dict[str, Any] = {
+                "model": self._settings.model,
+                "messages": messages,
+                "stream": False,
+                "think": False,
+                "options": {"temperature": temp, "num_predict": tokens},
+            }
+        else:
+            endpoint = self._endpoint("/chat/completions")
+            payload = {"messages": messages, "temperature": temp, "max_tokens": tokens}
+            if self._settings.model:
+                payload["model"] = self._settings.model
 
         last_error: Exception | None = None
         for _ in range(max(self._settings.retries, 1)):
             try:
                 async with httpx.AsyncClient(timeout=self._settings.timeout) as client:
-                    response = await client.post(
-                        self._endpoint("/chat/completions"),
-                        headers=self._headers(),
-                        json=payload,
-                    )
+                    response = await client.post(endpoint, headers=self._headers(), json=payload)
                     response.raise_for_status()
                     data = response.json()
                     if message := data.get("message"):

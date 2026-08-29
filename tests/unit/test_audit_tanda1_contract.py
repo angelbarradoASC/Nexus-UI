@@ -47,18 +47,21 @@ def _load_desktop_backend(tmp_path: Path):
         importlib.reload(config_module)
         app_module = importlib.reload(desktop_app_module)
         local_state_module.build_desktop_provider_secret_store = lambda: secret_store
-        app_module._get_desktop_local_state = lambda: DesktopLocalState(
-            DesktopSettings.from_env(),
-            provider_secret_store=secret_store,
-        )
 
         @asynccontextmanager
         async def _noop_lifespan(_app):
             yield
 
         app_module.app.router.lifespan_context = _noop_lifespan
-        app_module._session_auth = app_module.SessionAuth(app_module.cfg)
-        app_module.app.state.session_auth = app_module._session_auth
+        # El lifespan real es quien rellena estos app.state — como aqui se
+        # sustituye por un noop, hay que poblarlos a mano (mismo patron que
+        # usa products/desktop/backend/app.py:lifespan).
+        app_module.app.state.desktop_settings = DesktopSettings.from_env()
+        app_module.app.state.desktop_local_state = DesktopLocalState(
+            DesktopSettings.from_env(),
+            provider_secret_store=secret_store,
+        )
+        app_module.app.state.session_auth = app_module.SessionAuth(app_module.cfg)
         app_module.app.state.llm_router = MagicMock(close=AsyncMock())
         return app_module
 
@@ -126,13 +129,14 @@ def test_login_invalido_conserva_redireccion_esperada(tmp_path):
 
 def test_provider_config_no_devuelve_secreto_completo_ni_rompe_claves_publicas(tmp_path):
     from fastapi.testclient import TestClient
+    from products.desktop.backend import settings_routes
 
     app_module = _load_desktop_backend(tmp_path)
 
-    async def _fake_reload(_app):
-        return app_module._load_desktop_provider_config()
+    async def _fake_reload(_request, _local_state):
+        return app_module.app.state.desktop_local_state.load_llm_provider_config()
 
-    with patch.object(app_module, "_reload_desktop_provider_runtime", side_effect=_fake_reload):
+    with patch.object(settings_routes, "_reload_desktop_provider_runtime", side_effect=_fake_reload):
         with TestClient(app_module.app, raise_server_exceptions=False) as client:
             save_response = client.put(
                 "/api/desktop/providers",

@@ -1,0 +1,36 @@
+{
+  "id": "desktop.system_task",
+  "name": "Tarea libre en este PC",
+  "description": "Resuelve CUALQUIER OTRA cosa en ESTE ordenador (Windows, el PC donde corre Nexus) que no sea la velocidad del ratón: instalar/configurar una impresora, cambiar ajustes de red o wifi, abrir/cerrar programas, cambiar configuración del sistema, ejecutar comandos, organizar ficheros, o CONSULTAR EL ESTADO de este mismo ordenador (cpu, memoria, disco, procesos). Es el cajón general para 'toca o consulta el PC local' cuando no encaja en un skill más específico. Señales de que es ESTE ordenador y no un servidor remoto: 'esta máquina', 'este ordenador', 'mi PC', 'el equipo donde trabajo/estoy', o cualquier petición de diagnóstico que NO nombre un servidor/host concreto.",
+  "execution": {
+    "where": "desktop",
+    "timeout": 60,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2"
+  },
+  "inputs": {
+    "task": {"type": "str", "required": true}
+  },
+  "outputs": {
+    "content": "str",
+    "error": "str"
+  },
+  "triggers": [
+    "mi pc va lento",
+    "mi ordenador va lento",
+    "instala una impresora",
+    "cambia la configuracion de red",
+    "cuentame el estado de esta maquina",
+    "libera espacio en el disco",
+    "que procesos consumen mas cpu"
+  ],
+  "examples": [
+    "mi ordenador va muy lento, puedes ver que le pasa?",
+    "cuentame el estado de esta maquina, cpu memoria y disco",
+    "borra los archivos temporales de mi usuario para liberar espacio"
+  ]
+}

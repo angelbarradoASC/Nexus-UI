@@ -17,7 +17,7 @@ class DesktopSettings:
     startup_timeout_seconds: int = 15
     monitoring_interval_seconds: int = 30
     desktop_internal_token: str = ""
-    startup_route: str = "/open-nexus"
+    startup_route: str = "/nexus-pepo"
     open_operator_on_start: bool = True
     debug: bool = False
     local_data_root: str = ""
@@ -57,6 +57,10 @@ class DesktopSettings:
         return self.resolved_local_data_root / "history"
 
     @property
+    def pepo_conversations_db_path(self) -> Path:
+        return self.history_dir / "pepo_conversations.db"
+
+    @property
     def llm_provider_config_path(self) -> Path:
         return self.config_dir / "llm_provider.json"
 
@@ -67,6 +71,14 @@ class DesktopSettings:
     @property
     def skill_library_db_path(self) -> Path:
         return self.config_dir / "skill_library.db"
+
+    @property
+    def mcp_servers_db_path(self) -> Path:
+        return self.config_dir / "mcp_servers.db"
+
+    @property
+    def pending_actions_db_path(self) -> Path:
+        return self.config_dir / "pending_actions.db"
 
     @property
     def llm_router_config_path(self) -> Path:
@@ -94,7 +106,7 @@ class DesktopSettings:
             startup_timeout_seconds=int(os.environ.get("DESKTOP_STARTUP_TIMEOUT", "15")),
             monitoring_interval_seconds=int(os.environ.get("DESKTOP_MONITOR_INTERVAL", "30")),
             desktop_internal_token=os.environ.get("DESKTOP_INTERNAL_TOKEN", ""),
-            startup_route=os.environ.get("DESKTOP_STARTUP_ROUTE", "/open-nexus"),
+            startup_route=os.environ.get("DESKTOP_STARTUP_ROUTE", "/nexus-pepo"),
             open_operator_on_start=os.environ.get("DESKTOP_OPEN_OPERATOR_ON_START", "true").lower() in {"1", "true", "yes", "on"},
             debug=os.environ.get("DEBUG", "").lower() in {"1", "true", "yes", "on"},
             local_data_root=os.environ.get("OPEN_NEXUS_DATA_DIR", ""),

@@ -1,7 +1,7 @@
 {
   "id": "windows.prediagnostico",
   "name": "Pre diagnostico Windows",
-  "description": "Prepara una linea de investigacion para incidencias sobre servidores Windows y servicios Microsoft.",
+  "description": "Diagnostico sobre un servidor o servicio Windows REMOTO concreto (nombrado o identificable). Nunca uses esto para preguntas sobre 'esta máquina'/'mi ordenador'/el PC donde corre Nexus — eso es desktop.system_task.",
   "execution": {
     "where": "assistant",
     "timeout": 30,

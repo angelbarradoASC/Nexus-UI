@@ -1,7 +1,7 @@
 {
   "id": "assets.crear_ticket_operador",
   "name": "Crear ticket de operador en Assets",
-  "description": "Procesa lo que dice el operador, extrae la incidencia, la enriquece y crea un ticket real en Assets Consultores.",
+  "description": "Quiere CREAR/ABRIR/REGISTRAR un ticket o incidencia operativa nueva en Assets (servidores, alertas, monitorización, Docker, red). Requiere intención EXPLÍCITA de crear algo ('abre un ticket', 'registra una incidencia', 'escálalo'). Preguntar si hay incidentes/alertas NO es esto — eso es monitoring.estado.",
   "execution": {
     "where": "server",
     "timeout": 30,

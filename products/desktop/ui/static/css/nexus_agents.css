@@ -1,0 +1,347 @@
+/* nexus_agents.css — gestor de agentes
+   Mismo sistema visual que Campaña/Shell/Vault/Settings (nexus_v1.css,
+   tema claro). Mismo patron anti-solapamiento: filas con altura fija via
+   grid-template-rows (no "auto") + scroll interno por panel. */
+
+.workspace-agents {
+    height: calc(100dvh / var(--ui-zoom));
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+.agents-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: minmax(0, 200px) minmax(0, 1fr);
+    gap: var(--shell-gap);
+    min-height: 0;
+}
+
+.agents-catalog-panel {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+    .agents-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 200px) minmax(0, 200px) minmax(0, 1fr);
+    }
+}
+
+/* ── Panel base ──────────────────────────────────────────────────────────── */
+.agents-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: linear-gradient(180deg, rgba(255,253,250,0.98) 0%, rgba(248,243,235,0.96) 100%);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    gap: 10px;
+}
+
+.agents-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ag-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-shrink: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.ag-header h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--forest);
+    letter-spacing: -0.02em;
+}
+
+.ag-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.ag-badge--unknown { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.ag-badge--warn    { background: var(--gold-soft); color: var(--gold); }
+
+/* ── Tabbar interno del panel Catálogo (Agentes / Skills) ─────────────────── */
+.ag-tabbar {
+    display: flex;
+    gap: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+.ag-tab {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: inherit;
+}
+.ag-tab.is-active { background: var(--forest); color: #fff; }
+.ag-tab:not(.is-active):hover { color: var(--forest); }
+
+.ag-btn {
+    padding: 0.35rem 0.8rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line-strong);
+    cursor: pointer;
+    font-family: inherit;
+    background: var(--panel-2);
+    color: var(--text);
+}
+.ag-btn:hover { border-color: var(--forest-2); color: var(--forest); }
+.ag-btn--ghost { background: transparent; }
+.ag-btn--primary { background: var(--forest); color: #fff; border-color: var(--forest); }
+.ag-btn--primary:hover { background: var(--forest-2); color: #fff; }
+.ag-btn--danger { background: var(--danger-soft); color: var(--danger); border-color: rgba(178,75,59,0.3); }
+
+.ag-empty {
+    color: var(--muted);
+    font-style: italic;
+    text-align: center;
+    padding: 1.5rem 0;
+    font-size: 0.85rem;
+}
+
+/* ── Lista de pendientes / actividad ─────────────────────────────────────── */
+.ag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ag-list--mono {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+}
+
+.ag-pending-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel-2);
+}
+
+.ag-pending-summary {
+    font-size: 0.82rem;
+    color: var(--text);
+}
+
+.ag-pending-meta {
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+}
+
+.ag-pending-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.ag-activity-item {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line);
+    line-height: 1.5;
+}
+.ag-activity-item:last-child { border-bottom: none; }
+
+.ag-activity-status-accepted { color: var(--forest-2); }
+.ag-activity-status-degraded { color: var(--gold); }
+.ag-activity-status-error    { color: var(--danger); }
+
+.ag-activity-time { color: var(--muted); margin-right: 8px; }
+
+/* ── Catálogo de agentes ─────────────────────────────────────────────────── */
+.ag-catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    align-content: start;
+    /* Clave del bug de "apelotonado": sin esto, grid estira cada tarjeta a la
+       altura de la mas alta de su fila (align-items:stretch es el default en
+       grid) — Sales con 8 skills inflaba a todas sus vecinas con hueco vacio. */
+    align-items: start;
+}
+
+.ag-card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel-2);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    /* Tope de altura + scroll interno — una tarjeta con muchos skills no debe
+       dominar visualmente el resto del catalogo. */
+    max-height: 320px;
+}
+
+.ag-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.ag-card-name {
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--text);
+}
+
+.ag-card-role {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.ag-card-desc {
+    font-size: 0.74rem;
+    color: var(--muted);
+    line-height: 1.35;
+    flex-shrink: 0;
+}
+
+.ag-card-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ag-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.ag-pill {
+    font-size: 0.6rem;
+    padding: 1px 7px;
+    border-radius: 20px;
+    background: var(--ok-soft);
+    color: var(--forest-2);
+    border: 1px solid rgba(26,101,89,0.2);
+    white-space: nowrap;
+}
+
+.ag-skill-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 7px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    flex-shrink: 0;
+}
+
+.ag-skill-id {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.ag-skill-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.ag-skill-controls select {
+    min-height: 22px;
+    max-width: 78px;
+    padding: 1px 4px;
+    font-size: 0.6rem;
+}
+
+/* Toggle compacto para enabled/disabled por skill */
+.ag-toggle {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+.ag-toggle input { display: none; }
+.ag-toggle-track {
+    width: 28px;
+    height: 15px;
+    background: var(--line-strong);
+    border-radius: 9px;
+    position: relative;
+    transition: background 0.2s;
+}
+.ag-toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 11px; height: 11px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.ag-toggle input:checked + .ag-toggle-track { background: var(--forest); }
+.ag-toggle input:checked + .ag-toggle-track::after { transform: translateX(13px); }
+
+/* ── Toast ───────────────────────────────────────────────────────────────── */
+.ag-toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 0.65rem 1.1rem;
+    font-size: 0.8rem;
+    color: var(--text);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 999;
+    max-width: 360px;
+    box-shadow: var(--shadow);
+}
+.ag-toast.ag-toast--visible { opacity: 1; transform: translateY(0); }

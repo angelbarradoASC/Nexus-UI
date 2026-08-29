@@ -63,5 +63,28 @@ pyinstaller==6.3.0
 # Credenciales seguras del proveedor desktop (Windows Credential Manager via keyring)
 keyring==25.2.1
 
+# Cliente MCP (Model Context Protocol) — permite a PEPO conectarse a
+# servidores MCP externos (Slack, Notion, filesystem...) sin escribir una
+# clase Python nueva por integracion. Ver app/nexus/mcp/manager.py.
+#
+# ATENCION AL INSTALAR/ACTUALIZAR — CONFLICTO REAL DE VERSIONES:
+#   `pip install mcp` SIN pins explicitos arrastra el resolver de pip a
+#   subir starlette a 1.x (rompe FastAPI 0.111.0, que exige
+#   starlette<0.38.0 — confirmado en vivo: TypeError en Router.__init__,
+#   'on_startup' ya no existe en starlette 1.x) y a subir pydantic/
+#   pydantic-settings a versiones tambien mas nuevas de lo necesario.
+#   mcp==1.6.0 SI funciona con las versiones que ya usa el resto del
+#   proyecto (confirmado en vivo: conexion stdio real, list_tools +
+#   call_tool correctos) — solo pydantic necesita un patch minimo
+#   (2.7.1 -> 2.7.2, sin cambios de comportamiento). Si se toca esta
+#   dependencia, instalar SIEMPRE los 4 paquetes juntos en un solo
+#   comando para que el resolver de pip no se vaya a versiones nuevas
+#   de starlette/pydantic-settings sin necesidad real:
+#     pip install mcp==1.6.0 starlette==0.37.2 httpx==0.27.0 pydantic==2.7.2 pydantic-settings==2.5.2
+mcp==1.6.0
+starlette==0.37.2
+pydantic==2.7.2
+pydantic-settings==2.5.2
+
 # Empaquetado produccion (obfuscacion)
 # nuitka==2.1.0       # instalar aparte, requiere compilador C

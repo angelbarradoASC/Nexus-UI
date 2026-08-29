@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_pepo.css?v=20260805c">
+    <link rel="stylesheet" href="/static/css/nexus_pepo.css?v=20260811c">
 </head>
 <body>
     <main class="workspace workspace-pepo">
@@ -23,10 +23,21 @@
             {% include "partials/desktop_nav.html" %}
         </header>
 
-        <!-- ── Split 70/30 ────────────────────────────────────────────────── -->
+        <!-- ── Split 15/55/30 ─────────────────────────────────────────────── -->
         <div class="pepo-layout">
 
-            <!-- ── CHAT (70%) ─────────────────────────────────────────────── -->
+            <!-- ── CONVERSACIONES (15%) ──────────────────────────────────── -->
+            <aside class="pepo-panel pepo-conversations-sidebar">
+                <div class="pepo-conversations-head">
+                    <p class="eyebrow eyebrow-tight">Historial</p>
+                    <button id="pepoNewChatBtn" class="pepo-new-chat-btn" type="button">+ Nuevo chat</button>
+                </div>
+                <div id="pepoConversationsList" class="pepo-conversations-list">
+                    <div class="pepo-conversations-empty">Sin conversaciones todavía</div>
+                </div>
+            </aside>
+
+            <!-- ── CHAT (55%) ─────────────────────────────────────────────── -->
             <section class="pepo-panel">
 
                 <div class="pepo-panel-head">
@@ -42,22 +53,10 @@
 
                 <!-- Historial -->
                 <div id="pepoChatLog" class="pepo-chat-log">
-                    <div class="pepo-msg pepo-msg-pepo">
+                    <div class="pepo-msg pepo-msg-pepo" data-pepo-greeting="true">
                         <p class="pepo-msg-role">PEPO</p>
                         <div class="pepo-bubble">Hola. Soy PEPO, tu agente personal. Puedo ayudarte con operaciones, prospección comercial, incidentes y más. También puedes lanzar skills desde el panel de la derecha. ¿En qué empezamos?</div>
                     </div>
-                </div>
-
-                <!-- Chips de acceso rápido -->
-                <div class="pepo-chips">
-                    <button class="pepo-chip" type="button"
-                        data-pepo-prompt="¿Cuál es el estado operativo general del sistema?">Estado del sistema</button>
-                    <button class="pepo-chip" type="button"
-                        data-pepo-prompt="Resume la actividad comercial reciente y los siguientes pasos">Actividad comercial</button>
-                    <button class="pepo-chip" type="button"
-                        data-pepo-prompt="¿Hay incidentes o alertas que requieran atención inmediata?">Alertas urgentes</button>
-                    <button class="pepo-chip" type="button"
-                        data-pepo-prompt="Propón una búsqueda de leads para este mes">Proponer prospección</button>
                 </div>
 
                 <!-- Compositor -->
@@ -78,6 +77,6 @@
 
     </main>
 
-    <script src="/static/js/nexus_pepo.js?v=20260805c"></script>
+    <script src="/static/js/nexus_pepo.js?v=20260811b"></script>
 </body>
 </html>

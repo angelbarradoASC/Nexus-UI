@@ -1,7 +1,20 @@
 // nexus_pepo.js — PEPO chat + skills panel
 
-let _pepoContextId = null;
+const PEPO_ACTIVE_CONVERSATION_KEY = 'pepo_active_conversation_id';
+
+// Conversacion activa persistida en localStorage — mismo patron que
+// nexus_last_run_id en nexus_sales.js. Antes _pepoContextId nunca se
+// asignaba, asi que todo PEPO compartia un unico "user_id" fijo sin
+// distinguir conversaciones; ahora es el id real de la conversacion activa,
+// y se manda como context_id en cada peticion a /api/nexus/chat.
+let _pepoContextId = localStorage.getItem(PEPO_ACTIVE_CONVERSATION_KEY) || null;
 let _pepoBusy = false;
+// Cuando PEPO pide un secreto (contraseña/token) via ask_user_secret, la
+// respuesta trae redact_next_reply=true — el turno que el usuario responda
+// a continuacion se guarda en el historial como "[secreto omitido]" en vez
+// del texto real (que si se manda tal cual a /api/nexus/chat, unico sitio
+// que lo necesita para procesarlo).
+let _pepoRedactNextUserTurn = false;
 let _pepoRunPollTimer = null;
 let _pepoRunSeenCount = 0;
 
@@ -26,6 +39,34 @@ async function apiJson(url, opts = {}) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
+// Un mensaje de PEPO puede traer un bloque ```...``` (el script que va a
+// ejecutar). El usuario final no quiere ver PowerShell en crudo — se separa
+// el texto en lenguaje llano del codigo, y el codigo se oculta detras de un
+// <details> plegable (mismo patron que "Ver proceso de pensamiento"). Todo
+// el contenido dinamico se sigue escapando por separado: solo las etiquetas
+// <details>/<summary> son HTML literal nuestro, nunca texto del LLM.
+function renderBubbleContent(text) {
+    const codeFence = /```[a-zA-Z]*\n?([\s\S]*?)```/;
+    const match = text.match(codeFence);
+    if (!match) {
+        return escHtml(text).replace(/\n/g, '<br>');
+    }
+
+    const before = text.slice(0, match.index).trim();
+    const after = text.slice(match.index + match[0].length).trim();
+    const code = match[1].trim();
+
+    const beforeHtml = before ? `${escHtml(before).replace(/\n/g, '<br>')}` : '';
+    const afterHtml = after ? `<div class="pepo-bubble-after">${escHtml(after).replace(/\n/g, '<br>')}</div>` : '';
+
+    return `${beforeHtml}
+        <details class="pepo-code-toggle">
+            <summary>Ver script</summary>
+            <pre><code>${escHtml(code)}</code></pre>
+        </details>
+        ${afterHtml}`;
+}
+
 function appendMsg(role, text, isThinking = false) {
     const log = document.getElementById('pepoChatLog');
     if (!log) return null;
@@ -43,8 +84,11 @@ function appendMsg(role, text, isThinking = false) {
                 <div class="pepo-thinking-dot"></div>
             </div>`;
     } else {
+        const bodyHtml = role === 'user'
+            ? escHtml(text).replace(/\n/g, '<br>')
+            : renderBubbleContent(text);
         wrap.innerHTML = `<p class="pepo-msg-role">${escHtml(roleLabel)}</p>
-            <div class="pepo-bubble">${escHtml(text).replace(/\n/g, '<br>')}</div>`;
+            <div class="pepo-bubble">${bodyHtml}</div>`;
     }
 
     log.appendChild(wrap);
@@ -65,6 +109,22 @@ async function sendToChat(message) {
     const thinkEl = appendMsg('pepo', '', true);
 
     try {
+        // Primer mensaje de un chat nuevo: crea la conversacion en BBDD antes
+        // de hablar con el LLM, asi el context_id que ve /api/nexus/chat ya
+        // es el real (aisla la memoria de esta conversacion de las demas).
+        if (!_pepoContextId) {
+            try {
+                const created = await apiJson('/api/desktop/pepo/conversations', {
+                    method: 'POST',
+                    body: JSON.stringify({ first_message: message }),
+                });
+                setActiveConversationId(created.conversation.id);
+                loadConversationsList();
+            } catch (err) {
+                console.warn('No se pudo crear la conversacion — el chat sigue sin persistir', err);
+            }
+        }
+
         const data = await apiJson('/api/nexus/chat', {
             method: 'POST',
             body: JSON.stringify({
@@ -75,8 +135,25 @@ async function sendToChat(message) {
             }),
         });
         thinkEl?.remove();
-        appendMsg('pepo', data.response || '(sin respuesta)');
+        const reply = data.response || '(sin respuesta)';
+        appendMsg('pepo', reply);
         if (data.run_id) startRunTrace(data.run_id);
+
+        if (_pepoContextId) {
+            try {
+                await apiJson(`/api/desktop/pepo/conversations/${encodeURIComponent(_pepoContextId)}/messages`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_message: _pepoRedactNextUserTurn ? '[secreto omitido]' : message,
+                        assistant_message: reply,
+                    }),
+                });
+                loadConversationsList();
+            } catch (err) {
+                console.warn('No se pudo guardar el turno en el historial', err);
+            }
+        }
+        _pepoRedactNextUserTurn = !!data.redact_next_reply;
     } catch (err) {
         thinkEl?.remove();
         appendMsg('pepo', `Error al conectar: ${err.message}`);
@@ -84,6 +161,94 @@ async function sendToChat(message) {
         _pepoBusy = false;
         if (sendBtn) sendBtn.disabled = false;
         if (input) input.focus();
+    }
+}
+
+// ── Conversaciones (barra izquierda) ────────────────────────────────────────
+
+function setActiveConversationId(id) {
+    _pepoContextId = id;
+    if (id) {
+        localStorage.setItem(PEPO_ACTIVE_CONVERSATION_KEY, id);
+    } else {
+        localStorage.removeItem(PEPO_ACTIVE_CONVERSATION_KEY);
+    }
+}
+
+function clearChatLogToGreeting() {
+    const log = document.getElementById('pepoChatLog');
+    if (!log) return;
+    log.innerHTML = `<div class="pepo-msg pepo-msg-pepo" data-pepo-greeting="true">
+        <p class="pepo-msg-role">PEPO</p>
+        <div class="pepo-bubble">Hola. Soy PEPO, tu agente personal. Puedo ayudarte con operaciones, prospección comercial, incidentes y más. También puedes lanzar skills desde el panel de la derecha. ¿En qué empezamos?</div>
+    </div>`;
+}
+
+function startNewChat() {
+    if (_pepoBusy) return;
+    setActiveConversationId(null);
+    clearChatLogToGreeting();
+    renderConversationsList(_pepoConversationsCache);
+    _pepoRedactNextUserTurn = false;
+    const input = document.getElementById('pepoInput');
+    if (input) input.focus();
+}
+
+let _pepoConversationsCache = [];
+
+function renderConversationsList(conversations) {
+    _pepoConversationsCache = conversations || [];
+    const list = document.getElementById('pepoConversationsList');
+    if (!list) return;
+
+    if (!_pepoConversationsCache.length) {
+        list.innerHTML = '<div class="pepo-conversations-empty">Sin conversaciones todavía</div>';
+        return;
+    }
+
+    list.innerHTML = _pepoConversationsCache.map(c => `
+        <button type="button" class="pepo-conversation-item ${c.id === _pepoContextId ? 'is-active' : ''}"
+            data-conversation-id="${escHtml(c.id)}" title="${escHtml(c.title)}">${escHtml(c.title)}</button>
+    `).join('');
+
+    list.querySelectorAll('[data-conversation-id]').forEach(btn => {
+        btn.addEventListener('click', () => switchConversation(btn.dataset.conversationId));
+    });
+}
+
+async function loadConversationsList() {
+    try {
+        const data = await apiJson('/api/desktop/pepo/conversations');
+        renderConversationsList(data.conversations || []);
+    } catch (err) {
+        console.warn('No se pudo cargar el historial de conversaciones', err);
+    }
+}
+
+async function switchConversation(conversationId) {
+    if (_pepoBusy || conversationId === _pepoContextId) return;
+    _pepoRedactNextUserTurn = false;
+    await loadConversationMessages(conversationId);
+}
+
+async function loadConversationMessages(conversationId) {
+    const log = document.getElementById('pepoChatLog');
+    try {
+        const data = await apiJson(`/api/desktop/pepo/conversations/${encodeURIComponent(conversationId)}/messages`);
+        setActiveConversationId(conversationId);
+        if (log) {
+            log.innerHTML = '';
+            (data.messages || []).forEach(m => appendMsg(m.role === 'user' ? 'user' : 'pepo', m.content));
+            if (!data.messages || !data.messages.length) clearChatLogToGreeting();
+        }
+        renderConversationsList(_pepoConversationsCache);
+    } catch (err) {
+        // Conversacion ya no existe (BBDD reseteada, etc.) — se limpia el
+        // puntero guardado y se cae al estado vacio en vez de quedarse
+        // apuntando a un id muerto para siempre.
+        console.warn('No se pudo cargar la conversacion — se limpia el puntero guardado', err);
+        setActiveConversationId(null);
+        clearChatLogToGreeting();
     }
 }
 
@@ -377,12 +542,17 @@ function initPepo() {
         });
     }
 
-    document.querySelectorAll('[data-pepo-prompt]').forEach(btn => {
-        btn.addEventListener('click', () => sendToChat(btn.dataset.pepoPrompt));
-    });
+    const newChatBtn = document.getElementById('pepoNewChatBtn');
+    if (newChatBtn) newChatBtn.addEventListener('click', startNewChat);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initPepo();
     loadSkillSource();
+    await loadConversationsList();
+    // Restaura la conversacion activa (si la habia) para que volver a la
+    // pestaña no borre el historial visible — se mantiene hasta "Nuevo chat".
+    if (_pepoContextId) {
+        await loadConversationMessages(_pepoContextId);
+    }
 });

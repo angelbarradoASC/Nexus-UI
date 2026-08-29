@@ -438,7 +438,10 @@ def test_email_validator_flags_generic_and_personal():
     assert personal["is_personal"] is True
 
 
-def test_restaurant_scoring_is_vertical_aware():
+def test_restaurant_scoring_is_vertical_aware(prospecting_cfg):
+    # point_criteria viene de la vertical real sembrada en BBDD, no de un
+    # if/elif en Python — ver sales_verticals._RESTAURANT_POINT_CRITERIA.
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
     scorer = ProspectScorer()
     payload = scorer.score(
         {
@@ -453,14 +456,15 @@ def test_restaurant_scoring_is_vertical_aware():
             "is_premium": True,
             "crm_duplicate": None,
         },
-        vertical="restaurants",
+        vertical=verticals.get("restaurants"),
         minimum_score=50,
     )
     assert payload["score"] >= 50
     assert payload["accepted"] is True
 
 
-def test_public_scoring_values_official_contact():
+def test_public_scoring_values_official_contact(prospecting_cfg):
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
     scorer = ProspectScorer()
     payload = scorer.score(
         {
@@ -476,11 +480,58 @@ def test_public_scoring_values_official_contact():
             "contact_form_only": False,
             "crm_duplicate": None,
         },
-        vertical="public_administration",
+        vertical=verticals.get("public_administration"),
         minimum_score=50,
     )
     assert payload["score"] >= 80
     assert payload["priority"] == "Alta"
+
+
+def test_unknown_vertical_no_longer_scores_like_public_administration(prospecting_cfg):
+    """Bug real que fijaba el if/elif: cualquier vertical no reconocida caia
+    en el 'else' de _score_public_administration. 'custom' no debe premiar
+    web oficial/rol TIC — esos criterios solo existen para admin publica."""
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
+    scorer = ProspectScorer()
+    candidate = {
+        "website": "https://negocio.example.com",
+        "official_website": True,
+        "dns_valid": True,
+        "mx_valid": True,
+        "email": "info@negocio.example.com",
+        "phone": "600111222",
+        "contact_role": "Concejalia de Nuevas Tecnologias",
+        "contact_person": "Ana Perez",
+        "quality_signals": ["administracion electronica", "modernizacion"],
+        "contact_form_only": False,
+        "crm_duplicate": None,
+    }
+    custom_score = scorer.score(candidate, vertical=verticals.get("custom"), minimum_score=20)["score"]
+    public_admin_score = scorer.score(candidate, vertical=verticals.get("public_administration"), minimum_score=20)["score"]
+    # public_administration puntua "web oficial" (+10) y "rol TIC" (+10) que
+    # custom no tiene activados — deben dar puntuaciones distintas.
+    assert custom_score != public_admin_score
+    assert public_admin_score > custom_score
+
+
+def test_scoring_criteria_come_from_bbdd_not_from_code(prospecting_cfg):
+    """Cambiar point_criteria vía la API de verticales cambia el resultado —
+    prueba que la fuente es la fila de BBDD, no un metodo hardcodeado."""
+    verticals = SalesVerticalsRepository(prospecting_cfg.prospecting_data_dir)
+    scorer = ProspectScorer()
+    candidate = {"website": "https://negocio.example.com", "crm_duplicate": None}
+
+    before = verticals.get("zapaterias")
+    score_before = scorer.score(candidate, vertical=before, minimum_score=0)["score"]
+
+    new_rules = dict(before.scoring_rules)
+    new_rules["point_criteria"] = {**new_rules["point_criteria"], "has_website": 1}
+    verticals.update("zapaterias", scoring_rules=new_rules)
+    after = verticals.get("zapaterias")
+    score_after = scorer.score(candidate, vertical=after, minimum_score=0)["score"]
+
+    assert score_before != score_after
+    assert score_after == 1
 
 
 @pytest.mark.asyncio
@@ -772,8 +823,10 @@ async def test_orchestrate_brief_refines_prompt_and_plans_sources(prospecting_cf
     assert orchestrated["brief"]["must_have"] == ["Reservas online", "Email directo"]
     assert orchestrated["orchestration"]["refinement_applied"] is True
     assert orchestrated["orchestration"]["source_plan"]["sources"][0]["name"] == "google_places"
-    assert orchestrated["orchestration"]["autonomous_agents"]["completed_agents"] == 3
+    # 4 desde que se añadió brief_verifier (verificación de ida y vuelta contra el texto original).
+    assert orchestrated["orchestration"]["autonomous_agents"]["completed_agents"] == 4
     assert any(agent["agent_id"] == "brief_guardian" for agent in orchestrated["orchestration"]["autonomous_agents"]["agents"])
+    assert any(agent["agent_id"] == "brief_verifier" for agent in orchestrated["orchestration"]["autonomous_agents"]["agents"])
 
 
 @pytest.mark.asyncio

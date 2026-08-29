@@ -27,13 +27,70 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger("nexus.system_task_agent")
 
 _MAX_LOOP_STEPS = 6
+
+# Parsea el script con el propio parser de PowerShell (no regex) y comprueba
+# con Get-Command que cada cmdlet referenciado existe de verdad en esta
+# maquina. Nunca escribe el script del usuario dentro de este string — lo
+# lee de un fichero temporal via $env:NEXUS_SCRIPT_PATH para no depender de
+# escapar comillas/heredocs ajenos.
+_VALIDATE_SCRIPT_PS = r"""
+$scriptText = Get-Content -LiteralPath $env:NEXUS_SCRIPT_PATH -Raw
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($scriptText, [ref]$tokens, [ref]$parseErrors)
+$commands = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
+    ForEach-Object { $_.GetCommandName() } | Where-Object { $_ } | Sort-Object -Unique
+$missing = @()
+foreach ($c in $commands) {
+    if (-not (Get-Command -Name $c -ErrorAction SilentlyContinue)) { $missing += $c }
+}
+[PSCustomObject]@{
+    missing = @($missing)
+    parse_errors = @($parseErrors | ForEach-Object { $_.Message })
+} | ConvertTo-Json -Compress
+"""
+
+# Whitelist fijo de solo lectura para investigar el PC local antes de
+# proponer nada — mismo principio que el whitelist SSH de RemoteOpsAgent.
+# Nunca comandos que decida el LLM: el "sin confirmar" solo es una garantia
+# real si el conjunto de comandos esta cerrado de antemano.
+_LOCAL_DIAGNOSTIC_COMMANDS: list[tuple[str, str]] = [
+    (
+        "Get-CimInstance Win32_OperatingSystem | Select-Object LastBootUpTime, "
+        "@{N='FreeMemMB';E={[math]::Round($_.FreePhysicalMemory/1KB,0)}}, "
+        "@{N='TotalMemMB';E={[math]::Round($_.TotalVisibleMemorySize/1KB,0)}} | Format-List | Out-String -Width 200",
+        "Arranque y memoria",
+    ),
+    (
+        "Get-Process | Sort-Object CPU -Descending | Select-Object -First 8 Name, "
+        "@{N='CPU_s';E={[math]::Round($_.CPU,1)}}, Id | Format-Table -AutoSize | Out-String -Width 200",
+        "Top procesos por CPU",
+    ),
+    (
+        "Get-Process | Sort-Object WorkingSet -Descending | Select-Object -First 8 Name, "
+        "@{N='MemMB';E={[math]::Round($_.WorkingSet/1MB,0)}}, Id | Format-Table -AutoSize | Out-String -Width 200",
+        "Top procesos por memoria",
+    ),
+    (
+        "Get-PSDrive -PSProvider FileSystem | Where-Object { $null -ne $_.Used } | Select-Object Name, "
+        "@{N='FreeGB';E={[math]::Round($_.Free/1GB,1)}}, @{N='UsedGB';E={[math]::Round($_.Used/1GB,1)}} | "
+        "Format-Table -AutoSize | Out-String -Width 200",
+        "Espacio en disco",
+    ),
+    (
+        "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average",
+        "Uso de CPU actual (%)",
+    ),
+]
 
 _TOOLS: list[dict[str, Any]] = [
     {
@@ -50,6 +107,20 @@ _TOOLS: list[dict[str, Any]] = [
                 "properties": {"query": {"type": "string", "description": "Que se busca (nombre, IP, rol, tipo...)"}},
                 "required": ["query"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_diagnostic",
+            "description": (
+                "Ejecuta un diagnostico real de solo lectura en este PC (procesos por "
+                "CPU/memoria, disco, uptime) SIN pedir confirmacion — nunca cambia nada. "
+                "Usalo SIEMPRE antes de proponer una accion para un sintoma vago (va "
+                "lento, se cuelga, no responde, esta raro) en vez de adivinar la causa o "
+                "saltar directo a algo drastico como reiniciar el equipo."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -127,25 +198,62 @@ class PendingSystemTask:
     description: str | None = None
 
 
-def _run_powershell(script: str, *, timeout: float = 60.0) -> subprocess.CompletedProcess:
+def _run_powershell(
+    script: str, *, timeout: float = 60.0, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
 
 
 class SystemTaskAgent:
     """Resuelve tareas libres sobre el PC via skill guardada, bucle de tools o windows-use."""
 
-    def __init__(self, cfg, *, llm_router=None, skill_library=None, cmdb=None) -> None:
+    persistence_key = "system_task"
+
+    def __init__(self, cfg, *, llm_router=None, skill_library=None, cmdb=None, store=None) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
         self._skill_library = skill_library
         self._cmdb = cmdb
+        self._store = store
         self._agent = None
         self._pending: dict[str, PendingSystemTask] = {}
+
+    # ── Persistencia (ver desktop/storage/pending_actions.py) ───────────────
+
+    def _set_pending(self, context_id: str, pending: PendingSystemTask) -> None:
+        self._pending[context_id] = pending
+        if self._store is not None:
+            payload = {
+                "skill_id": pending.skill_id, "script": pending.script,
+                "verify_command": pending.verify_command, "description": pending.description,
+            }
+            self._store.save(
+                agent_id=self.persistence_key, context_id=context_id, kind=pending.kind,
+                task=pending.task, payload=payload, messages=pending.messages,
+                tool_call_id=pending.tool_call_id,
+            )
+
+    def _clear_pending(self, context_id: str) -> PendingSystemTask | None:
+        pending = self._pending.pop(context_id, None)
+        if self._store is not None:
+            self._store.delete(agent_id=self.persistence_key, context_id=context_id)
+        return pending
+
+    def load_pending_from_store(self) -> None:
+        if self._store is None:
+            return
+        for row in self._store.list_for_agent(self.persistence_key):
+            self._pending[row.context_id] = PendingSystemTask(
+                task=row.task, kind=row.kind, messages=row.messages, tool_call_id=row.tool_call_id,
+                skill_id=row.payload.get("skill_id"), script=row.payload.get("script"),
+                verify_command=row.payload.get("verify_command"), description=row.payload.get("description"),
+            )
 
     def _get_windows_use_agent(self):
         if self._agent is None:
@@ -163,30 +271,64 @@ class SystemTaskAgent:
     # ── Tool: lookup_cmdb ────────────────────────────────────────────────────
 
     async def _lookup_cmdb(self, query: str) -> str:
-        if self._cmdb is None:
-            return "CMDB no disponible."
+        from nexus.cmdb.lookup import search_devices
+
         try:
-            devices = await self._cmdb.list_devices(enabled_only=False)
+            return await search_devices(self._cmdb, query)
         except Exception:
             logger.exception("Fallo consultando CMDB")
             return "Error consultando el CMDB."
 
-        needle = (query or "").strip().lower()
-        if not needle:
-            return "Consulta vacia."
+    # ── Tool: run_diagnostic (solo lectura, sin confirmar) ──────────────────
 
-        hits = []
-        for d in devices:
-            haystack = " ".join(
-                str(v) for v in (d.name, d.ip, d.type, d.vendor, d.notes, d.fqdn) if v
-            ).lower()
-            haystack += " " + " ".join(f"{k}:{v}" for k, v in (d.tags or {}).items()).lower()
-            if needle in haystack:
-                hits.append(f"{d.name} (ip={d.ip}, tipo={d.type}, notas={d.notes or '-'})")
+    async def _run_diagnostic(self) -> str:
+        sections: list[str] = []
+        for cmd, label in _LOCAL_DIAGNOSTIC_COMMANDS:
+            try:
+                result = await asyncio.to_thread(_run_powershell, cmd, timeout=15.0)
+                output = (result.stdout or "").strip() or "(sin datos)"
+                sections.append(f"### {label}\n{output}")
+            except Exception as exc:
+                sections.append(f"### {label}\n[error: {exc}]")
+        return "\n\n".join(sections)
 
-        if not hits:
-            return f"No hay ningun dispositivo en el CMDB que coincida con '{query}'."
-        return "Encontrado en el CMDB:\n" + "\n".join(hits[:5])
+    # ── Validacion: cmdlets reales antes de confirmar ───────────────────────
+
+    async def _validate_script(self, script: str) -> list[str]:
+        """Comprueba con Get-Command que cada cmdlet del script existe de
+        verdad en esta maquina — nunca deja llegar a confirmacion (ni a
+        reutilizarse desde SkillLibrary) un script con cmdlets inventados."""
+        if not script.strip():
+            return []
+
+        fd, path = tempfile.mkstemp(suffix=".txt", prefix="nexus_script_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(script)
+            env = {**os.environ, "NEXUS_SCRIPT_PATH": path}
+            result = await asyncio.to_thread(_run_powershell, _VALIDATE_SCRIPT_PS, timeout=20.0, env=env)
+        except Exception:
+            logger.exception("Fallo validando el script generado")
+            return []
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return []
+
+        problems: list[str] = []
+        for cmdlet in data.get("missing") or []:
+            problems.append(f"El cmdlet '{cmdlet}' no existe en este sistema.")
+        for err in data.get("parse_errors") or []:
+            problems.append(f"Error de sintaxis: {err}")
+        return problems
 
     # ── Bucle generico ───────────────────────────────────────────────────────
 
@@ -244,6 +386,11 @@ class SystemTaskAgent:
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
                 continue
 
+            if name == "run_diagnostic":
+                result_text = await self._run_diagnostic()
+                messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
+                continue
+
             if name == "ask_user":
                 return {
                     "kind": "ask_user",
@@ -253,9 +400,19 @@ class SystemTaskAgent:
                 }
 
             if name == "run_script":
+                script = args.get("script", "")
+                problems = await self._validate_script(script)
+                if problems:
+                    feedback = (
+                        "El script propuesto NO es valido y no se ha mostrado al usuario:\n- "
+                        + "\n- ".join(problems)
+                        + "\nCorrigelo usando solo cmdlets reales de PowerShell y vuelve a llamar a run_script."
+                    )
+                    messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": feedback})
+                    continue
                 return {
                     "kind": "run_script",
-                    "script": args.get("script", ""),
+                    "script": script,
                     "verify_command": args.get("verify_command", ""),
                     "description": args.get("description", ""),
                     "messages": messages,
@@ -277,59 +434,87 @@ class SystemTaskAgent:
         kind = outcome["kind"]
 
         if kind == "ask_user":
-            self._pending[context_id] = PendingSystemTask(
+            self._set_pending(context_id, PendingSystemTask(
                 task=task, kind="ask_user", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
-            )
+            ))
             return {"kind": "ask_user", "task": task, "question": outcome["question"]}
 
         if kind == "run_script":
-            self._pending[context_id] = PendingSystemTask(
+            self._set_pending(context_id, PendingSystemTask(
                 task=task, kind="run_script", messages=outcome["messages"], tool_call_id=outcome["tool_call_id"],
                 script=outcome["script"], verify_command=outcome.get("verify_command", ""),
                 description=outcome.get("description", task),
-            )
+            ))
             return {"kind": "run_script", "task": task, "script": outcome["script"], "description": outcome.get("description", task)}
 
         # finish
         if not outcome.get("scriptable", True):
-            self._pending[context_id] = PendingSystemTask(task=task, kind="windows_use")
+            self._set_pending(context_id, PendingSystemTask(task=task, kind="windows_use"))
             return {"kind": "windows_use", "task": task}
 
         return {"kind": "finish", "task": task, "summary": outcome.get("summary", "Hecho.")}
 
     # ── API publica ──────────────────────────────────────────────────────────
 
-    async def propose(self, context_id: str, task: str) -> dict[str, Any]:
+    async def propose(
+        self, context_id: str, task: str, *, history: list[dict[str, str]] | None = None
+    ) -> dict[str, Any]:
         """Decide como resolver la tarea. Puede terminar de una vez o dejarla pendiente."""
         if self._skill_library is not None and self._llm_router is not None:
             match = await self._skill_library.find_match(task, self._llm_router)
             if match is not None:
-                self._pending[context_id] = PendingSystemTask(
-                    task=task, kind="skill_match", skill_id=match.skill_id,
-                    script=match.script_body, verify_command=match.verify_command,
-                    description=match.description,
+                problems = await self._validate_script(match.script_body)
+                if not problems:
+                    self._set_pending(context_id, PendingSystemTask(
+                        task=task, kind="skill_match", skill_id=match.skill_id,
+                        script=match.script_body, verify_command=match.verify_command,
+                        description=match.description,
+                    ))
+                    return {
+                        "kind": "skill_match", "task": task, "script": match.script_body,
+                        "description": match.description, "status": match.status,
+                    }
+                logger.warning(
+                    "Skill guardada '%s' ya no es valida (%s) — se regenera con el LLM",
+                    match.skill_id, "; ".join(problems),
                 )
-                return {
-                    "kind": "skill_match", "task": task, "script": match.script_body,
-                    "description": match.description, "status": match.status,
-                }
+                self._skill_library.record_failure(match.skill_id)
 
         if self._llm_router is None:
-            self._pending[context_id] = PendingSystemTask(task=task, kind="windows_use")
+            self._set_pending(context_id, PendingSystemTask(task=task, kind="windows_use"))
             return {"kind": "windows_use", "task": task}
 
-        outcome = await self._run_loop([{"role": "user", "content": task}])
+        # Igual que en RemoteOpsAgent: sin el historial previo, un mensaje de
+        # seguimiento tipo "y ese proceso, mátalo" no tiene forma de saber a
+        # que proceso se referia el turno anterior.
+        seed_messages = [*(history or []), {"role": "user", "content": task}]
+        outcome = await self._run_loop(seed_messages)
         return self._store_outcome(context_id, task, outcome)
 
     def has_pending(self, context_id: str) -> bool:
         return context_id in self._pending
+
+    async def list_pending(self) -> list[dict[str, Any]]:
+        """Solo lectura, para el gestor de agentes — nunca expone el script en claro
+        para pendientes ajenos, solo la descripcion/tarea.
+
+        Async por consistencia con el resto de agentes (ver mouse_agent.py)."""
+        return [
+            {
+                "context_id": context_id,
+                "agent_id": "system_task",
+                "kind": pending.kind,
+                "summary": pending.description or pending.task,
+            }
+            for context_id, pending in self._pending.items()
+        ]
 
     def pending_kind(self, context_id: str) -> str | None:
         pending = self._pending.get(context_id)
         return pending.kind if pending else None
 
     def cancel(self, context_id: str) -> None:
-        self._pending.pop(context_id, None)
+        self._clear_pending(context_id)
 
     async def _run_script_and_record(self, pending: PendingSystemTask) -> dict[str, Any]:
         try:
@@ -374,7 +559,7 @@ class SystemTaskAgent:
 
     async def confirm(self, context_id: str, user_reply: str | None = None) -> dict[str, Any] | None:
         """Continua/ejecuta lo pendiente. `user_reply` es obligatorio si el pendiente es 'ask_user'."""
-        pending = self._pending.pop(context_id, None)
+        pending = self._clear_pending(context_id)
         if pending is None:
             return None
 

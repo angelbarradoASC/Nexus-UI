@@ -457,6 +457,8 @@ async function loadSalesConfig() {
     const payload = await api.get("/api/desktop/settings/sales");
     document.getElementById("braveEnabled").checked = Boolean(payload.brave.enabled);
     document.getElementById("braveRateLimit").value = payload.brave.rate_limit ?? "";
+    document.getElementById("braveSoftLimit").value = payload.brave.soft_limit ?? "";
+    document.getElementById("braveHardLimit").value = payload.brave.hard_limit ?? "";
     document.getElementById("gpEnabled").checked = Boolean(payload.google_places.enabled);
     document.getElementById("gpRateLimit").value = payload.google_places.rate_limit ?? "";
     document.getElementById("gpMaxResults").value = payload.google_places.max_results ?? "";
@@ -479,6 +481,8 @@ async function saveSalesConfig() {
         brave_enabled: document.getElementById("braveEnabled").checked,
         brave_api_key: document.getElementById("braveApiKey").value.trim(),
         brave_rate_limit: parseFloat(document.getElementById("braveRateLimit").value) || 1.0,
+        brave_soft_limit: document.getElementById("braveSoftLimit").value.trim() === "" ? null : parseInt(document.getElementById("braveSoftLimit").value, 10),
+        brave_hard_limit: document.getElementById("braveHardLimit").value.trim() === "" ? null : parseInt(document.getElementById("braveHardLimit").value, 10),
         gp_enabled: document.getElementById("gpEnabled").checked,
         gp_api_key: document.getElementById("gpApiKey").value.trim(),
         gp_rate_limit: parseFloat(document.getElementById("gpRateLimit").value) || 0.5,

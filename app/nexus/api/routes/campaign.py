@@ -13,6 +13,10 @@ POST /campaign/pending/{id}/send    — aprobar y enviar UN lead concreto
 POST /campaign/pending/{id}/discard — descartar UN lead sin contactarlo
 GET  /campaign/results         — leads de la ultima ejecucion (atajo sobre
                                   prospecting.list_results filtrado por run_id)
+POST /campaign/decompose-verify — descompone una peticion en lenguaje
+                                  natural y la verifica de ida y vuelta
+                                  contra el LLM local (ver
+                                  nexus.prospecting.campaign_decompose)
 """
 
 from __future__ import annotations
@@ -21,12 +25,18 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
-from nexus.api.dependencies.auth import get_campaign_agent, get_prospecting_manager
+from nexus.api.dependencies.auth import get_campaign_agent, get_campaign_decomposer, get_prospecting_manager
 from nexus.prospecting import ProspectingAgentService
 from nexus.prospecting.campaign_agent import CampaignAgent
+from nexus.prospecting.campaign_decompose import CampaignDecomposer
 
 router = APIRouter(prefix="/campaign", tags=["campaign"])
+
+
+class _DecomposeVerifyRequest(BaseModel):
+    text: str
 
 
 def _get_scheduler(request: Request):
@@ -110,3 +120,14 @@ async def campaign_results(
         return {"status": "ok", "run_id": None, "results": []}
     payload = await prospecting.list_results(run_id=run_id)
     return {"status": "ok", "run_id": run_id, **payload}
+
+
+@router.post("/decompose-verify")
+async def campaign_decompose_verify(
+    payload: _DecomposeVerifyRequest,
+    decomposer: CampaignDecomposer = Depends(get_campaign_decomposer),
+) -> dict[str, Any]:
+    """Descompone `text` en {vertical, business_type, city, radius_km} y
+    verifica de ida y vuelta contra el LLM local — ver
+    nexus.prospecting.campaign_decompose.CampaignDecomposer."""
+    return await decomposer.decompose_and_verify(payload.text)

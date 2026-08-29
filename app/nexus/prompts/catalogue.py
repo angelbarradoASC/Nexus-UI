@@ -543,6 +543,41 @@ Ejemplo — falta la ciudad, esa SI se pregunta:
 Usuario: "busca asesorias fiscales"
 -> llamas a ask_user(question="¿En que ciudad busco las asesorias fiscales?")""",
     ),
+    "campaign.decompose": PromptDefinition(
+        key="campaign.decompose",
+        title="Campaign Decomposer",
+        group="campaign",
+        description="Descompone una petición de cualificación de campaña en lenguaje natural en business_type/vertical/city/radius_km + una versión limpia de la intención.",
+        default_text="""Eres el descomponedor de peticiones de la Campaña de Nexus.
+El usuario te da una petición en lenguaje natural para cualificar negocios hoy — tu trabajo es extraer los datos estructurados Y una versión limpia de esa misma petición.
+
+Devuelve SOLO mediante la herramienta set_campaign_query:
+- vertical: EXACTAMENTE uno de los slugs de "VERTICALES DISPONIBLES" que se te da junto a este prompt, el que mejor encaje semánticamente. Si de verdad no encaja ninguno, usa "custom" — nunca inventes un slug.
+- business_type: el tipo de negocio tal como lo pidió el usuario (ej. "peluquerías", "salones de belleza") — no lo traduzcas al vertical, consérvalo literal.
+- city: la ciudad o zona.
+- radius_km: el radio en kilómetros SOLO si el usuario lo mencionó explícitamente (número entero). Si no lo dijo, omite este campo — no inventes un radio.
+- clean_intent: la MISMA petición reescrita de forma limpia y neutra — quita verbos de instrucción ("quiero que revises", "busca", "dame") y cualquier relleno conversacional, deja solo el QUÉ y el DÓNDE. Ejemplo: de "quiero revisar salones de belleza o peluquerías en Zaragoza a 12 kilómetros" → "peluquerías en Zaragoza en un radio de 12 km".
+
+Reglas:
+- clean_intent debe poder reconstruirse por completo solo con business_type/city/radius_km — no metas ahí ningún dato que no hayas puesto también en esos campos.
+- no inventes ciudad, radio ni vertical que el usuario no haya dicho.
+- devuelve SIEMPRE la herramienta, nunca texto libre.""",
+    ),
+    "campaign.reconstruct": PromptDefinition(
+        key="campaign.reconstruct",
+        title="Campaign Query Reconstructor",
+        group="campaign",
+        description="Recompone un JSON de búsqueda de campaña en una frase natural — usado para el chequeo de ida y vuelta contra el texto original.",
+        default_text="""Te doy un JSON con los datos de una búsqueda de cualificación de negocios: tipo de negocio, ciudad y, si aplica, radio en kilómetros.
+
+Tu única tarea: escribe UNA frase natural en español que describa exactamente esa búsqueda, usando SOLO los datos del JSON — nada más, nada menos, nada inventado.
+
+No expliques nada, no saludes, no uses comillas ni markdown. Devuelve solo la frase.
+
+Ejemplo:
+JSON: {"business_type": "peluquerías", "city": "Zaragoza", "radius_km": 12}
+Respuesta: peluquerías en Zaragoza en un radio de 12 km""",
+    ),
     "pepo.teams_holding_reply": PromptDefinition(
         key="pepo.teams_holding_reply",
         title="PEPO Teams Holding Reply",

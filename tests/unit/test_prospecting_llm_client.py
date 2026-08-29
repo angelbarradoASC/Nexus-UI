@@ -1,10 +1,14 @@
 """tests/unit/test_prospecting_llm_client.py
 
 Tests unitarios para LocalLLMClient — en concreto, que provider="ollama"
-desactiva el modo de razonamiento (think=False) para no pagar el coste de
-tokens de "pensar" en tareas de extraccion/verificacion JSON donde no hace
-falta. Verificado en vivo contra el servidor real: 21.9s/206 tokens con
-razonamiento activo frente a 9.8s sin el, para un prompt trivial.
+desactiva el modo de razonamiento (think=False) y usa el endpoint NATIVO
+de Ollama (/api/chat), no el compatible con OpenAI. Encontrado en vivo el
+2026-08-29: via /v1/chat/completions, think=False NO elimina el
+razonamiento del todo — se cuela dentro de "content" y agota max_tokens
+antes de la respuesta real (una llamada real de reconstruccion devolvio
+el razonamiento truncado en ingles en vez de la frase pedida). Via
+/api/chat nativo, think=False lo elimina limpio — mismo modelo, mismo
+prompt, cero fugas.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ class _FakeResponse:
 
 class _FakeAsyncClient:
     captured_payload: dict | None = None
+    captured_url: str | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         pass
@@ -42,6 +47,7 @@ class _FakeAsyncClient:
 
     async def post(self, url: str, *, headers: dict, json: dict) -> _FakeResponse:
         _FakeAsyncClient.captured_payload = json
+        _FakeAsyncClient.captured_url = url
         return _FakeResponse({"message": {"content": "ok"}})
 
 
@@ -67,6 +73,46 @@ async def test_ollama_provider_sends_think_false(monkeypatch):
 
     assert result == "ok"
     assert _FakeAsyncClient.captured_payload["think"] is False
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_uses_native_endpoint_not_openai_compatible(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+    client = LocalLLMClient(settings=_settings(provider="ollama"))
+
+    await client.complete(system_prompt="sistema", user_prompt="responde ok")
+
+    assert _FakeAsyncClient.captured_url == "http://192.168.68.150:11434/api/chat"
+
+
+@pytest.mark.asyncio
+async def test_ollama_provider_uses_native_payload_shape(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+    client = LocalLLMClient(settings=_settings(provider="ollama"))
+
+    await client.complete(system_prompt="sistema", user_prompt="responde ok", temperature=0.3, max_tokens=42)
+
+    payload = _FakeAsyncClient.captured_payload
+    assert payload["model"] == "qwen3:8b"
+    assert payload["stream"] is False
+    assert payload["options"] == {"temperature": 0.3, "num_predict": 42}
+    # Nunca top-level temperature/max_tokens (esos son del shim OpenAI-compat, no del nativo)
+    assert "temperature" not in payload
+    assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+async def test_non_ollama_provider_uses_openai_compatible_endpoint(monkeypatch):
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient)
+    client = LocalLLMClient(settings=_settings(provider="openai_compatible"))
+
+    await client.complete(system_prompt="sistema", user_prompt="responde ok", temperature=0.3, max_tokens=42)
+
+    assert _FakeAsyncClient.captured_url == "http://192.168.68.150:11434/v1/chat/completions"
+    payload = _FakeAsyncClient.captured_payload
+    assert payload["temperature"] == 0.3
+    assert payload["max_tokens"] == 42
+    assert "options" not in payload
 
 
 @pytest.mark.asyncio

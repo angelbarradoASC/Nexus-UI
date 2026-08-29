@@ -33,6 +33,9 @@ from nexus.outreach import OutreachManager
 from nexus.crm import CRMBridgeService
 from nexus.prospecting import ProspectingAgentService
 from nexus.prospecting.campaign_agent import CampaignAgent
+from nexus.prospecting.campaign_decompose import CampaignDecomposer
+from nexus.prospecting.embeddings import LocalEmbeddingsClient, LocalEmbeddingsSettings
+from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.prompts import PromptManager, set_default_prompt_manager
 from nexus.mail import ThunderbirdMailManager
 from nexus.teams import TeamsChatManager
@@ -62,6 +65,7 @@ class NexusRuntime:
     teams:             TeamsChatManager = None
     case_log:          CaseLogStore = None
     jira:              JiraConnector = None
+    campaign_decomposer: Any = None
 
 
 def build_runtime(cfg) -> NexusRuntime:
@@ -138,6 +142,39 @@ def build_runtime(cfg) -> NexusRuntime:
     operations = AssetsOperationsService(cfg=cfg, llm_router=llm_router)
     jira_connector = JiraConnector(cfg)
     prospecting = ProspectingAgentService(cfg=cfg)
+    # Descomposicion + verificacion de ida y vuelta para la Campaña —
+    # deliberadamente distinta de sales.prospecting.interpret (pedido asi
+    # por el usuario). Reutiliza el repositorio de verticales que ya
+    # construyo ProspectingAgentService, pero NO su LocalLLMClient — ese
+    # tiene un timeout de 30s pensado para el chat interactivo de Sales
+    # (alguien esperando). Aqui el usuario dijo explicitamente que no le
+    # importa esperar, y la GPU compartida del 150 a veces tarda mas de
+    # 30s bajo carga (verificado en vivo) — un cliente propio con timeout
+    # largo evita forzar esa misma espera sobre Sales.
+    campaign_local_llm = LocalLLMClient(
+        settings=LocalLLMSettings(
+            base_url=getattr(cfg, "local_llm_base_url", None),
+            model=getattr(cfg, "local_llm_model", ""),
+            provider=getattr(cfg, "local_llm_provider", "openai_compatible"),
+            timeout=float(getattr(cfg, "local_llm_campaign_timeout", 300)),
+            retries=1,
+            enabled=bool(getattr(cfg, "local_llm_enabled", False)),
+        ),
+        api_key=getattr(cfg, "local_llm_api_key", "") or "not-needed",
+    )
+    campaign_decomposer = CampaignDecomposer(
+        llm_router=llm_router,
+        local_llm=campaign_local_llm,
+        embeddings=LocalEmbeddingsClient(
+            settings=LocalEmbeddingsSettings(
+                base_url=getattr(cfg, "local_llm_base_url", None),
+                model=getattr(cfg, "local_embeddings_model", "nomic-embed-text"),
+                timeout=float(getattr(cfg, "local_embeddings_timeout", 120)),
+                enabled=bool(getattr(cfg, "local_embeddings_enabled", False)),
+            ),
+        ),
+        verticals=prospecting.verticals,
+    )
     # outreach/crm/campaign se construyen aqui (no mas abajo, donde estaban
     # antes) porque NexusCoordinator ahora necesita campaign_agent para
     # incluir su cola de revision en list_pending_actions() — mismo motivo
@@ -191,6 +228,7 @@ def build_runtime(cfg) -> NexusRuntime:
         teams=teams,
         case_log=case_log,
         jira=jira_connector,
+        campaign_decomposer=campaign_decomposer,
     )
 
 
@@ -264,6 +302,11 @@ def get_prospecting_manager(request: Request) -> ProspectingAgentService:
 def get_campaign_agent(request: Request) -> CampaignAgent:
     """Fetch the campaign agent from FastAPI application state."""
     return get_runtime(request).campaign
+
+
+def get_campaign_decomposer(request: Request) -> CampaignDecomposer:
+    """Fetch the campaign query decomposer/verifier from FastAPI application state."""
+    return get_runtime(request).campaign_decomposer
 
 
 def get_agent_settings_store(request: Request) -> Any:

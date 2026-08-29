@@ -20,6 +20,100 @@ document.addEventListener('DOMContentLoaded', () => {
     loadPending();
 });
 
+// ── Descomposición y verificación de ida y vuelta ────────────────────────
+
+async function decomposeAndVerify() {
+    const input = document.getElementById('decomposeInput');
+    const text = input.value.trim();
+    if (!text) {
+        toast('Escribe algo primero', true);
+        return;
+    }
+
+    const btn = document.getElementById('decomposeBtn');
+    const statusEl = document.getElementById('decomposeStatus');
+    const badge = document.getElementById('decomposeBadge');
+    btn.disabled = true;
+    statusEl.textContent = 'descomponiendo y verificando… (el LLM local puede tardar)';
+    badge.textContent = '…';
+    badge.className = 'camp-badge camp-badge--unknown';
+
+    try {
+        const res = await fetch(`${API}/decompose-verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        });
+        const data = await res.json();
+        renderDecomposeResult(data);
+    } catch (err) {
+        toast('Error al descomponer', true);
+        badge.textContent = 'error';
+        badge.className = 'camp-badge camp-badge--stopped';
+    } finally {
+        btn.disabled = false;
+        statusEl.textContent = '';
+    }
+}
+
+function renderDecomposeResult(data) {
+    const el = document.getElementById('decomposeResult');
+    const badge = document.getElementById('decomposeBadge');
+
+    if (data.status !== 'ok') {
+        el.className = 'camp-decompose-result';
+        el.innerHTML = `<span>Error: ${escapeHtml(data.error || 'desconocido')}</span>`;
+        badge.textContent = 'error';
+        badge.className = 'camp-badge camp-badge--stopped';
+        return;
+    }
+
+    const q = data.query || {};
+    const jsonBlock = JSON.stringify(
+        { vertical: q.vertical, business_type: q.business_type, city: q.city, radius_km: q.radius_km },
+        null, 2,
+    );
+
+    let similarityHtml = '<span class="camp-similarity-pill camp-similarity-pill--unknown">sin verificar</span>';
+    if (typeof data.similarity === 'number') {
+        const pct = Math.round(data.similarity * 100);
+        const cls = data.consistent ? 'camp-similarity-pill--pass' : 'camp-similarity-pill--fail';
+        similarityHtml = `<span class="camp-similarity-pill ${cls}">${pct}%</span>`;
+    }
+
+    if (data.consistent === true) {
+        badge.textContent = 'consistente';
+        badge.className = 'camp-badge camp-badge--running';
+    } else if (data.consistent === false) {
+        badge.textContent = 'desviado';
+        badge.className = 'camp-badge camp-badge--stopped';
+    } else {
+        badge.textContent = 'sin verificar';
+        badge.className = 'camp-badge camp-badge--disabled';
+    }
+
+    el.className = 'camp-decompose-result';
+    el.innerHTML = `
+        <div class="camp-decompose-json">${escapeHtml(jsonBlock)}</div>
+        <div class="camp-decompose-row">
+            <span class="camp-meta-label">Versión limpia</span>
+            <span>${escapeHtml(q.clean_intent || '—')}</span>
+        </div>
+        <div class="camp-decompose-row">
+            <span class="camp-meta-label">Reconstrucción LLM</span>
+            <span>${escapeHtml(data.reconstructed || '—')}</span>
+        </div>
+        <div class="camp-decompose-row">
+            <span class="camp-meta-label">Similitud</span>
+            ${similarityHtml}
+        </div>
+        <div class="camp-decompose-row">
+            <span class="camp-meta-label">Nota</span>
+            <span>${escapeHtml(data.note || '')}</span>
+        </div>
+    `;
+}
+
 // ── Estado del scheduler ──────────────────────────────────────────────────
 
 async function loadStatus() {

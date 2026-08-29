@@ -140,6 +140,12 @@ class ProspectingAgentService:
         """
         return self._verticals
 
+    @property
+    def local_llm(self) -> LocalLLMClient:
+        """Expuesto para que otros consumidores (ej. CampaignDecomposer) reutilicen
+        la misma conexion al LLM local en vez de construir una segunda."""
+        return self._llm
+
     # ── Logging ──────────────────────────────────────────────────────────────
 
     @staticmethod

@@ -240,6 +240,124 @@
     background: var(--forest-2);
 }
 
+.camp-btn--secondary {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+}
+
+.camp-btn--secondary:not(:disabled):hover {
+    background: var(--line);
+}
+
+/* ── Franja compacta de estado del scheduler ──────────────────────────────── */
+.camp-status-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    padding: 0.55rem 1rem;
+    margin-bottom: var(--shell-gap);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel-2);
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.camp-status-strip-item strong {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.camp-status-strip-report {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.camp-status-strip-report summary {
+    cursor: pointer;
+    user-select: none;
+}
+
+.camp-status-strip-report .camp-report {
+    margin-top: 0.5rem;
+    min-height: 0;
+    max-width: 60vw;
+}
+
+/* ── Descomposición y verificación de ida y vuelta ────────────────────────── */
+.camp-decompose-hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.camp-decompose-textarea {
+    width: 100%;
+    resize: vertical;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    background: var(--panel-2);
+    color: var(--text);
+}
+
+.camp-decompose-result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.8rem 1rem;
+    font-size: 0.82rem;
+}
+
+.camp-decompose-result--empty {
+    color: var(--muted);
+    font-style: italic;
+    background: var(--panel-2);
+}
+
+.camp-decompose-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.camp-decompose-row .camp-meta-label {
+    flex-shrink: 0;
+    min-width: 110px;
+}
+
+.camp-decompose-json {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    background: #14170f;
+    color: #c9d6b8;
+    padding: 0.6rem 0.8rem;
+    border-radius: var(--radius-md);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.camp-similarity-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+}
+
+.camp-similarity-pill--pass { background: var(--ok-soft); color: var(--forest-2); }
+.camp-similarity-pill--fail { background: var(--danger-soft); color: var(--danger); }
+.camp-similarity-pill--unknown { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+
 /* ── Toggle ──────────────────────────────────────────────────────────────── */
 .camp-toggle {
     display: flex;

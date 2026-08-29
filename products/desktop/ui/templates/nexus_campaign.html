@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260812a">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260829a">
 </head>
 <body>
     <main class="workspace workspace-campaign">
@@ -21,39 +21,49 @@
             {% include "partials/desktop_nav.html" %}
         </header>
 
+        <!-- ── Franja de estado del scheduler — compacta a propósito: la
+             próxima ejecución y el botón manual se consultan una vez y ya
+             está, no necesitan un panel entero. Antes ocupaba una columna
+             completa sin aportar nada más que esto mismo. ── -->
+        <div class="camp-status-strip">
+            <span id="schedulerBadge" class="camp-badge camp-badge--unknown">—</span>
+            <span class="camp-status-strip-item">Próxima: <strong id="nextRunAt">cargando…</strong></span>
+            <span class="camp-status-strip-item">Última: <strong id="lastRunAt">—</strong></span>
+            <button id="triggerBtn" class="camp-btn camp-btn--secondary" onclick="triggerCampaign()">Ejecutar ahora</button>
+            <span id="triggerStatus" class="camp-trigger-status"></span>
+            <details class="camp-status-strip-report">
+                <summary>Último informe</summary>
+                <div id="lastRunReport" class="camp-report camp-report--empty">Sin ejecuciones previas en esta sesión</div>
+            </details>
+        </div>
+
         <div class="campaign-layout">
 
-            <!-- ── Panel izquierdo: estado del scheduler ─────────────────── -->
-            <section class="campaign-panel campaign-status-panel">
+            <!-- ── Panel izquierdo: descomposición y verificación de ida y vuelta ── -->
+            <section class="campaign-panel campaign-decompose-panel">
                 <div class="camp-header">
                     <div>
-                        <p class="eyebrow eyebrow-tight">Prospección automática</p>
-                        <h2>Estado</h2>
+                        <p class="eyebrow eyebrow-tight">Cualificar hoy</p>
+                        <h2>Descomposición y verificación</h2>
                     </div>
-                    <span id="schedulerBadge" class="camp-badge camp-badge--unknown">—</span>
+                    <span id="decomposeBadge" class="camp-badge camp-badge--unknown">—</span>
                 </div>
 
                 <div class="campaign-panel-body">
-                    <div class="camp-meta-grid">
-                        <div class="camp-meta-item">
-                            <span class="camp-meta-label">Próxima ejecución</span>
-                            <span id="nextRunAt" class="camp-meta-value">cargando…</span>
-                        </div>
-                        <div class="camp-meta-item">
-                            <span class="camp-meta-label">Última ejecución</span>
-                            <span id="lastRunAt" class="camp-meta-value">—</span>
-                        </div>
-                    </div>
-
-                    <div id="lastRunReport" class="camp-report camp-report--empty">
-                        Sin ejecuciones previas en esta sesión
-                    </div>
-
+                    <p class="camp-decompose-hint">
+                        Escribe en lenguaje natural qué quieres cualificar hoy — tipo de negocio, ciudad y, si aplica, radio.
+                        Se descompone y se verifica de ida y vuelta contra el LLM local antes de dar nada por bueno.
+                    </p>
+                    <textarea id="decomposeInput" class="camp-decompose-textarea" rows="3"
+                              placeholder="quiero revisar salones de belleza o peluquerías en Zaragoza a 12 kilómetros"></textarea>
                     <div class="camp-trigger-row">
-                        <button id="triggerBtn" class="camp-btn camp-btn--primary" onclick="triggerCampaign()">
-                            Ejecutar ahora
+                        <button id="decomposeBtn" class="camp-btn camp-btn--primary" onclick="decomposeAndVerify()">
+                            Descomponer y verificar
                         </button>
-                        <span id="triggerStatus" class="camp-trigger-status"></span>
+                        <span id="decomposeStatus" class="camp-trigger-status"></span>
+                    </div>
+                    <div id="decomposeResult" class="camp-decompose-result camp-decompose-result--empty">
+                        El resultado de la descomposición aparecerá aquí.
                     </div>
                 </div>
             </section>
@@ -185,6 +195,6 @@
 
     <div id="toast" class="camp-toast" aria-live="polite"></div>
 
-    <script src="/static/js/nexus_campaign.js?v=20260812a"></script>
+    <script src="/static/js/nexus_campaign.js?v=20260829a"></script>
 </body>
 </html>

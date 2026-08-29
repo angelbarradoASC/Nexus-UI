@@ -94,6 +94,7 @@ class NexusCoordinator:
         campaign_agent: Any | None = None,
         mcp_agent: Any | None = None,
         mcp_server_store: Any | None = None,
+        campaign_decomposer: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
     ) -> None:
         self._alertmanager = alertmanager
@@ -109,6 +110,7 @@ class NexusCoordinator:
         self._campaign_agent = campaign_agent
         self._mcp_agent = mcp_agent
         self._mcp_server_store = mcp_server_store
+        self._campaign_decomposer = campaign_decomposer
         self._incident_repository = incident_repository
         self._audit_repository = audit_repository
         self._runbooks = runbooks
@@ -243,6 +245,8 @@ class NexusCoordinator:
             return await self._handle_docker_prediagnostic_chat(payload, resolution, audit_id)
         if skill_id == "sales.prospecting" and self._prospecting is not None:
             return await self._handle_sales_prospecting_chat(payload, audit_id)
+        if skill_id == "campaign.qualify" and self._campaign_decomposer is not None:
+            return await self._handle_campaign_decompose_chat(payload, audit_id)
         if skill_id in {
             "linux.prediagnostico",
             "windows.prediagnostico",
@@ -444,6 +448,66 @@ class NexusCoordinator:
             audit_id=audit_id,
             run_id=run_id,
         )
+
+    async def _handle_campaign_decompose_chat(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+    ) -> ChatResponse:
+        """Skill de solo lectura — no propone nada que confirmar, solo
+        descompone y verifica. Comparte la MISMA funcion que el cuadro de
+        la pantalla de Campaña (nexus.prospecting.campaign_decompose),
+        pedido asi explicitamente por el usuario."""
+        result = await self._campaign_decomposer.decompose_and_verify(payload.message)
+        response = self._render_campaign_decompose_result(result)
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status="accepted" if result.get("status") == "ok" else "degraded",
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "campaign.qualify",
+                "consistent": result.get("consistent"),
+                "similarity": result.get("similarity"),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status="accepted" if result.get("status") == "ok" else "degraded",
+            response=response,
+            agent="campaign-decomposer",
+            flow="chat",
+            audit_id=audit_id,
+        )
+
+    def _render_campaign_decompose_result(self, result: dict[str, Any]) -> str:
+        if result.get("status") != "ok":
+            return f"No he podido descomponerlo: {result.get('error', 'error desconocido')}."
+
+        query = result.get("query") or {}
+        lines = [
+            f"Entendido: {query.get('business_type', '?')} en {query.get('city', '?')}"
+            + (f", radio {query['radius_km']}km" if query.get("radius_km") else "")
+            + ".",
+        ]
+        similarity = result.get("similarity")
+        consistent = result.get("consistent")
+        if similarity is not None:
+            pct = round(similarity * 100)
+            if consistent:
+                lines.append(f"Verificado contra el LLM local: {pct}% de similitud — coincide con lo que pediste.")
+            else:
+                lines.append(
+                    f"Ojo: solo {pct}% de similitud al verificar contra el LLM local — puede que me haya desviado. "
+                    f"Reconstrucción: \"{result.get('reconstructed', '?')}\"."
+                )
+        else:
+            lines.append(f"({result.get('note', 'no se pudo verificar')})")
+        return "\n".join(lines)
 
     async def _handle_mouse_speed_propose(
         self,

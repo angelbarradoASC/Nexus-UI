@@ -64,6 +64,7 @@ class DesktopSkillRouter:
         "cisco.switch.prediagnostico": ["infra.cisco.observe"],
         "web.busqueda": [],
         "sales.prospecting": [],
+        "campaign.qualify": [],
         "desktop.mouse_speed": ["desktop.system.control"],
         "desktop.system_task": ["desktop.system.control"],
         "vault.add_credential": ["vault.write"],
@@ -88,6 +89,7 @@ class DesktopSkillRouter:
         "cisco.switch.prediagnostico": PermissionLevel.ASSIST,
         "web.busqueda": PermissionLevel.ASSIST,
         "sales.prospecting": PermissionLevel.ASSIST,
+        "campaign.qualify": PermissionLevel.OBSERVE,
         "desktop.mouse_speed": PermissionLevel.OPERATE,
         "desktop.system_task": PermissionLevel.OPERATE,
         "vault.add_credential": PermissionLevel.ADMIN,
@@ -267,6 +269,16 @@ class DesktopSkillRouter:
             return "mcp.conectar", 0.92, "La peticion pide conectar un servidor MCP nuevo."
         if "mcp" in lowered:
             return "mcp.usar", 0.85, "La peticion menciona MCP sin pedir conectar uno nuevo — se interpreta como usar un servidor ya conectado."
+        if any(term in lowered for term in ("cualificar", "cualifica", "revisar hoy", "campaña", "campana")) and any(
+            term in lowered
+            for term in (
+                "asesor", "gestor", "fiscal", "laboral", "contable", "clinica",
+                "dentista", "odont", "inmobiliaria", "pisos", "alquiler",
+                "restaurante", "hosteleria", "peluquer", "salon", "salón",
+                "taller", "gimnasio", "empresas", "negocios",
+            )
+        ):
+            return "campaign.qualify", 0.9, "La peticion pide cualificar negocios para la campaña — descomposicion+verificacion, no una busqueda de Sales."
         if any(term in lowered for term in ("busca", "buscar", "encuentra", "dame el listado", "listado de")) and (
             "cerca de" in lowered
             or any(

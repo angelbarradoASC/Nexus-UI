@@ -67,6 +67,10 @@ def _apply_desktop_sales_config(cfg, data: dict | None) -> None:
         cfg.brave_search_api_key = brave["api_key"]
     if "rate_limit" in brave:
         cfg.brave_search_rate_limit = float(brave["rate_limit"])
+    if brave.get("soft_limit") is not None:
+        cfg.brave_search_soft_limit = int(brave["soft_limit"])
+    if brave.get("hard_limit") is not None:
+        cfg.brave_search_hard_limit = int(brave["hard_limit"])
     gp = data.get("google_places", {})
     if "enabled" in gp:
         cfg.google_places_enabled = bool(gp["enabled"])
@@ -421,6 +425,8 @@ async def get_desktop_sales_config():
             "enabled": cfg.brave_search_enabled,
             "api_key_set": bool(cfg.brave_search_api_key),
             "rate_limit": cfg.brave_search_rate_limit,
+            "soft_limit": cfg.brave_search_soft_limit,
+            "hard_limit": cfg.brave_search_hard_limit,
         },
         "google_places": {
             "enabled": cfg.google_places_enabled,
@@ -450,6 +456,8 @@ class _DesktopSalesConfigBody(BaseModel):
     brave_enabled: bool = False
     brave_api_key: str = ""
     brave_rate_limit: float = 1.0
+    brave_soft_limit: int | None = None
+    brave_hard_limit: int | None = None
     gp_enabled: bool = False
     gp_api_key: str = ""
     gp_rate_limit: float = 0.5
@@ -482,7 +490,10 @@ async def save_desktop_sales_config(
         return new_val if new_val else (old_val or "")
 
     data = {
-        "brave": {"enabled": body.brave_enabled, "api_key": _keep(body.brave_api_key, ex_brave.get("api_key", "")), "rate_limit": body.brave_rate_limit},
+        "brave": {
+            "enabled": body.brave_enabled, "api_key": _keep(body.brave_api_key, ex_brave.get("api_key", "")),
+            "rate_limit": body.brave_rate_limit, "soft_limit": body.brave_soft_limit, "hard_limit": body.brave_hard_limit,
+        },
         "google_places": {
             "enabled": body.gp_enabled, "api_key": _keep(body.gp_api_key, ex_gp.get("api_key", "")),
             "rate_limit": body.gp_rate_limit, "max_results": body.gp_max_results,

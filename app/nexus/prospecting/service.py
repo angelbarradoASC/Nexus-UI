@@ -24,7 +24,7 @@ from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
-from nexus.prospecting.api_budget import BudgetExceededError, PlacesApiBudget
+from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, PlacesApiBudget
 from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES
 from nexus.utils.geocoding import GeocodeCache, haversine_km
 from nexus.utils.text import normalize_text as _normalize_text
@@ -116,6 +116,11 @@ class ProspectingAgentService:
         )
         self._opportunity_scorer = opportunity_scorer or OpportunityScorer()
         self._budget = PlacesApiBudget(cfg.prospecting_data_dir)
+        self._brave_budget = BraveApiBudget(
+            cfg.prospecting_data_dir,
+            soft_limit=getattr(cfg, "brave_search_soft_limit", None),
+            hard_limit=getattr(cfg, "brave_search_hard_limit", None),
+        )
         self._orchestrator = ProspectingPromptOrchestrator(
             llm_client=self._llm,
             brave_enabled=self._brave.enabled,
@@ -256,8 +261,14 @@ class ProspectingAgentService:
         return self._run_summary(run)
 
     def get_budget(self) -> dict:
-        """Return current month's API budget status (synchronous snapshot)."""
-        return self._budget.status()
+        """Return current month's API budget status (synchronous snapshot).
+
+        Places se mantiene en el nivel superior (compatibilidad con el JS
+        existente, que ya lee calls/hard_limit/remaining/status de aqui
+        directamente) — Brave se añade anidado bajo "brave", mismo shape."""
+        status = self._budget.status()
+        status["brave"] = self._brave_budget.status()
+        return status
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         run = await self._repository.get_run(run_id)
@@ -1106,6 +1117,11 @@ class ProspectingAgentService:
         self._log(run, f"Brave Search: {len(queries)} queries", queries=queries[:5])
         raw_hits: list[dict[str, Any]] = []
         for query in queries:
+            try:
+                self._brave_budget.check_or_raise()
+            except BudgetExceededError as exc:
+                self._log(run, f"{exc} — se detiene el discovery de Brave, se conserva lo ya encontrado.", level="error")
+                break
             payload = await self._brave.search(
                 run_id=run_id,
                 query=query,
@@ -1113,6 +1129,7 @@ class ProspectingAgentService:
                 language=brief.language,
                 count=min(max(brief.desired_count, 5), 20),
             )
+            await self._brave_budget.increment(1)
             batch = [
                 {
                     "query": query,
@@ -1297,6 +1314,12 @@ class ProspectingAgentService:
         if not query:
             return {}
 
+        try:
+            self._brave_budget.check_or_raise()
+        except BudgetExceededError as exc:
+            self._log(run, f"{exc} — se salta el enriquecimiento Brave de '{base_name[:50]}'.", level="error")
+            return {}
+
         payload = await self._brave.search(
             run_id=run_id,
             query=query,
@@ -1304,6 +1327,7 @@ class ProspectingAgentService:
             language=brief.language,
             count=5,
         )
+        await self._brave_budget.increment(1)
         results = list(payload.get("results", []))[:3]
         run.setdefault("enrichment_queries", [])
         if query not in run["enrichment_queries"]:

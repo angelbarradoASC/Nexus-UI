@@ -78,6 +78,8 @@ button {
 
 .field-wide { grid-column: 1 / -1; }
 
+.field-hint { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin: 0; }
+
 .status-inline { color: var(--muted); font-size: 13px; }
 
 .toggle-row {
@@ -630,7 +632,13 @@ button {
 }
 
 .module-form-body {
-    flex: 0 1 auto;
+    /* flex-shrink:0 — bug pre-existente encontrado el 2026-08-29: con el
+       shrink por defecto (1), un hermano alto (ej. el grid de Verticales
+       comerciales) se llevaba TODO el espacio y colapsaba esta seccion
+       (Brave/Places/CRM) a 0px real, dejandola invisible aunque siguiera
+       en el DOM. max-height:50% se conserva como techo para contenido
+       realmente largo, pero ya no se deja apretar a la nada por un vecino. */
+    flex: 0 0 auto;
     max-height: 50%;
     overflow: auto;
     display: flex;

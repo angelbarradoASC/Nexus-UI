@@ -151,6 +151,12 @@ class AppConfig(BaseSettings):
     brave_search_api_key: str | None = None
     brave_search_enabled: bool = False
     brave_search_rate_limit: float = Field(default=1.0, ge=0.0, le=60.0)
+    # Brave dejo de dar un nivel gratis universal en 2026 (verificado en
+    # vivo: cuentas nuevas solo tienen $5/mes en creditos, ~1000 queries) —
+    # control ferreo de volumen, configurable desde /nexus/settings, no fijo
+    # en codigo. None = usa los defaults de api_budget.py.
+    brave_search_soft_limit: int | None = Field(default=None, ge=0, le=1_000_000)
+    brave_search_hard_limit: int | None = Field(default=None, ge=0, le=1_000_000)
     google_places_api_key: str | None = None
     google_places_enabled: bool = False
     google_places_rate_limit: float = Field(default=0.5, ge=0.0, le=10.0)

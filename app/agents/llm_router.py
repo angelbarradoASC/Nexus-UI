@@ -143,19 +143,24 @@ class LLMRouter:
                 cost_per_1k_tokens=0.0, timeout=120,
             )
 
-        # L1 — Groq (llama-3.1-8b-instant) — OpenRouter free (50/dia) se agoto
+        # L1 — Groq (openai/gpt-oss-20b) — OpenRouter free (50/dia) se agoto
         # probando esta noche; Groq da 1000-14400/dia gratis, sin tarjeta.
+        # Groq retiro toda la familia Llama de su catalogo (llama-3.1-8b-instant
+        # devolvia 404 model_not_found) — migrado a gpt-oss-20b.
         if cfg.l1_url and cfg.l1_key:
             self._levels[1] = LLMLevel(
-                level=1, name="L1-Groq-Llama8B",
+                level=1, name="L1-Groq-GptOss20B",
                 url=cfg.l1_url, api_key=cfg.l1_key, model=cfg.l1_model,
                 cost_per_1k_tokens=0.0, timeout=30,
             )
 
-        # L2 — Groq (llama-3.3-70b-versatile)
+        # L2 — Groq (qwen/qwen3.8-27b) — antes llama-3.3-70b-versatile, tambien
+        # retirado por Groq (404 model_not_found). Qwen en vez de otro gpt-oss
+        # para que la escalada L2 tenga un proveedor/familia realmente distinto
+        # de L1 y L3, no solo un tamano distinto del mismo modelo.
         if cfg.llm_l2_url and cfg.llm_l2_key:
             self._levels[2] = LLMLevel(
-                level=2, name="L2-Groq-Llama70B",
+                level=2, name="L2-Groq-Qwen27B",
                 url=cfg.llm_l2_url, api_key=cfg.llm_l2_key, model=cfg.llm_l2_model,
                 cost_per_1k_tokens=0.0, timeout=30,
             )

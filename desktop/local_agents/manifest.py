@@ -42,6 +42,7 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             AgentCapability(capability_id="crm.configure", name="Configurar conexión a CRM", description="Configura la conexión de Sales a Assets CRM u Odoo, pendiente de confirmación."),
             AgentCapability(capability_id="mcp.connect", name="Conectar servidor MCP", description="Conecta PEPO a un servidor MCP (Model Context Protocol) externo, stdio o http, pendiente de confirmación."),
             AgentCapability(capability_id="mcp.call", name="Usar herramientas MCP", description="Usa las herramientas de un servidor MCP ya conectado — solo lectura directo, escritura pendiente de confirmación."),
+            AgentCapability(capability_id="campaign.qualify", name="Cualificar para la Campaña", description="Descompone una petición de cualificación en lenguaje natural y la verifica de ida y vuelta contra el LLM local — solo lectura, no lanza ninguna búsqueda."),
         ],
         skill_ids=[
             "desktop.system_task",
@@ -54,6 +55,7 @@ LOCAL_AGENT_MANIFESTS: list[AgentManifest] = [
             "crm.configurar",
             "mcp.conectar",
             "mcp.usar",
+            "campaign.qualify",
         ],
         connector_ids=["cmdb", "vault", "ssh", "powershell", "docker_cli", "windows_registry", "crm", "mcp"],
         tags=["pepo", "local", "confirmable"],

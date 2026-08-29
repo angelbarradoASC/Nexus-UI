@@ -196,6 +196,7 @@ def build_runtime(cfg) -> NexusRuntime:
         campaign_agent=campaign,
         mcp_agent=mcp_agent,
         mcp_server_store=mcp_server_store,
+        campaign_decomposer=campaign_decomposer,
         skill_router=skill_router,
         incident_repository=MemoryIncidentRepository(),
         audit_repository=MemoryAuditRepository(),

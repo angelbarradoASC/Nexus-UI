@@ -1,0 +1,35 @@
+{
+  "id": "campaign.qualify",
+  "name": "Cualificar negocios para Campaña",
+  "description": "Pide CUALIFICAR o REVISAR negocios para la Campaña (no una búsqueda de Sales): descompone el tipo de negocio, ciudad y distancia/radio en JSON, y verifica contra el LLM que la interpretación no se ha desviado del pedido original. Incluye peticiones como 'quiero cualificar peluquerías en Zaragoza a 12km', 'revisa hoy salones de belleza cerca de', 'cualifica negocios de tipo X en Y'.",
+  "execution": {
+    "where": "server",
+    "timeout": 120,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L1",
+    "preferred_level": "L2"
+  },
+  "inputs": {
+    "business_type": {"type": "str", "required": false},
+    "city": {"type": "str", "required": false},
+    "radius_km": {"type": "float", "required": false}
+  },
+  "outputs": {
+    "consistent": "bool",
+    "similarity": "float"
+  },
+  "triggers": [
+    "quiero cualificar",
+    "cualifica negocios de",
+    "revisar hoy",
+    "cualificar para la campaña",
+    "revisa negocios de tipo"
+  ],
+  "examples": [
+    "quiero cualificar peluquerias en zaragoza a 12 kilometros",
+    "revisar hoy salones de belleza cerca de villamayor"
+  ]
+}

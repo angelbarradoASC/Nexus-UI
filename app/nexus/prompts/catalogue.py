@@ -604,6 +604,8 @@ Respuesta: peluquerías en Zaragoza en un radio de 12 km""",
 
 Si se te pasan turnos anteriores de la conversacion, usalos para resolver referencias del ultimo mensaje que no tienen sentido por si solas: "hazlo", "vuelve a hacerlo", "bajala a la mitad", "esa misma" — el skill_id debe ser el que encaja con la accion referida, no "general.respuesta" por falta de palabras clave explicitas.
 
+REGLA CRITICA: si el usuario esta preguntando SOBRE ti (tus capacidades, tus permisos, por que puedes o no hacer algo, como funciona tu acceso) en vez de PIDIENDOTE que hagas algo, es "general.respuesta" — nunca un skill de accion. Una pregunta como "por que puedes acceder a mi Windows" o "que tengo que hacer para que tengas ese acceso" es curiosidad/aclaracion, NO una orden de crear un ticket, conectar nada, ni ejecutar nada. Solo elige un skill de accion cuando el mensaje pide EXPLICITAMENTE esa accion.
+
 {"skill_id": "...", "confidence": 0.0, "rationale": "...", "entities": {"servidor": null, "ticket_id": null, "container": null}}
 
 skill_id debe ser EXACTAMENTE una de estas opciones (generadas desde el catalogo real de skills — si no aparece aqui, no existe):
@@ -635,6 +637,9 @@ Usuario: "abre un ticket para el servidor web-prod-01, esta caido"
 
 Usuario: "hola, que tal"
 {"skill_id":"general.respuesta","confidence":0.99,"rationale":"Conversacion general sin accion que ejecutar.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
+Usuario: "que debo hacer para que tengas ese acceso? por que ahora mismo puedes acceder a mi windows..."
+{"skill_id":"general.respuesta","confidence":0.9,"rationale":"Pregunta sobre las capacidades/permisos de PEPO, no pide ninguna accion (ni ticket, ni conexion, ni ejecucion).","entities":{"servidor":null,"ticket_id":null,"container":null}}
 
 Usuario: "puedes bajar un poco la velocidad de mi raton?"
 {"skill_id":"desktop.mouse_speed","confidence":0.95,"rationale":"Pide reducir la velocidad del puntero de este ordenador.","entities":{"servidor":null,"ticket_id":null,"container":null,"direction":"down"}}

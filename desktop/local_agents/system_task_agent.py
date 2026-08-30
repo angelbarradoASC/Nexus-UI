@@ -31,11 +31,15 @@ import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("nexus.system_task_agent")
 
-_MAX_LOOP_STEPS = 6
+# 6 bastaba para "una tarea de sistema = un script", pero analizar codigo real
+# necesita list_directory + varios read_file antes del finish — con 6 se
+# quedaba sin pasos a media exploracion.
+_MAX_LOOP_STEPS = 12
 
 # Parsea el script con el propio parser de PowerShell (no regex) y comprueba
 # con Get-Command que cada cmdlet referenciado existe de verdad en esta
@@ -121,6 +125,38 @@ _TOOLS: list[dict[str, Any]] = [
                 "saltar directo a algo drastico como reiniciar el equipo."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_directory",
+            "description": (
+                "Lista el contenido de una carpeta real de este PC (nombre, tipo, tamano) — "
+                "de solo lectura, SIN pedir confirmacion. Usalo para explorar un proyecto o "
+                "carpeta antes de leer ficheros concretos con read_file."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Ruta absoluta de la carpeta, ej. C:\\Users\\ana\\proyecto"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": (
+                "Lee el contenido de texto de un fichero real de este PC — de solo lectura, "
+                "SIN pedir confirmacion. Usalo para analizar codigo o configuracion una vez "
+                "sepas que fichero te interesa (por list_directory o porque el usuario lo dijo)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Ruta absoluta del fichero, ej. C:\\Users\\ana\\proyecto\\main.py"}},
+                "required": ["path"],
+            },
         },
     },
     {
@@ -292,6 +328,79 @@ class SystemTaskAgent:
                 sections.append(f"### {label}\n[error: {exc}]")
         return "\n\n".join(sections)
 
+    # ── Tools: list_directory / read_file (solo lectura, sin confirmar) ─────
+    # Mismo nivel de riesgo que run_diagnostic (lectura, no cambia nada) —
+    # a diferencia de run_diagnostic la ruta la decide el LLM/usuario, no una
+    # whitelist cerrada, porque el objetivo es justamente poder apuntar a
+    # CUALQUIER carpeta/proyecto real del usuario para analizarlo.
+
+    _MAX_LIST_ENTRIES = 300
+    _MAX_READ_CHARS = 100_000  # ~25-30k tokens, de sobra para un fichero de codigo
+
+    def _list_directory_sync(self, path: str) -> str:
+        target = Path(path)
+        if not target.exists():
+            return f"No existe la carpeta: {path}"
+        if not target.is_dir():
+            return f"No es una carpeta (es un fichero): {path}"
+        try:
+            entries = list(target.iterdir())
+        except PermissionError:
+            return f"Sin permiso para listar: {path}"
+        except OSError as exc:
+            return f"Error listando {path}: {exc}"
+
+        entries.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+        truncated = len(entries) > self._MAX_LIST_ENTRIES
+        lines = []
+        for entry in entries[: self._MAX_LIST_ENTRIES]:
+            try:
+                if entry.is_dir():
+                    lines.append(f"[DIR]  {entry.name}")
+                else:
+                    size = entry.stat().st_size
+                    lines.append(f"[FILE] {entry.name} ({size} bytes)")
+            except OSError:
+                lines.append(f"[?]    {entry.name}")
+        if truncated:
+            lines.append(f"... ({len(entries) - self._MAX_LIST_ENTRIES} elementos mas, no mostrados)")
+        return f"Contenido de {path}:\n" + ("\n".join(lines) if lines else "(vacia)")
+
+    async def _list_directory(self, path: str) -> str:
+        if not path.strip():
+            return "Falta la ruta de la carpeta a listar."
+        return await asyncio.to_thread(self._list_directory_sync, path)
+
+    def _read_file_sync(self, path: str) -> str:
+        target = Path(path)
+        if not target.exists():
+            return f"No existe el fichero: {path}"
+        if not target.is_file():
+            return f"No es un fichero (es una carpeta): {path}"
+        try:
+            raw = target.read_bytes()
+        except PermissionError:
+            return f"Sin permiso para leer: {path}"
+        except OSError as exc:
+            return f"Error leyendo {path}: {exc}"
+
+        if b"\x00" in raw[:8192]:
+            return f"{path} parece un fichero binario (no de texto) — no se puede leer como codigo."
+
+        text = raw.decode("utf-8", errors="replace")
+        truncated = len(text) > self._MAX_READ_CHARS
+        if truncated:
+            text = text[: self._MAX_READ_CHARS]
+        header = f"Contenido de {path}"
+        if truncated:
+            header += f" (truncado a los primeros {self._MAX_READ_CHARS} caracteres)"
+        return f"{header}:\n{text}"
+
+    async def _read_file(self, path: str) -> str:
+        if not path.strip():
+            return "Falta la ruta del fichero a leer."
+        return await asyncio.to_thread(self._read_file_sync, path)
+
     # ── Validacion: cmdlets reales antes de confirmar ───────────────────────
 
     async def _validate_script(self, script: str) -> list[str]:
@@ -388,6 +497,16 @@ class SystemTaskAgent:
 
             if name == "run_diagnostic":
                 result_text = await self._run_diagnostic()
+                messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
+                continue
+
+            if name == "list_directory":
+                result_text = await self._list_directory(args.get("path", ""))
+                messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
+                continue
+
+            if name == "read_file":
+                result_text = await self._read_file(args.get("path", ""))
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
                 continue
 

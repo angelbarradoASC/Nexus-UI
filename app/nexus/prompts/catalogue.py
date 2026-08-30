@@ -647,6 +647,9 @@ Usuario: "puedes bajar un poco la velocidad de mi raton?"
 Usuario: "cuentame el estado de esta maquina, cpu memoria y disco"
 {"skill_id":"desktop.system_task","confidence":0.92,"rationale":"Pregunta por el estado del PC local (este ordenador), no nombra ningun servidor remoto.","entities":{"servidor":null,"ticket_id":null,"container":null}}
 
+Usuario: "puedes analizar el codigo de C:/Users/ana/mi-proyecto?"
+{"skill_id":"desktop.system_task","confidence":0.93,"rationale":"Pide leer/analizar ficheros de una carpeta real de este PC — desktop.system_task tiene herramientas de solo lectura (list_directory, read_file) para esto, nunca es 'no puedo acceder al sistema de archivos'.","entities":{"servidor":null,"ticket_id":null,"container":null}}
+
 Usuario: "revisa el servidor BeaServer"
 {"skill_id":"ssh.diagnostico","confidence":0.9,"rationale":"Nombra un servidor remoto concreto por nombre.","entities":{"servidor":"BeaServer","ticket_id":null,"container":null}}
 
@@ -687,6 +690,7 @@ Devuelve SOLO el JSON.""",
 Reglas:
 - Antes de suponer un dato, comprueba si puedes averiguarlo con lookup_cmdb.
 - Si la tarea es un sintoma vago (va lento, no responde, se cuelga, esta raro) y no un objetivo concreto, usa SIEMPRE run_diagnostic antes de proponer nada — es de solo lectura, no pide confirmacion, y te da datos reales (procesos por CPU/memoria, disco, uptime) en vez de adivinar la causa.
+- Si la tarea es analizar codigo, revisar un proyecto o leer ficheros de una carpeta real de este PC, usa list_directory para ver que hay y read_file para leer los ficheros concretos que hagan falta — ambas son de solo lectura, sin pedir confirmacion. NUNCA respondas que "no puedes acceder al sistema de archivos" — si tienes la ruta, puedes leerla con estas herramientas. Si el usuario no ha dado ninguna ruta, pregunta con ask_user cual es la carpeta antes de nada.
 - Con el diagnostico en la mano, propon la accion MENOS drastica que explique lo que has visto — no la mas grande que conozcas. Reiniciar el equipo (Restart-Computer) es el ultimo recurso, no el primero: solo propon eso si el diagnostico realmente lo justifica (por ejemplo llevas dias sin reiniciar y hay actualizaciones pendientes) o el usuario lo pide explicitamente. Si el diagnostico muestra que un proceso concreto consume todo, propon actuar sobre ESE proceso, no reiniciar todo el sistema.
 - Si de verdad no hay forma de saberlo (no esta en el CMDB, no lo has dicho tu ni el usuario antes, y run_diagnostic no lo aclara), pregunta con ask_user — UNA sola cosa concreta cada vez, nunca varias a la vez.
 - Cuando ya tengas todos los datos que necesitas, usa run_script con el comando final.

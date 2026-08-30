@@ -38,6 +38,7 @@ from nexus.investigation.technology_plan import TechnologyInvestigationPlanner
 from nexus.monitoring.alert_pipeline import AlertPipeline
 from nexus.monitoring.runbooks import RunbookRegistry
 from nexus.operations import AssetsOperationsService
+from nexus.operations.ticket_agent import TicketAgent
 from nexus.policy.guardrails import can_auto_execute, should_create_ticket
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting import ProspectingAgentService
@@ -96,6 +97,7 @@ class NexusCoordinator:
         mcp_server_store: Any | None = None,
         campaign_decomposer: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
+        ticket_agent: Any | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
@@ -109,6 +111,7 @@ class NexusCoordinator:
         self._self_config_agent = self_config_agent
         self._campaign_agent = campaign_agent
         self._mcp_agent = mcp_agent
+        self._ticket_agent = ticket_agent or (TicketAgent(operations) if operations is not None else None)
         self._mcp_server_store = mcp_server_store
         self._campaign_decomposer = campaign_decomposer
         self._incident_repository = incident_repository
@@ -141,13 +144,13 @@ class NexusCoordinator:
 
     async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -173,6 +176,8 @@ class NexusCoordinator:
             result = await self._remote_ops_agent.confirm(context_id, user_reply)
         elif agent is self._mcp_agent:
             result = await self._mcp_agent.confirm(context_id, user_reply)
+        elif agent is self._ticket_agent:
+            result = await self._ticket_agent.confirm(context_id, user_reply)
         else:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
@@ -220,6 +225,8 @@ class NexusCoordinator:
             return await self._handle_self_config_pending(payload, audit_id, context_key)
         if self._mcp_agent is not None and self._mcp_agent.has_pending(context_key):
             return await self._handle_mcp_pending(payload, audit_id, context_key)
+        if self._ticket_agent is not None and self._ticket_agent.has_pending(context_key):
+            return await self._handle_assets_ticket_pending(payload, audit_id, context_key)
         resolution = resolution_override or self._skill_router.resolve(payload.message).to_dict()
         skill_id = resolution.get("skill_id", "general.respuesta")
         if skill_id == "desktop.mouse_speed" and self._mouse_agent is not None:
@@ -240,7 +247,7 @@ class NexusCoordinator:
             skill_id == "jira.crear_ticket"
             and payload.mode in {"operator", "monitoring", "incident"}
         ):
-            return await self._handle_assets_ticket_chat(payload, resolution, audit_id)
+            return await self._handle_assets_ticket_chat(payload, resolution, audit_id, context_key)
         if skill_id == "docker.prediagnostico":
             return await self._handle_docker_prediagnostic_chat(payload, resolution, audit_id)
         if skill_id == "sales.prospecting" and self._prospecting is not None:
@@ -661,12 +668,23 @@ class NexusCoordinator:
             verdict = _match_confirmation(payload.message)
             if verdict == "yes":
                 result = await self._system_task_agent.confirm(context_key)
-                if result and result.get("error"):
-                    response = f"No lo he conseguido: {result['error']}"
-                elif result:
-                    response = result.get("content") or "Hecho."
-                else:
+                if result is None:
                     response = "No había ninguna tarea pendiente."
+                elif result.get("next_question"):
+                    # El script fallo y PEPO decidio que necesita un dato antes de reintentar.
+                    response = result["next_question"]
+                elif result.get("next_script"):
+                    # El script fallo y PEPO propone uno distinto (mas acotado) — sigue
+                    # exigiendo confirmacion, no se ejecuta solo.
+                    response = (
+                        f"Eso no ha funcionado, pero puedo intentar otra cosa "
+                        f"({result.get('next_description')}):\n"
+                        f"```\n{result['next_script']}\n```\n¿Confirmas que lo ejecute?"
+                    )
+                elif result.get("error"):
+                    response = f"No lo he conseguido: {result['error']}"
+                else:
+                    response = result.get("content") or "Hecho."
             elif verdict == "no":
                 self._system_task_agent.cancel(context_key)
                 response = "Vale, no toco nada."
@@ -1172,12 +1190,19 @@ class NexusCoordinator:
         payload: ChatRequest,
         resolution: dict[str, Any],
         audit_id: str,
+        context_key: str,
     ) -> ChatResponse:
-        if self._operations is None:
+        """Propone el ticket (composicion via LLM, solo lectura) y pide confirmacion
+        antes de escribir nada en Assets. Antes esto creaba el ticket directamente
+        en cuanto el clasificador de intencion resolvia este skill — bug real: una
+        pregunta meta ("por que da timeout?") se clasifico asi y PEPO creo un
+        ticket que nadie pidio. La clasificacion nunca va a ser perfecta; el freno
+        real es la confirmacion humana, igual que ya exige mouse_speed/system_task."""
+        if self._ticket_agent is None:
             response = "La integracion de ticketing de Assets no esta disponible en este runtime."
             await self._audit(
                 flow="chat",
-                action="create_assets_ticket",
+                action="propose_assets_ticket",
                 actor=payload.user_id,
                 status="degraded",
                 details={
@@ -1197,35 +1222,83 @@ class NexusCoordinator:
             )
 
         try:
-            result = await self._operations.create_ticket_from_message(
+            proposal = await self._ticket_agent.propose(
+                context_key,
                 payload.message,
-                source="codex",
                 actor=payload.user_id,
-                trigger_kind="operator",
                 context={
                     "mode": payload.mode,
                     "context_id": payload.context_id,
                     "skill_entities": resolution.get("entities", {}),
                 },
             )
-            ticket_payload = result.get("ticket_payload", {})
+            ticket_payload = proposal["ticket_payload"]
             response = (
-                f"He creado el ticket #{result.get('task_id')} en Assets: "
-                f"{result.get('task_title') or ticket_payload.get('title', 'sin titulo')}.\n"
+                f"Puedo crear este ticket en Assets: {ticket_payload.get('title', 'sin titulo')}\n"
                 f"Tipo: {ticket_payload.get('ticket_type', 'task')} · "
-                f"Prioridad: {ticket_payload.get('priority', 'medium')} · "
-                f"Estado: {ticket_payload.get('status', 'pending')}."
+                f"Prioridad: {ticket_payload.get('priority', 'medium')}\n"
+                "¿Confirmas que lo cree? (sí/no)"
             )
             status = "accepted"
         except Exception as exc:
-            response = f"No he podido crear el ticket en Assets: {exc}"
+            response = f"No he podido preparar el ticket en Assets: {exc}"
             status = "degraded"
-            result = {
-                "task_id": None,
-                "task_title": None,
-                "ticket_payload": {},
-                "error": str(exc),
-            }
+            ticket_payload = {}
+
+        await self._audit(
+            flow="chat",
+            action="propose_assets_ticket",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "ticket_payload": ticket_payload,
+                "skill_id": resolution.get("skill_id"),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status=status,
+            response=response,
+            agent="operator-ticketing",
+            flow="chat",
+            audit_id=audit_id,
+        )
+
+    async def _handle_assets_ticket_pending(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        verdict = _match_confirmation(payload.message)
+        if verdict == "yes":
+            result = await self._ticket_agent.confirm(context_key)
+            if result is None:
+                response = "No había ningún ticket pendiente."
+                status = "accepted"
+            elif result.get("error"):
+                response = f"No he podido crear el ticket en Assets: {result['error']}"
+                status = "degraded"
+            else:
+                ticket_payload = result.get("ticket_payload", {})
+                response = (
+                    f"He creado el ticket #{result.get('task_id')} en Assets: "
+                    f"{result.get('task_title') or ticket_payload.get('title', 'sin titulo')}.\n"
+                    f"Tipo: {ticket_payload.get('ticket_type', 'task')} · "
+                    f"Prioridad: {ticket_payload.get('priority', 'medium')} · "
+                    f"Estado: {ticket_payload.get('status', 'pending')}."
+                )
+                status = "accepted"
+        elif verdict == "no":
+            self._ticket_agent.cancel(context_key)
+            response = "Vale, no creo el ticket."
+            status = "accepted"
+        else:
+            response = "¿Confirmas que cree el ticket en Assets? (sí/no)"
+            status = "accepted"
 
         await self._audit(
             flow="chat",
@@ -1236,10 +1309,7 @@ class NexusCoordinator:
                 "mode": payload.mode,
                 "context_id": payload.context_id,
                 "message_preview": payload.message[:160],
-                "ticket_id": result.get("task_id"),
-                "ticket_title": result.get("task_title"),
-                "ticket_payload": result.get("ticket_payload", {}),
-                "skill_id": resolution.get("skill_id"),
+                "pending_resolution": response[:200],
             },
             audit_id=audit_id,
         )

@@ -692,6 +692,8 @@ Reglas:
 - Cuando ya tengas todos los datos que necesitas, usa run_script con el comando final.
 - Si la tarea no se puede resolver con un script (requiere manejar una GUI sin cmdlet equivalente) o ya esta resuelta con lo que sabes, usa finish.
 - No inventes nombres de cmdlet que no existen. Usa solo comandos y cmdlets estandar y muy conocidos de PowerShell/Windows (Get-*, Set-*, New-Item, Test-Path, Clear-RecycleBin, w32tm, etc). Si no estas seguro de que un cmdlet exista, prefiere el enfoque mas basico y verificable en vez de arriesgar un nombre inventado.
+- Si la tarea implica buscar contenido en TODO el disco C: (o varias unidades) en vez de una carpeta concreta, avisa al usuario de que puede tardar varios minutos antes de proponer el script, y si el usuario no ha dado una carpeta, pregunta primero si puede acotarlo (Documentos, Descargas, un proyecto concreto) — un rastreo de disco completo es una tarea legitima pero lenta, no un fallo.
+- Select-String / findstr sobre ficheros .pdf, .docx, .xlsx u otros formatos binarios/comprimidos NO encuentra el texto real (esos formatos no son texto plano) — el resultado sera casi siempre vacio aunque el contenido este ahi. Si la tarea es buscar texto dentro de PDFs u Office, dilo explicitamente en tu respuesta final (via finish) en vez de reportar "no se encontraron coincidencias" como si fuera concluyente.
 - Responde siempre llamando a una herramienta — no respondas en texto libre salvo que ya hayas llamado a finish.""",
     ),
     "pepo.remote_ops_loop": PromptDefinition(

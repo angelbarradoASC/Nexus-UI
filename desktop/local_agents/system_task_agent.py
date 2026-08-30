@@ -37,6 +37,14 @@ logger = logging.getLogger("nexus.system_task_agent")
 
 _MAX_LOOP_STEPS = 6
 
+# Timeout para el script YA CONFIRMADO por el usuario (no el de _run_powershell
+# por defecto, 60s, pensado para diagnosticos ligeros). Una tarea real como
+# "busca en todo el disco C: los PDF que contengan X" puede tardar varios
+# minutos de I/O legitimo — bug real: un usuario confirmo un rastreo de disco
+# completo y murio con "tardo demasiado" a los 60s, sin ningun resultado
+# parcial ni forma de saber que estaba genuinamente trabajando.
+_CONFIRMED_SCRIPT_TIMEOUT = 600.0
+
 # Parsea el script con el propio parser de PowerShell (no regex) y comprueba
 # con Get-Command que cada cmdlet referenciado existe de verdad en esta
 # maquina. Nunca escribe el script del usuario dentro de este string — lo
@@ -518,9 +526,21 @@ class SystemTaskAgent:
 
     async def _run_script_and_record(self, pending: PendingSystemTask) -> dict[str, Any]:
         try:
-            result = await asyncio.to_thread(_run_powershell, pending.script)
+            result = await asyncio.to_thread(
+                _run_powershell, pending.script, timeout=_CONFIRMED_SCRIPT_TIMEOUT
+            )
         except subprocess.TimeoutExpired:
-            return {"task": pending.task, "is_done": False, "content": None, "error": "El script tardo demasiado (timeout)."}
+            minutes = int(_CONFIRMED_SCRIPT_TIMEOUT // 60)
+            return {
+                "task": pending.task,
+                "is_done": False,
+                "content": None,
+                "error": (
+                    f"El script llevaba mas de {minutes} minutos corriendo y lo he parado. "
+                    "Si es un rastreo de disco completo, prueba a acotarlo a una carpeta "
+                    "concreta en vez de todo el disco — sera mucho mas rapido."
+                ),
+            }
 
         success = result.returncode == 0
         verify_output = ""

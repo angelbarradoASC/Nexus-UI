@@ -41,6 +41,23 @@ logger = logging.getLogger("nexus.system_task_agent")
 # quedaba sin pasos a media exploracion.
 _MAX_LOOP_STEPS = 12
 
+# Timeout para el script YA CONFIRMADO por el usuario (no el de _run_powershell
+# por defecto, 60s, pensado para diagnosticos ligeros). Una tarea real como
+# "busca en todo el disco C: los PDF que contengan X" puede tardar varios
+# minutos de I/O legitimo — bug real: un usuario confirmo un rastreo de disco
+# completo y murio con "tardo demasiado" a los 60s, sin ningun resultado
+# parcial ni forma de saber que estaba genuinamente trabajando.
+_CONFIRMED_SCRIPT_TIMEOUT = 600.0
+
+# Cuando el script confirmado falla (timeout o codigo de error), el fallo se
+# devuelve al propio bucle de PEPO como un resultado de herramienta mas —
+# el LLM decide si reintenta acotando el alcance, pregunta, o explica el
+# motivo real — en vez de que un timeout fijo sea siempre la respuesta
+# final. Limite para no encadenar reintentos automaticos sin fin: cada
+# reintento sigue exigiendo confirmacion humana antes de ejecutar nada, asi
+# que esto es una red de seguridad adicional, no el unico freno.
+_MAX_AUTO_RETRIES = 2
+
 # Parsea el script con el propio parser de PowerShell (no regex) y comprueba
 # con Get-Command que cada cmdlet referenciado existe de verdad en esta
 # maquina. Nunca escribe el script del usuario dentro de este string — lo
@@ -232,6 +249,7 @@ class PendingSystemTask:
     script: str | None = None
     verify_command: str | None = None
     description: str | None = None
+    retry_count: int = 0
 
 
 def _run_powershell(
@@ -637,9 +655,21 @@ class SystemTaskAgent:
 
     async def _run_script_and_record(self, pending: PendingSystemTask) -> dict[str, Any]:
         try:
-            result = await asyncio.to_thread(_run_powershell, pending.script)
+            result = await asyncio.to_thread(
+                _run_powershell, pending.script, timeout=_CONFIRMED_SCRIPT_TIMEOUT
+            )
         except subprocess.TimeoutExpired:
-            return {"task": pending.task, "is_done": False, "content": None, "error": "El script tardo demasiado (timeout)."}
+            minutes = int(_CONFIRMED_SCRIPT_TIMEOUT // 60)
+            return {
+                "task": pending.task,
+                "is_done": False,
+                "content": None,
+                "error": (
+                    f"El script llevaba mas de {minutes} minutos corriendo y lo he parado. "
+                    "Si es un rastreo de disco completo, prueba a acotarlo a una carpeta "
+                    "concreta en vez de todo el disco — sera mucho mas rapido."
+                ),
+            }
 
         success = result.returncode == 0
         verify_output = ""
@@ -686,6 +716,8 @@ class SystemTaskAgent:
             logger.info("Ejecutando script de sistema | modo=%s | tarea=%s", pending.kind, pending.task)
             result = await self._run_script_and_record(pending)
             logger.info("Script de sistema terminado | is_done=%s | error=%s", result["is_done"], result["error"])
+            if result["error"]:
+                return await self._handle_execution_failure(context_id, pending, result)
             return result
 
         if pending.kind == "ask_user":
@@ -694,20 +726,87 @@ class SystemTaskAgent:
             })
             outcome = await self._run_loop(pending.messages)
             stored = self._store_outcome(context_id, pending.task, outcome)
-            if stored["kind"] == "finish":
-                return {"task": pending.task, "is_done": True, "content": stored["summary"], "error": None}
-            if stored["kind"] == "ask_user":
-                return {"task": pending.task, "is_done": False, "content": None, "error": None, "next_question": stored["question"]}
-            if stored["kind"] == "run_script":
-                return {"task": pending.task, "is_done": False, "content": None, "error": None, "next_script": stored["script"], "next_description": stored["description"]}
-            if stored["kind"] == "windows_use":
-                return await self._run_windows_use(pending.task)
+            return await self._shape_continuation_result(pending.task, stored)
 
         agent_kind = pending.kind
         if agent_kind == "windows_use":
             return await self._run_windows_use(pending.task)
 
         return None
+
+    async def _shape_continuation_result(self, task: str, stored: dict[str, Any]) -> dict[str, Any]:
+        if stored["kind"] == "finish":
+            return {"task": task, "is_done": True, "content": stored["summary"], "error": None}
+        if stored["kind"] == "ask_user":
+            return {"task": task, "is_done": False, "content": None, "error": None, "next_question": stored["question"]}
+        if stored["kind"] == "run_script":
+            return {
+                "task": task, "is_done": False, "content": None, "error": None,
+                "next_script": stored["script"], "next_description": stored["description"],
+            }
+        if stored["kind"] == "windows_use":
+            return await self._run_windows_use(task)
+        return {"task": task, "is_done": False, "content": None, "error": None}
+
+    def _seed_messages_for_pending(self, pending: PendingSystemTask) -> tuple[list[dict[str, Any]], str]:
+        """El camino run_script ya trae el historial real del bucle LLM. skill_match
+        se ejecuto directo (sin pasar por el bucle), asi que no hay historial — se
+        finge que el LLM acaba de proponer ese script, para poder devolver el fallo
+        exactamente igual que en el otro camino."""
+        if pending.messages and pending.tool_call_id:
+            return pending.messages, pending.tool_call_id
+
+        from nexus.prompts import resolve_prompt_sync
+
+        tool_call_id = "skill_retry"
+        messages = [
+            {"role": "system", "content": resolve_prompt_sync("pepo.system_task_loop")},
+            {"role": "user", "content": pending.task},
+            {
+                "role": "assistant", "content": None,
+                "tool_calls": [{
+                    "id": tool_call_id,
+                    "function": {
+                        "name": "run_script",
+                        "arguments": json.dumps({
+                            "script": pending.script or "", "description": pending.description or "",
+                        }),
+                    },
+                }],
+            },
+        ]
+        return messages, tool_call_id
+
+    async def _handle_execution_failure(
+        self, context_id: str, pending: PendingSystemTask, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """El script ya confirmado fallo (timeout o codigo de error). En vez de que
+        eso sea la respuesta final, se le devuelve a PEPO como resultado de
+        herramienta para que el decida: reintentar acotando, preguntar, o explicar
+        el motivo — igual que ya hace con ask_user. Acotado por _MAX_AUTO_RETRIES
+        porque cada reintento sigue pidiendo confirmacion humana, pero no queremos
+        encadenar llamadas al LLM sin limite ante un fallo persistente."""
+        attempts = pending.retry_count + 1
+        if attempts > _MAX_AUTO_RETRIES:
+            return result
+
+        messages, tool_call_id = self._seed_messages_for_pending(pending)
+        feedback = (
+            f"El script fallo (intento {attempts} de {_MAX_AUTO_RETRIES}): {result['error']}\n"
+            "Decide que hacer: propon un script distinto y mejor acotado con run_script, "
+            "pregunta con ask_user si te falta un dato para acotarlo, o si no hay forma "
+            "razonable de resolverlo usa finish explicando el motivo real al usuario. "
+            "No repitas el mismo script que acaba de fallar."
+        )
+        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": feedback})
+
+        outcome = await self._run_loop(messages)
+        stored = self._store_outcome(context_id, pending.task, outcome)
+        if stored["kind"] == "run_script":
+            new_pending = self._pending.get(context_id)
+            if new_pending is not None:
+                new_pending.retry_count = attempts
+        return await self._shape_continuation_result(pending.task, stored)
 
     async def _run_windows_use(self, task: str) -> dict[str, Any]:
         agent = self._get_windows_use_agent()

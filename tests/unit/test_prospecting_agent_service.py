@@ -247,6 +247,43 @@ def test_zapaterias_zaragoza_actur_resolves_and_scores_from_bbdd(prospecting_cfg
 
 
 @pytest.mark.asyncio
+async def test_classify_candidate_lets_llm_veto_heuristic_always_true_fallback(prospecting_cfg):
+    """Bug real: _classify_candidate calculaba el veredicto 'relevant' del LLM y
+    lo tiraba (merged = dict(heuristic) nunca se sobreescribia con response) —
+    en verticales sin relevance_signals curados (ej. "custom", el default de
+    campaña) el heuristico siempre devuelve relevant=True, asi que nada
+    filtraba paginas que no son negocios (una pagina de resultados de
+    indeed.com, un centro comercial). Ahora el LLM puede vetar ese True
+    heuristico (AND, nunca lo contrario: no puede rescatar uno que el
+    heuristico ya descarto por señales reales)."""
+    service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        llm_client=_FakeOrchestrationLLM({
+            "relevant": False,
+            "reason": "No es un negocio local, es una pagina de resultados de busqueda.",
+        }),
+        brave_client=_FakeBrave(),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical="custom", city="Zaragoza", target_description="negocios locales")
+    )
+
+    result = await service._classify_candidate(
+        {"title": "Resume de CEO: ejemplo y consejos", "url": "https://www.indeed.com/x", "description": ""},
+        {"name": "Resume de CEO: ejemplo y consejos", "quality_signals": []},
+        {},
+        brief,
+    )
+
+    assert result["relevant"] is False
+
+
+@pytest.mark.asyncio
 async def test_geography_guardrail_accepts_pedania_within_radius_via_real_distance(prospecting_cfg):
     """Antes: un candidato en Zaragoza capital se descartaba si brief.city era una
     pedania (ej. Villamayor de Gallego) porque el nombre exacto no aparecia en el

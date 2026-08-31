@@ -1398,6 +1398,18 @@ class ProspectingAgentService:
         merged["notes"] = self._dedupe_list([heuristic.get("notes", ""), response.get("notes", "")])
         merged["is_premium"] = bool(heuristic.get("is_premium") or response.get("is_premium", False))
         merged["official_website"] = bool(heuristic.get("official_website") or response.get("official_website", False))
+        # El veredicto del LLM sobre "relevant" se estaba calculando y tirando: merged
+        # partia de dict(heuristic) y nunca se sobreescribia con response["relevant"],
+        # asi que el heuristico (que en verticales sin relevance_signals curados —
+        # "custom", el default de campaña — siempre devuelve relevant=True) era la
+        # unica palabra final. Eso dejaba pasar paginas que no son negocios (un
+        # resultado de busqueda de indeed.com, un centro comercial) porque nada
+        # comprobaba de verdad si encajaban. AND, no OR: el LLM puede vetar un
+        # candidato que el heuristico acepto por defecto, pero no puede rescatar uno
+        # que el heuristico ya descarto por señales reales.
+        llm_relevant = response.get("relevant")
+        if llm_relevant is not None:
+            merged["relevant"] = bool(heuristic.get("relevant", True)) and bool(llm_relevant)
         # contact_person and contact_role are NEVER filled by LLM inference — only by
         # real website scraping or LinkedIn DDG snippets. See _linkedin_pass().
         return merged

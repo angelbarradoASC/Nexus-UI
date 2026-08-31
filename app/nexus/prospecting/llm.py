@@ -24,6 +24,13 @@ class LocalLLMSettings:
     enabled: bool = False
 
 
+@dataclass(slots=True)
+class LocalToolCallResult:
+    content: str
+    tool_calls: list[dict[str, Any]]
+    error: str | None = None
+
+
 class LocalLLMClient:
     """Small OpenAI-compatible client for local reasoning tasks."""
 
@@ -113,6 +120,61 @@ class LocalLLMClient:
             logger.warning("LocalLLMClient | fallo tras {} intentos — degradado: {}", self._settings.retries, type(last_error).__name__)
             return ""
         return ""
+
+    async def chat_with_tools(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> LocalToolCallResult:
+        """Como complete(), pero deja que el modelo pida usar herramientas.
+        Solo soportado con provider="ollama" — Ollama ya sabe aplicar la
+        plantilla de tool-calling propia del modelo (verificado en vivo con
+        qwen3:8b, capabilities=['completion','tools','thinking']): nosotros
+        solo mandamos `tools` y leemos message.tool_calls, que Ollama ya
+        entrega parseado (arguments como dict, no como string JSON — a
+        diferencia de OpenAI). Para continuar la conversacion tras ejecutar
+        una herramienta, añade un mensaje {"role": "tool", "content": <texto>}
+        y vuelve a llamar — verificado en vivo que el modelo usa ese
+        resultado para la respuesta final."""
+        if not self.enabled:
+            return LocalToolCallResult(content="", tool_calls=[], error="LLM local deshabilitado")
+        if self._settings.provider != "ollama":
+            return LocalToolCallResult(
+                content="", tool_calls=[],
+                error=f"tool-calling no soportado para provider={self._settings.provider}",
+            )
+
+        base = (self._settings.base_url or "").rstrip("/").removesuffix("/v1")
+        endpoint = f"{base}/api/chat"
+        payload: dict[str, Any] = {
+            "model": self._settings.model,
+            "messages": messages,
+            "tools": tools,
+            "stream": False,
+            "think": False,
+            "options": {"temperature": self._settings.temperature},
+        }
+
+        last_error: Exception | None = None
+        for _ in range(max(self._settings.retries, 1)):
+            try:
+                async with httpx.AsyncClient(timeout=self._settings.timeout) as client:
+                    response = await client.post(endpoint, headers=self._headers(), json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    message = data.get("message") or {}
+                    return LocalToolCallResult(
+                        content=str(message.get("content") or "").strip(),
+                        tool_calls=message.get("tool_calls") or [],
+                    )
+            except Exception as exc:  # pragma: no cover - network variance
+                last_error = exc
+        logger.warning(
+            "LocalLLMClient.chat_with_tools | fallo tras {} intentos: {}",
+            self._settings.retries, type(last_error).__name__,
+        )
+        return LocalToolCallResult(content="", tool_calls=[], error=str(last_error) if last_error else "error desconocido")
 
     async def extract_json(
         self,

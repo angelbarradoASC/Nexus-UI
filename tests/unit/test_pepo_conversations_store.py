@@ -90,6 +90,36 @@ def test_get_messages_empty_for_conversation_without_turns(tmp_path):
     assert store.get_messages(conv.id) == []
 
 
+def test_delete_conversation_removes_conversation_and_its_messages(tmp_path):
+    store = _store(tmp_path)
+    conv = store.create_conversation("hola")
+    store.append_turn(conv.id, user_message="hola", assistant_message="hola, ¿en qué ayudo?")
+
+    deleted = store.delete_conversation(conv.id)
+
+    assert deleted is True
+    assert store.get_conversation(conv.id) is None
+    assert store.get_messages(conv.id) == []
+
+
+def test_delete_conversation_returns_false_when_missing(tmp_path):
+    store = _store(tmp_path)
+    assert store.delete_conversation("no-existe") is False
+
+
+def test_delete_conversation_does_not_affect_other_conversations(tmp_path):
+    store = _store(tmp_path)
+    keep = store.create_conversation("conversacion que se queda")
+    doomed = store.create_conversation("conversacion que se borra")
+    store.append_turn(keep.id, user_message="hola", assistant_message="hola")
+
+    store.delete_conversation(doomed.id)
+
+    ids_remaining = [c.id for c in store.list_conversations()]
+    assert ids_remaining == [keep.id]
+    assert len(store.get_messages(keep.id)) == 2
+
+
 def test_store_survives_reopening_same_db_path(tmp_path):
     """Persistencia real entre 'reinicios' — construir un segundo store
     sobre el mismo fichero debe ver los datos del primero."""

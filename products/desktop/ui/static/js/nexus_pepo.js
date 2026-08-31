@@ -207,13 +207,45 @@ function renderConversationsList(conversations) {
     }
 
     list.innerHTML = _pepoConversationsCache.map(c => `
-        <button type="button" class="pepo-conversation-item ${c.id === _pepoContextId ? 'is-active' : ''}"
-            data-conversation-id="${escHtml(c.id)}" title="${escHtml(c.title)}">${escHtml(c.title)}</button>
+        <div class="pepo-conversation-row">
+            <button type="button" class="pepo-conversation-item ${c.id === _pepoContextId ? 'is-active' : ''}"
+                data-conversation-id="${escHtml(c.id)}" title="${escHtml(c.title)}">${escHtml(c.title)}</button>
+            <button type="button" class="pepo-conversation-delete" data-delete-id="${escHtml(c.id)}"
+                title="Eliminar conversación" aria-label="Eliminar conversación">✕</button>
+        </div>
     `).join('');
 
     list.querySelectorAll('[data-conversation-id]').forEach(btn => {
         btn.addEventListener('click', () => switchConversation(btn.dataset.conversationId));
     });
+
+    list.querySelectorAll('[data-delete-id]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            deleteConversation(btn.dataset.deleteId);
+        });
+    });
+}
+
+async function deleteConversation(conversationId) {
+    if (_pepoBusy) return;
+    if (!confirm('¿Eliminar esta conversación? No se puede deshacer.')) return;
+
+    try {
+        await apiJson(`/api/desktop/pepo/conversations/${encodeURIComponent(conversationId)}`, {
+            method: 'DELETE',
+        });
+    } catch (err) {
+        console.warn('No se pudo eliminar la conversación', err);
+        alert(`No se pudo eliminar la conversación: ${err.message}`);
+        return;
+    }
+
+    const wasActive = conversationId === _pepoContextId;
+    await loadConversationsList();
+    if (wasActive) {
+        startNewChat();
+    }
 }
 
 async function loadConversationsList() {

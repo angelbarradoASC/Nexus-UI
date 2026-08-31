@@ -16,7 +16,15 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from path_setup import ensure_desktop_import_paths  # noqa: E402
+try:
+    # Funciona en dev: desktop/ es una carpeta real en disco, sys.path.insert
+    # de arriba la hace buscable y path_setup.py se importa tal cual.
+    from path_setup import ensure_desktop_import_paths  # noqa: E402
+except ModuleNotFoundError:
+    # En un build de PyInstaller no hay una carpeta desktop/ real que buscar
+    # — path_setup.py esta empaquetado como el modulo del paquete
+    # desktop.path_setup, no como un top-level "path_setup" suelto.
+    from desktop.path_setup import ensure_desktop_import_paths  # noqa: E402
 
 ensure_desktop_import_paths()
 

@@ -22,7 +22,13 @@ $Pip = Join-Path $VenvPath "Scripts\pip.exe"
 
 & $Python -m pip install --upgrade pip
 & $Pip install -r $AppRequirements -r $DesktopRequirements
+if ($LASTEXITCODE -ne 0) {
+    throw "pip install ha fallado con codigo $LASTEXITCODE - build abortada antes de empaquetar dependencias incompletas."
+}
 & $Python -m pip check
+if ($LASTEXITCODE -ne 0) {
+    throw "pip check ha encontrado conflictos de dependencias - build abortada."
+}
 
 Push-Location $RepoRoot
 try {

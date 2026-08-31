@@ -10,8 +10,8 @@ jinja2==3.1.4
 
 # Config
 python-dotenv==1.0.1
-pydantic==2.7.1
-pydantic-settings==2.3.0
+pydantic==2.7.2
+pydantic-settings==2.5.2
 
 # Database
 pymongo==4.8.0

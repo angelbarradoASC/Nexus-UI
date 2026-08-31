@@ -32,20 +32,24 @@ rich==13.7.1
 # ficheros, vision por accesibilidad de Windows via LLM (proveedor OpenRouter
 # reutilizado de llm_router.py).
 #
-# REQUISITO OBLIGATORIO DE SISTEMA — sin esto la instalacion falla:
-#   Una dependencia transitiva (elevenlabs, usado solo para voz/STT-TTS que
-#   AUN NO USAMOS pero que windows-use importa siempre al cargar el paquete)
-#   tiene rutas de fichero mas largas que el limite de Windows (260
-#   caracteres). Hay que activar "rutas largas" ANTES de instalar:
-#
-#   Desde PowerShell COMO ADMINISTRADOR (una sola vez, todo el sistema):
-#     Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-#       -Name "LongPathsEnabled" -Value 1 -Type DWord
-#
-#   Sin este paso, `pip install windows-use` falla con:
-#     OSError: [Errno 2] No such file or directory: '...\elevenlabs\...'
-#   No hace falta reiniciar Windows, pip lo recoge en la siguiente ejecucion.
-windows-use==0.8.1
+# DESACTIVADO — no instalar hasta resolver esto:
+#   windows-use 0.8.1 en PyPI arrastra una cola de ~15 SDKs sin relacion
+#   (anthropic, cerebras, discord.py, elevenlabs, google-genai, litellm,
+#   mistralai, ollama, openai, posthog, ipykernel...) con suelos de version
+#   que chocan con el resto del proyecto (cryptography>=44, httpx>=0.28.1,
+#   Pillow>=11.2.1, psutil>=7.0.0, pydantic>=2.11.7, pywin32>=311,
+#   rich>=14.0.0 — subirlos todos SI resuelve el grafo, probado en vivo) y
+#   ademas litellm en su version mas vieja compatible (1.93.0) no tiene
+#   wheel para este Python/plataforma y solo compila via Rust/Cargo — el
+#   auto-instalador de Rust de pip (puccinialin) fallo aqui con
+#   "could not read metadata for file: ...rustup-init.exe".
+#   _get_windows_use_agent() en system_task_agent.py ya hace el import de
+#   forma perezosa (solo al usar el fallback de GUI), y de hecho NO esta
+#   instalado en el venv de desarrollo que corre PEPO hoy — quitarlo de
+#   aqui no rompe nada que ya funcione, solo deja sin ese fallback
+#   concreto hasta que alguien lo revise con tiempo (fijar litellm a una
+#   version con wheel, o sustituir windows-use por algo mas ligero).
+# windows-use==0.8.1
 
 # Automatizacion GUI (nivel 1+ permisos)
 # pyautogui==0.9.54   # descomentar cuando se implemente
@@ -76,10 +80,12 @@ keyring==25.2.1
 #   mcp==1.6.0 SI funciona con las versiones que ya usa el resto del
 #   proyecto (confirmado en vivo: conexion stdio real, list_tools +
 #   call_tool correctos) — solo pydantic necesita un patch minimo
-#   (2.7.1 -> 2.7.2, sin cambios de comportamiento). Si se toca esta
-#   dependencia, instalar SIEMPRE los 4 paquetes juntos en un solo
-#   comando para que el resolver de pip no se vaya a versiones nuevas
-#   de starlette/pydantic-settings sin necesidad real:
+#   (2.7.1 -> 2.7.2, sin cambios de comportamiento; ese pin vivia
+#   duplicado y desincronizado en app/requirements/base.txt, ya
+#   corregido ahi tambien). Si se toca esta dependencia, instalar
+#   SIEMPRE los 4 paquetes juntos en un solo comando para que el
+#   resolver de pip no se vaya a versiones nuevas de
+#   starlette/pydantic-settings sin necesidad real:
 #     pip install mcp==1.6.0 starlette==0.37.2 httpx==0.27.0 pydantic==2.7.2 pydantic-settings==2.5.2
 mcp==1.6.0
 starlette==0.37.2

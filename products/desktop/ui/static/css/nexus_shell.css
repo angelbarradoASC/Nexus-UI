@@ -188,6 +188,11 @@
     color: var(--gold);
 }
 
+.chat-badge.error {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
 /* Monitoring rail */
 .monitoring-rail {
     grid-column: 2;

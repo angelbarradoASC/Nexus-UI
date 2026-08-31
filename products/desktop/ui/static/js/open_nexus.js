@@ -96,19 +96,27 @@ async function sendChat(event) {
 
     if (badge) { badge.textContent = 'procesando'; badge.className = 'chat-badge thinking'; }
     const thinkingEl = appendMessage('thinking', 'Nexus procesando...');
+    let badgeText = 'listo';
+    let badgeOk = true;
 
     try {
-        const data = await requestJson('/api/nexus/chat', {
+        // Este chat habla directo con el LLM local (192.168.68.150), no con
+        // el router de Groq compartido que usa PEPO — pedido explicito.
+        const data = await requestJson('/api/nexus/shell/chat', {
             method: 'POST',
-            body: JSON.stringify({ message, user_id: 'shell-user', mode: 'general' }),
+            body: JSON.stringify({ message }),
         });
         thinkingEl?.remove();
         appendMessage('assistant', data.response || 'Sin respuesta');
+        badgeText = data.available ? `listo (${data.model || 'local'})` : 'sin conexion';
+        badgeOk = data.available;
     } catch (e) {
         thinkingEl?.remove();
         appendMessage('assistant', `Error: ${e.message}`);
+        badgeText = 'error';
+        badgeOk = false;
     } finally {
-        if (badge) { badge.textContent = 'listo'; badge.className = 'chat-badge'; }
+        if (badge) { badge.textContent = badgeText; badge.className = badgeOk ? 'chat-badge' : 'chat-badge error'; }
     }
 }
 

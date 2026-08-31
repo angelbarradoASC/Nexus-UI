@@ -107,9 +107,16 @@ html { zoom: 0.75; }
     padding: 1rem 0;
 }
 
+.pepo-conversation-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
 .pepo-conversation-item {
     display: block;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: left;
     padding: 8px 10px;
     border-radius: var(--radius-sm);
@@ -130,6 +137,34 @@ html { zoom: 0.75; }
     border-color: var(--gold);
     color: var(--forest);
     font-weight: 600;
+}
+
+.pepo-conversation-delete {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pepo-conversation-row:hover .pepo-conversation-delete,
+.pepo-conversation-delete:focus-visible {
+    opacity: 1;
+}
+.pepo-conversation-delete:hover {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+    color: var(--danger);
 }
 
 /* ── Log de mensajes ─────────────────────────────────────────────────────── */

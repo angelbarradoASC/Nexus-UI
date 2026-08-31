@@ -74,3 +74,14 @@ async def append_conversation_turn(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversación no encontrada")
     store.append_turn(conversation_id, user_message=body.user_message, assistant_message=body.assistant_message)
     return {"available": True, "status": "saved"}
+
+
+@router.delete("/api/desktop/pepo/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    store: PepoConversationStore = Depends(get_pepo_conversation_store),
+):
+    deleted = store.delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversación no encontrada")
+    return {"available": True, "status": "deleted"}

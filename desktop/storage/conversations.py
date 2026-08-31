@@ -89,8 +89,8 @@ class PepoMessage:
 
 
 class PepoConversationStore:
-    """Persiste conversaciones + mensajes de PEPO. Sin borrar/renombrar/
-    favoritos/carpetas — no forma parte de lo pedido."""
+    """Persiste conversaciones + mensajes de PEPO. Sin renombrar/favoritos/
+    carpetas — no forma parte de lo pedido."""
 
     def __init__(self, db_path: str | Path) -> None:
         self._path = Path(db_path)
@@ -145,6 +145,15 @@ class PepoConversationStore:
                 (conversation_id,),
             ).fetchall()
         return [PepoMessage.from_row(row) for row in rows]
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Borra la conversacion y sus mensajes. Devuelve False si no existia
+        (para que el router pueda distinguir "ya no esta" de "se borro")."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+            cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def append_turn(self, conversation_id: str, *, user_message: str, assistant_message: str) -> None:
         """Inserta el turno (mensaje de usuario + respuesta) y refresca

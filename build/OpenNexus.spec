@@ -29,6 +29,7 @@ hiddenimports = [
     "apscheduler.schedulers.asyncio",
     "desktop.application",
     "desktop.main",
+    "desktop.path_setup",
     "desktop.tray",
     "nexus.bootstrap",
     "nexus.api.dependencies.auth",

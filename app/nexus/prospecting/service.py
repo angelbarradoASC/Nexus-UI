@@ -601,7 +601,15 @@ class ProspectingAgentService:
 
             run["status"] = "extracting"
             candidates = self._dedupe_candidates(raw_hits)
-            self._log(run, f"{len(candidates)} candidatos únicos tras deduplicación")
+            known_urls = await self._known_result_urls()
+            before_known_filter = len(candidates)
+            candidates = [c for c in candidates if self._normalize_url(c.get("url", "")) not in known_urls]
+            already_known = before_known_filter - len(candidates)
+            self._log(
+                run,
+                f"{len(candidates)} candidatos únicos tras deduplicación"
+                + (f" ({already_known} ya procesados en runs anteriores, omitidos)" if already_known else "")
+            )
 
             self._update_autonomous_agent(
                 run,
@@ -1791,6 +1799,26 @@ class ProspectingAgentService:
             "pushed_to_crm": 0,
             "errors": 0,
         }
+
+    async def _known_result_urls(self) -> set[str]:
+        """URLs (normalizadas) de negocios que ya generaron un resultado en
+        cualquier run anterior — evita que la campaña diaria vuelva a
+        descubrir y re-cualificar el mismo negocio cada dia (mismo Google
+        Places, mismo top de resultados), lo que generaba duplicados en la
+        cola de revision (Pendientes de contactar): un mismo negocio con
+        varios result_id distintos, uno por cada dia que volvia a aparecer
+        en la busqueda. Se incluyen tambien los descartados: si ya se evaluo
+        una vez, no tiene sentido volver a gastar scraping/LLM/Brave en el
+        mismo sitio cada dia."""
+        runs = await self._repository.load_runs()
+        urls: set[str] = set()
+        for run in runs:
+            for item in [*run.get("results", []), *run.get("discarded", [])]:
+                website = item.get("website") or item.get("source_url") or ""
+                normalized = self._normalize_url(website)
+                if normalized:
+                    urls.add(normalized)
+        return urls
 
     def _dedupe_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen: set[str] = set()

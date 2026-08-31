@@ -637,6 +637,55 @@ async def test_full_run_persists_results_and_summary(prospecting_cfg):
 
 
 @pytest.mark.asyncio
+async def test_second_run_skips_business_already_resolved_in_a_prior_run(prospecting_cfg):
+    """La campaña diaria repite la misma busqueda cada dia — sin este filtro,
+    el mismo negocio (misma web) reaparecia en Google Places una y otra vez y
+    generaba un result_id nuevo por dia, duplicando la cola de revision
+    (Pendientes de contactar) con el mismo lead varias veces."""
+    repository = ProspectingRepository(prospecting_cfg.prospecting_data_dir)
+
+    first_service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=repository,
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        places_client=_FakePlaces([_sample_places_result()]),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    first_run = await first_service.run(
+        ProspectingRunRequest(
+            vertical="restaurants", city="Zaragoza", desired_count=1, minimum_score=40, dry_run=True,
+        )
+    )
+    assert first_run["summary"]["usable_results"] == 1
+
+    second_service = ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=repository,
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        places_client=_FakePlaces([_sample_places_result()]),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+    second_run = await second_service.run(
+        ProspectingRunRequest(
+            vertical="restaurants", city="Zaragoza", desired_count=1, minimum_score=40, dry_run=True,
+        )
+    )
+
+    assert second_run["summary"]["usable_results"] == 0
+    assert second_run["summary"]["raw_candidates"] == 1
+
+    all_results = await second_service.list_results(vertical="restaurants")
+    domains = [r["domain"] for r in all_results["results"]]
+    assert domains.count("fuego.example.com") == 1
+
+
+@pytest.mark.asyncio
 async def test_resume_run_reprocesses_failed_run(prospecting_cfg):
     brave = _FakeBrave()
     service = ProspectingAgentService(

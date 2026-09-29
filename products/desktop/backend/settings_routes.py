@@ -13,6 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
+from agents.tools.credential_store import CredentialStore
 from config import cfg
 from desktop.config import DesktopSettings
 from desktop.runtime.llm_provider_runtime import apply_desktop_provider_to_cfg, apply_desktop_router_config
@@ -30,6 +31,9 @@ from nexus.connectors.observability.prometheus import PrometheusConnector
 from products.desktop.backend.dependencies import get_desktop_local_state, get_desktop_settings
 
 router = APIRouter()
+
+# Mismo prefijo que OutreachManager._ACCOUNT_KEY_PREFIX (nexus/outreach/service.py)
+_OUTREACH_ACCOUNT_PREFIX = "outreach_smtp:"
 
 
 # ── Bootstrap: aplicar config persistida sobre cfg (una vez, al arrancar) ────
@@ -112,23 +116,16 @@ def _apply_desktop_campaign_config(cfg, data: dict | None) -> None:
     outreach = data.get("outreach", {})
     if "enabled" in outreach:
         cfg.outreach_enabled = bool(outreach["enabled"])
-    if outreach.get("from_address") is not None:
-        cfg.outreach_email_address = outreach["from_address"]
     if outreach.get("sender_name") is not None:
         cfg.outreach_sender_name = outreach["sender_name"]
     if "daily_cap" in outreach:
         cfg.outreach_daily_cap_default = int(outreach["daily_cap"])
     if outreach.get("followup_delays") is not None:
         cfg.outreach_followup_delays_days = outreach["followup_delays"]
-    smtp = data.get("smtp", {})
-    if smtp.get("host") is not None:
-        cfg.outreach_smtp_host = smtp["host"]
-    if "port" in smtp:
-        cfg.outreach_smtp_port = int(smtp["port"])
-    if smtp.get("user") is not None:
-        cfg.outreach_smtp_user = smtp["user"]
-    if smtp.get("password"):
-        cfg.outreach_smtp_password = smtp["password"]
+    # El remitente real (cuenta, SMTP, contraseña) ya NO se edita aqui a
+    # mano — se extrae de Thunderbird (scripts/export_outreach_smtp_
+    # credentials.py) y se resuelve por cuenta desde CredentialStore. Este
+    # panel solo mira el estado (ver get_desktop_campaign_config).
     imap = data.get("imap", {})
     if imap.get("host") is not None:
         cfg.outreach_imap_host = imap["host"]
@@ -515,6 +512,24 @@ async def save_desktop_sales_config(
 
 # ── Campaña / outreach ────────────────────────────────────────────────────────
 
+def _outreach_accounts_status() -> list[dict]:
+    """Solo lectura — las cuentas reales de envio se extraen de Thunderbird
+    (scripts/export_outreach_smtp_credentials.py) y se guardan cifradas en
+    CredentialStore, nunca se escriben a mano desde este panel."""
+    store = CredentialStore()
+    accounts = []
+    for key in store.list_hosts():
+        if not key.startswith(_OUTREACH_ACCOUNT_PREFIX):
+            continue
+        creds = store.get(key) or {}
+        accounts.append({
+            "account_key": key[len(_OUTREACH_ACCOUNT_PREFIX):],
+            "email": creds.get("email", ""),
+            "host": creds.get("host", ""),
+        })
+    return accounts
+
+
 @router.get("/api/desktop/settings/campaign")
 async def get_desktop_campaign_config():
     return {
@@ -522,17 +537,11 @@ async def get_desktop_campaign_config():
         "source": "runtime",
         "outreach": {
             "enabled": cfg.outreach_enabled,
-            "from_address": cfg.outreach_email_address,
             "sender_name": cfg.outreach_sender_name,
             "daily_cap": cfg.outreach_daily_cap_default,
             "followup_delays": cfg.outreach_followup_delays_days,
         },
-        "smtp": {
-            "host": cfg.outreach_smtp_host,
-            "port": cfg.outreach_smtp_port,
-            "user": cfg.outreach_smtp_user,
-            "password_set": bool(cfg.outreach_smtp_password),
-        },
+        "accounts": _outreach_accounts_status(),
         "imap": {
             "host": cfg.outreach_imap_host,
             "port": cfg.outreach_imap_port,
@@ -544,14 +553,9 @@ async def get_desktop_campaign_config():
 
 class _DesktopCampaignConfigBody(BaseModel):
     outreach_enabled: bool = False
-    outreach_from_address: str = ""
     outreach_sender_name: str = ""
     outreach_daily_cap: int = 20
     outreach_followup_delays: str = "4,9"
-    smtp_host: str = ""
-    smtp_port: int = 465
-    smtp_user: str = ""
-    smtp_password: str = ""
     imap_host: str = ""
     imap_port: int = 993
     imap_user: str = ""
@@ -564,7 +568,6 @@ async def save_desktop_campaign_config(
     local_state: DesktopLocalState = Depends(get_desktop_local_state),
 ):
     existing = local_state.load_campaign_config() or {}
-    ex_smtp = existing.get("smtp", {})
     ex_imap = existing.get("imap", {})
 
     def _keep(new_val: str, old_val: str) -> str:
@@ -572,13 +575,9 @@ async def save_desktop_campaign_config(
 
     data = {
         "outreach": {
-            "enabled": body.outreach_enabled, "from_address": body.outreach_from_address,
+            "enabled": body.outreach_enabled,
             "sender_name": body.outreach_sender_name, "daily_cap": body.outreach_daily_cap,
             "followup_delays": body.outreach_followup_delays,
-        },
-        "smtp": {
-            "host": body.smtp_host, "port": body.smtp_port, "user": body.smtp_user,
-            "password": _keep(body.smtp_password, ex_smtp.get("password", "")),
         },
         "imap": {
             "host": body.imap_host, "port": body.imap_port, "user": body.imap_user,

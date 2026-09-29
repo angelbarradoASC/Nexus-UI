@@ -14,5 +14,12 @@ services:
     environment:
       APP_ENVIRONMENT: production
 
+  campaign_worker:
+    command: python /app/campaign_worker.py
+    volumes:
+      - ./data:/app/data
+    environment:
+      APP_ENVIRONMENT: production
+
   promtail:
     image: grafana/promtail:3.6.0

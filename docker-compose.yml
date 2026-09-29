@@ -36,6 +36,31 @@ services:
       redis:
         condition: service_started
 
+  campaign_worker:
+    # Mismo build que "web" (ya copia app/, products/, desktop/) — corre
+    # campaign_worker.py en vez de uvicorn main:app, para que el ciclo
+    # diario de la Campaña (y el envio real via cuentas Thunderbird) no
+    # dependa de que la app de escritorio este abierta.
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: nexus-campaign-worker
+    command: python campaign_worker.py
+    ports:
+      - "${CAMPAIGN_WORKER_PORT:-8100}:8100"
+    environment:
+      PYTHONPATH: /app:/app/products
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+    env_file:
+      - .env
+    networks:
+      - nexus-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   mongodb:
     image: mongo:5.0
     container_name: nexus-mongodb

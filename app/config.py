@@ -118,12 +118,13 @@ class AppConfig(BaseSettings):
     connector_retry_count: int = Field(default=2, ge=0, le=10)
 
     outreach_enabled: bool = False
-    outreach_email_address: str = ""
+    # sender_name es solo el nombre para la firma del correo (fallback si
+    # una linea de campaña no trae el suyo). El remitente real (cuenta,
+    # SMTP, contraseña) ya NO es una unica cuenta global — se resuelve por
+    # cuenta (outreach_account: "automato" / "sls_assetsconsultores") desde
+    # CredentialStore (data/credentials.enc), nunca desde .env en texto
+    # plano. Ver OutreachManager._transport_for().
     outreach_sender_name: str = ""
-    outreach_smtp_host: str = ""
-    outreach_smtp_port: int = Field(default=465, ge=1, le=65535)
-    outreach_smtp_user: str = ""
-    outreach_smtp_password: str = ""
     outreach_imap_host: str = ""
     outreach_imap_port: int = Field(default=993, ge=1, le=65535)
     outreach_imap_user: str = ""
@@ -133,6 +134,25 @@ class AppConfig(BaseSettings):
     outreach_data_dir: str = "data/outreach"
     prompt_data_dir: str = "data/prompts"
     prospecting_data_dir: str = "data/prospecting"
+
+    # Controla solo si el scheduler de la Campaña se AUTO-arranca (.start())
+    # en este proceso — el objeto en si siempre se construye, asi que el
+    # trigger manual desde la UI sigue funcionando como red de respaldo.
+    # Se pone a false en el PC de escritorio una vez el campaign_worker del
+    # servidor self-hosted asume el ciclo diario automatico, para evitar
+    # disparar la campaña (y el envio real) dos veces el mismo dia.
+    campaign_scheduler_autostart: bool = True
+
+    # Thunderbird local (lectura de bandeja + resolucion de cuentas SMTP
+    # salientes para el envio real de outreach). profile_root/profile_name
+    # vacios = autodetectar el perfil por defecto vía profiles.ini.
+    thunderbird_enabled: bool = False
+    thunderbird_profile_root: str = ""
+    thunderbird_profile_name: str = ""
+    thunderbird_install_dir: str = ""
+    thunderbird_priority_accounts: str = ""
+    thunderbird_message_limit_per_account: int = Field(default=20, ge=1, le=200)
+    thunderbird_priority_total_limit: int = Field(default=30, ge=1, le=200)
     prospecting_http_timeout_seconds: int = Field(default=12, ge=3, le=60)
     prospecting_user_agent: str = "Open-Nexus MunicipalProspector/1.0 (+https://assetsconsultores.es)"
     prospecting_max_pages_per_site: int = Field(default=4, ge=1, le=10)
@@ -253,8 +273,6 @@ class AppConfig(BaseSettings):
             inseguros.append("REDIS_PASSWORD")
         if self.session_secure_cookie is not True:
             inseguros.append("SESSION_SECURE_COOKIE")
-        if self.outreach_enabled and not self.outreach_smtp_password:
-            inseguros.append("OUTREACH_SMTP_PASSWORD")
         if self.outreach_enabled and not self.outreach_imap_password:
             inseguros.append("OUTREACH_IMAP_PASSWORD")
         if self.brave_search_enabled and not self.brave_search_api_key:

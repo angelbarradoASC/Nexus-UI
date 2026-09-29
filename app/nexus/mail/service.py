@@ -226,6 +226,71 @@ class ThunderbirdMailManager:
 
         return None
 
+    def resolve_outgoing_credentials(self, email: str) -> dict[str, Any] | None:
+        """Resuelve host/puerto/usuario/contraseña SMTP reales de una cuenta
+        de Thunderbird, para envio real de outreach (no lectura de bandeja).
+        Usado por scripts/export_outreach_smtp_credentials.py — nunca se
+        llama en caliente en cada envio, solo en la extraccion puntual.
+        """
+        profile_dir = self._resolve_profile_dir()
+        if profile_dir is None:
+            return None
+        prefs = self._parse_prefs(profile_dir / "prefs.js")
+
+        identity_id = self._find_identity_id(prefs, email)
+        if identity_id is None:
+            return None
+        smtp_server_id = prefs.get(f"mail.identity.{identity_id}.smtpServer")
+        if not smtp_server_id:
+            return None
+
+        host = prefs.get(f"mail.smtpserver.{smtp_server_id}.hostname", "")
+        if not host:
+            return None
+        port = int(prefs.get(f"mail.smtpserver.{smtp_server_id}.port", 465) or 465)
+        username = prefs.get(f"mail.smtpserver.{smtp_server_id}.username", email)
+
+        logins = self._load_logins(profile_dir)
+        match = next(
+            (entry for entry in logins if str(host).lower() in str(entry.get("hostname", "")).lower()),
+            None,
+        )
+        if match is None:
+            return None
+
+        store = ThunderbirdCredentialStore(
+            profile_dir,
+            Path(self._cfg.thunderbird_install_dir) if self._cfg.thunderbird_install_dir else None,
+        )
+        try:
+            resolved_username, password = store.decrypt_login(
+                match["encryptedUsername"], match["encryptedPassword"]
+            )
+        except Exception as exc:
+            raise RuntimeError(f"No se pudieron descifrar credenciales SMTP para {email}") from exc
+
+        return {
+            "email": email,
+            "host": host,
+            "port": port,
+            "username": resolved_username or username,
+            "password": password,
+        }
+
+    @staticmethod
+    def _find_identity_id(prefs: dict[str, Any], email: str) -> str | None:
+        account_ids = [a.strip() for a in str(prefs.get("mail.accountmanager.accounts", "")).split(",") if a.strip()]
+        for account_id in account_ids:
+            identity_ids = [
+                i.strip()
+                for i in str(prefs.get(f"mail.account.{account_id}.identities", "")).split(",")
+                if i.strip()
+            ]
+            for identity_id in identity_ids:
+                if str(prefs.get(f"mail.identity.{identity_id}.useremail", "")).lower() == email.lower():
+                    return identity_id
+        return None
+
     def _discover_accounts(self, profile_dir: Path) -> list[ThunderbirdAccount]:
         prefs = self._parse_prefs(profile_dir / "prefs.js")
         account_ids = [a.strip() for a in str(prefs.get("mail.accountmanager.accounts", "")).split(",") if a.strip()]

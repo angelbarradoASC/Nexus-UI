@@ -691,13 +691,16 @@ async function deleteVertical() {
 async function loadCampaignConfig() {
     const payload = await api.get("/api/desktop/settings/campaign");
     document.getElementById("outreachEnabled").checked = Boolean(payload.outreach.enabled);
-    document.getElementById("outreachFromAddress").value = payload.outreach.from_address || "";
     document.getElementById("outreachSenderName").value = payload.outreach.sender_name || "";
     document.getElementById("outreachDailyCap").value = payload.outreach.daily_cap ?? "";
     document.getElementById("outreachFollowupDelays").value = payload.outreach.followup_delays || "";
-    document.getElementById("smtpHost").value = payload.smtp.host || "";
-    document.getElementById("smtpPort").value = payload.smtp.port ?? "";
-    document.getElementById("smtpUser").value = payload.smtp.user || "";
+    const accountsEl = document.getElementById("outreachAccountsList");
+    if (accountsEl) {
+        const accounts = payload.accounts || [];
+        accountsEl.innerHTML = accounts.length
+            ? accounts.map((a) => `<div class="info-list-row"><strong>${esc(a.account_key)}</strong> — ${esc(a.email)} (${esc(a.host)})</div>`).join("")
+            : "<p>Sin cuentas extraidas todavia — ejecuta scripts/export_outreach_smtp_credentials.py.</p>";
+    }
     document.getElementById("imapHost").value = payload.imap.host || "";
     document.getElementById("imapPort").value = payload.imap.port ?? "";
     document.getElementById("imapUser").value = payload.imap.user || "";
@@ -713,20 +716,14 @@ async function saveCampaignConfig() {
     note.textContent = "Guardando...";
     await api.put("/api/desktop/settings/campaign", {
         outreach_enabled: document.getElementById("outreachEnabled").checked,
-        outreach_from_address: document.getElementById("outreachFromAddress").value.trim(),
         outreach_sender_name: document.getElementById("outreachSenderName").value.trim(),
         outreach_daily_cap: parseInt(document.getElementById("outreachDailyCap").value) || 20,
         outreach_followup_delays: document.getElementById("outreachFollowupDelays").value.trim(),
-        smtp_host: document.getElementById("smtpHost").value.trim(),
-        smtp_port: parseInt(document.getElementById("smtpPort").value) || 465,
-        smtp_user: document.getElementById("smtpUser").value.trim(),
-        smtp_password: document.getElementById("smtpPassword").value,
         imap_host: document.getElementById("imapHost").value.trim(),
         imap_port: parseInt(document.getElementById("imapPort").value) || 993,
         imap_user: document.getElementById("imapUser").value.trim(),
         imap_password: document.getElementById("imapPassword").value,
     });
-    document.getElementById("smtpPassword").value = "";
     document.getElementById("imapPassword").value = "";
     note.textContent = "Guardado";
     await loadCampaignConfig();

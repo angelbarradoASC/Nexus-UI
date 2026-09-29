@@ -191,6 +191,17 @@ class CampaignAgent:
             name = extra.get("name") or f"linea_{index + 1}"
             yield name, extra
 
+    def _line_config_for_vertical(self, vertical: str) -> dict[str, Any]:
+        """Devuelve la config de la línea de campaña cuyo "vertical" coincide
+        con la del lead — cada línea tiene su propia propuesta/CTA/cuenta de
+        envío. Sin match (vertical vacia, "custom", o dato antiguo), cae a
+        la línea "default"."""
+        cfg = self.load_config()
+        for _, line_cfg in self._iter_campaign_lines(cfg):
+            if vertical and line_cfg.get("vertical") == vertical:
+                return line_cfg
+        return cfg
+
     # ── Follow-ups ────────────────────────────────────────────────────────────
 
     async def _run_followups(self) -> dict[str, Any]:
@@ -342,6 +353,7 @@ class CampaignAgent:
             campaign_result = await self._outreach.launch_campaign({
                 "campaign_name":         campaign_name,
                 "sender_name":           cfg.get("sender_name", ""),
+                "outreach_account":      cfg.get("outreach_account", ""),
                 "proposition":           proposition,
                 "cta":                   cta,
                 "audience_hint":         audience,
@@ -469,12 +481,16 @@ class CampaignAgent:
         if prospect is None:
             return {"status": "not_found", "result_id": result_id}
 
-        cfg = self.load_config()
+        # Config de la LINEA que produjo este lead (no siempre "default") —
+        # sin esto, un lead de la vía IA/OT se enviaria con la propuesta y
+        # la cuenta de correo de la vía pyme por error.
+        cfg = self._line_config_for_vertical(prospect.get("vertical", ""))
         campaign_name = f"{prospect.get('name', 'lead')} {date.today().isoformat()}"
         try:
             campaign_result = await self._outreach.launch_campaign({
                 "campaign_name":        campaign_name,
                 "sender_name":          cfg.get("sender_name", ""),
+                "outreach_account":     cfg.get("outreach_account", ""),
                 "proposition":          cfg.get("proposition", ""),
                 "cta":                  cfg.get("cta", ""),
                 "audience_hint":        cfg.get("audience_hint", ""),

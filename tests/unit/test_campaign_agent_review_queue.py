@@ -388,6 +388,34 @@ async def test_send_to_prospect_passes_sender_name_from_config(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_send_to_prospect_routes_outreach_account_by_lead_vertical(tmp_path):
+    """Pedido explicito del usuario: automato.es para la via pyme,
+    sls_assetsconsultores para la via IA/OT — un lead de ia_adopcion debe
+    usar la cuenta de esa linea, no la de 'default', aunque 'default' sea
+    la config que carga load_config() por defecto."""
+    results = [
+        _qualified_result("r1", "Taller Luis", vertical="custom"),
+        _qualified_result("r2", "Fabrica Media SA", vertical="ia_adopcion"),
+    ]
+    agent, prospecting, outreach, crm = _agent(tmp_path, results=results)
+    cfg = agent.load_config()
+    cfg["outreach_account"] = "automato"
+    cfg["additional_campaigns"] = [{
+        "name": "ia_adopcion", "enabled": True, "vertical": "ia_adopcion",
+        "sender_name": "Vicente Araizeta", "outreach_account": "sls_assetsconsultores",
+        "proposition": "adopcion de IA", "cta": "hablamos?",
+    }]
+    agent.save_config(cfg)
+
+    await agent.send_to_prospect("r1")
+    await agent.send_to_prospect("r2")
+
+    assert outreach.launch_calls[0]["outreach_account"] == "automato"
+    assert outreach.launch_calls[1]["outreach_account"] == "sls_assetsconsultores"
+    assert outreach.launch_calls[1]["proposition"] == "adopcion de IA"
+
+
+@pytest.mark.asyncio
 async def test_discard_prospect_marks_discarded_and_leaves_queue(tmp_path):
     results = [_qualified_result("r1", "Panaderia Ana")]
     agent, prospecting, *_ = _agent(tmp_path, results=results)

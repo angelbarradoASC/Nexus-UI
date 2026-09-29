@@ -12,10 +12,17 @@ from io import StringIO
 from typing import Any
 
 from agents.llm_router import LLMRouter
+from agents.tools.credential_store import CredentialStore
 from nexus.prompts import resolve_prompt_sync
 from nexus.outreach.repository import OutreachRepository
 from nexus.outreach.transports import IMAPMailboxMonitor, SMTPOutreachTransport
 from nexus.utils.llm_json import strip_llm_fences
+
+# Prefijo de clave en CredentialStore (data/credentials.enc) para cuentas
+# SMTP reales de outreach — nunca "una sola cuenta global", una por vía
+# (automato / sls_assetsconsultores). Ver
+# scripts/export_outreach_smtp_credentials.py.
+_ACCOUNT_KEY_PREFIX = "outreach_smtp:"
 
 
 class OutreachManager:
@@ -27,18 +34,16 @@ class OutreachManager:
         cfg,
         llm_router: LLMRouter | None,
         repository: OutreachRepository | None = None,
-        smtp_transport: SMTPOutreachTransport | None = None,
+        credential_store: CredentialStore | None = None,
         imap_monitor: IMAPMailboxMonitor | None = None,
+        transport_factory: Any = None,
     ) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
         self._repository = repository or OutreachRepository(cfg.outreach_data_dir)
-        self._smtp = smtp_transport or SMTPOutreachTransport(
-            host=cfg.outreach_smtp_host,
-            port=cfg.outreach_smtp_port,
-            username=cfg.outreach_smtp_user,
-            password=cfg.outreach_smtp_password,
-        )
+        self._credentials = credential_store or CredentialStore()
+        self._transport_factory = transport_factory or SMTPOutreachTransport
+        self._transports: dict[str, SMTPOutreachTransport] = {}
         self._imap = imap_monitor or IMAPMailboxMonitor(
             host=cfg.outreach_imap_host,
             port=cfg.outreach_imap_port,
@@ -46,22 +51,54 @@ class OutreachManager:
             password=cfg.outreach_imap_password,
         )
 
+    def _account_creds(self, account_key: str) -> dict[str, Any] | None:
+        return self._credentials.get(f"{_ACCOUNT_KEY_PREFIX}{account_key}")
+
+    def _account_email(self, account_key: str) -> str:
+        return (self._account_creds(account_key) or {}).get("email", "")
+
+    def _transport_for(self, account_key: str) -> SMTPOutreachTransport:
+        if account_key not in self._transports:
+            creds = self._account_creds(account_key)
+            if not creds:
+                raise ValueError(
+                    f"No hay credenciales SMTP guardadas para la cuenta outreach '{account_key}'. "
+                    "Ejecuta scripts/export_outreach_smtp_credentials.py."
+                )
+            self._transports[account_key] = self._transport_factory(
+                host=creds["host"],
+                port=int(creds.get("port", 465)),
+                username=creds["user"],
+                password=creds["password"],
+            )
+        return self._transports[account_key]
+
+    def _known_account_keys(self) -> list[str]:
+        return sorted(
+            key[len(_ACCOUNT_KEY_PREFIX):]
+            for key in self._credentials.list_hosts()
+            if key.startswith(_ACCOUNT_KEY_PREFIX)
+        )
+
     async def status(self) -> dict[str, Any]:
         campaigns = await self._repository.load_campaigns()
         events = await self._repository.list_events(limit=25)
-        smtp_status = await asyncio.to_thread(self._safe_healthcheck, self._smtp.healthcheck)
+        accounts_status: dict[str, Any] = {}
+        for account_key in self._known_account_keys():
+            try:
+                transport = self._transport_for(account_key)
+                smtp_status = await asyncio.to_thread(self._safe_healthcheck, transport.healthcheck)
+            except Exception as exc:
+                smtp_status = {"configured": False, "status": "error", "error": str(exc)}
+            accounts_status[account_key] = {"email": self._account_email(account_key), "smtp": smtp_status}
         imap_status = await asyncio.to_thread(self._safe_healthcheck, self._imap.healthcheck)
         today = datetime.now(timezone.utc).date().isoformat()
         sent_today = sum(1 for event in events if event.get("event_type") == "email_sent" and str(event.get("timestamp", "")).startswith(today))
         return {
             "status": "success",
             "enabled": self._cfg.outreach_enabled,
-            "account": {
-                "email": self._cfg.outreach_email_address,
-                "sender_name": self._cfg.outreach_sender_name,
-                "smtp": smtp_status,
-                "imap": imap_status,
-            },
+            "accounts": accounts_status,
+            "imap": imap_status,
             "daily_cap_default": self._cfg.outreach_daily_cap_default,
             "sent_today": sent_today,
             "campaigns_total": len(campaigns),
@@ -71,6 +108,19 @@ class OutreachManager:
 
     async def launch_campaign(self, payload: dict[str, Any]) -> dict[str, Any]:
         prospects = self._parse_prospects(payload)
+        outreach_account = (payload.get("outreach_account") or "").strip()
+        if not outreach_account:
+            raise ValueError(
+                "outreach_account es obligatorio para lanzar una campaña — qué "
+                "cuenta real envía (p.ej. 'automato', 'sls_assetsconsultores'). "
+                "Configúralo en la línea de daily_config.json."
+            )
+        sender_email = self._account_email(outreach_account)
+        if not sender_email:
+            raise ValueError(
+                f"No hay credenciales guardadas para la cuenta outreach '{outreach_account}'. "
+                "Ejecuta scripts/export_outreach_smtp_credentials.py."
+            )
         sender_name = (payload.get("sender_name") or self._cfg.outreach_sender_name or "").strip()
         if not sender_name:
             raise ValueError(
@@ -84,7 +134,8 @@ class OutreachManager:
             "campaign_id": campaign_id,
             "campaign_name": payload["campaign_name"],
             "sender_name": sender_name,
-            "sender_email": self._cfg.outreach_email_address,
+            "sender_email": sender_email,
+            "outreach_account": outreach_account,
             "proposition": payload["proposition"],
             "cta": payload.get("cta") or "¿Te viene bien una llamada de 15 minutos esta semana?",
             "audience_hint": payload.get("audience_hint") or "",
@@ -378,7 +429,8 @@ class OutreachManager:
         message["To"] = prospect["email"]
         message["Subject"] = draft["subject"]
         message.set_content(draft["body"])
-        delivery = await asyncio.to_thread(self._smtp.send, message)
+        transport = self._transport_for(campaign.get("outreach_account", ""))
+        delivery = await asyncio.to_thread(transport.send, message)
         event["delivery_status"] = delivery.get("status", "unknown")
         return event
 

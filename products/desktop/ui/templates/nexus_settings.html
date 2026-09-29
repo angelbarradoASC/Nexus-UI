@@ -648,10 +648,6 @@
                                     <span>Habilitado</span>
                                 </label>
                                 <label class="field">
-                                    <span>Direccion remitente</span>
-                                    <input id="outreachFromAddress" type="email" placeholder="outreach@empresa.com" />
-                                </label>
-                                <label class="field">
                                     <span>Nombre remitente</span>
                                     <input id="outreachSenderName" type="text" placeholder="Assets Consultores" />
                                 </label>
@@ -668,26 +664,15 @@
                         <div class="module-section">
                             <div class="module-section-head">
                                 <p class="eyebrow eyebrow-tight">Envio</p>
-                                <h3>SMTP</h3>
+                                <h3>Cuentas SMTP (Thunderbird)</h3>
                             </div>
-                            <div class="provider-form">
-                                <label class="field">
-                                    <span>Host</span>
-                                    <input id="smtpHost" type="text" placeholder="smtp.gmail.com" />
-                                </label>
-                                <label class="field">
-                                    <span>Puerto</span>
-                                    <input id="smtpPort" type="number" min="1" max="65535" placeholder="465" />
-                                </label>
-                                <label class="field">
-                                    <span>Usuario</span>
-                                    <input id="smtpUser" type="text" placeholder="user@empresa.com" />
-                                </label>
-                                <label class="field">
-                                    <span>Password</span>
-                                    <input id="smtpPassword" type="password" placeholder="vacio = mantener actual" />
-                                </label>
-                            </div>
+                            <p class="assets-form-note">
+                                El remitente real de cada linea de campaña (cuenta, SMTP, contraseña) se
+                                extrae de Thunderbird con <code>scripts/export_outreach_smtp_credentials.py</code>
+                                y se guarda cifrado — no se escribe a mano aqui. Cada linea de
+                                <code>daily_config.json</code> elige la cuenta via <code>outreach_account</code>.
+                            </p>
+                            <div id="outreachAccountsList" class="info-list">Cargando...</div>
                         </div>
                         <div class="module-section">
                             <div class="module-section-head">

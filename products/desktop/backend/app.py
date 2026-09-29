@@ -98,9 +98,18 @@ async def lifespan(app: FastAPI):
 
     scheduler = NexusScheduler()
     scheduler.attach_campaign_agent(app.state.nexus_runtime.campaign)
-    scheduler.start()
+    # El objeto SIEMPRE se construye (el trigger manual desde la UI lo sigue
+    # necesitando como red de respaldo) — pero el arranque automatico a las
+    # 09:00 solo se activa aqui si CAMPAIGN_SCHEDULER_AUTOSTART=true. Se
+    # pone a false en el PC de escritorio una vez el campaign_worker del
+    # servidor self-hosted asume el ciclo diario, para no disparar (y
+    # enviar) la campaña dos veces el mismo dia.
+    if cfg.campaign_scheduler_autostart:
+        scheduler.start()
+        logger.info("Desktop lifespan | scheduler de campaña arrancado (autostart)")
+    else:
+        logger.info("Desktop lifespan | scheduler de campaña NO auto-arrancado (CAMPAIGN_SCHEDULER_AUTOSTART=false) — solo trigger manual")
     app.state.nexus_scheduler = scheduler
-    logger.info("Desktop lifespan | scheduler de campaña arrancado")
 
     yield
 

@@ -114,7 +114,11 @@ class CampaignAgent:
 
     async def run_daily(self) -> dict[str, Any]:
         """
-        Ejecuta el ciclo completo del día.
+        Ejecuta el ciclo completo del día — una o varias líneas de campaña
+        (ver _iter_campaign_lines: la línea "default" es el mismo dict plano
+        de siempre, retrocompatible con la UI actual; additional_campaigns
+        son líneas extra como la vía IA, pedidas explícitamente por el
+        usuario al bifurcar la Campaña).
         Seguro de llamar aunque falle SMTP, Obscura o el LLM.
         """
         cfg = self.load_config()
@@ -127,11 +131,11 @@ class CampaignAgent:
             "status":      "ok",
             "started_at":  started,
             "followups":   {},
-            "new_campaign": {},
+            "campaigns":   {},
             "errors":      [],
         }
 
-        # ── 1. Follow-ups vencidos ────────────────────────────────────────────
+        # ── 1. Follow-ups vencidos (compartido entre lineas) ──────────────────
         try:
             followup_result = await self._run_followups()
             report["followups"] = followup_result
@@ -139,22 +143,53 @@ class CampaignAgent:
             logger.error("Error en follow-ups: {}", exc)
             report["errors"].append(f"followups: {exc}")
 
-        # ── 2. Nuevos prospectos ──────────────────────────────────────────────
-        try:
-            new_result = await self._run_new_prospects(cfg)
-            report["new_campaign"] = new_result
-        except Exception as exc:
-            logger.error("Error en prospección nueva: {}", exc)
-            report["errors"].append(f"new_prospects: {exc}")
+        # ── 2. Nuevos prospectos, una pasada por linea ─────────────────────────
+        for line_name, line_cfg in self._iter_campaign_lines(cfg):
+            # "default" comparte el dict con el interruptor global de arriba
+            # (cfg["enabled"]) — si se usara ese mismo campo para decidir si
+            # ESTA linea corre, no habria forma de apagar solo el default
+            # dejando encendidas las lineas nuevas (additional_campaigns).
+            # default_enabled es un campo aparte solo para eso.
+            line_enabled = cfg.get("default_enabled", True) if line_name == "default" else line_cfg.get("enabled", True)
+            if not line_enabled:
+                continue
+            try:
+                result = await self._run_new_prospects(line_cfg)
+                report["campaigns"][line_name] = result
+            except Exception as exc:
+                logger.error("Error en prospección nueva ({}): {}", line_name, exc)
+                report["errors"].append(f"new_prospects[{line_name}]: {exc}")
+
+        # Retrocompatibilidad: /campaign/results y cualquier consumidor
+        # existente leen report['new_campaign']['run_id'] — se mantiene
+        # apuntando a la linea 'default' (o a la primera que haya, si
+        # 'default' no corrio por estar deshabilitada).
+        report["new_campaign"] = report["campaigns"].get("default") or next(iter(report["campaigns"].values()), {})
 
         report["completed_at"] = datetime.now(timezone.utc).isoformat()
+        total_sent = sum(r.get("sent_count", 0) for r in report["campaigns"].values())
         logger.info(
-            "Campaña diaria completada | followups={} | nuevos_enviados={} | errores={}",
+            "Campaña diaria completada | lineas={} | followups={} | nuevos_enviados={} | errores={}",
+            list(report["campaigns"].keys()),
             report["followups"].get("executed_count", 0),
-            report["new_campaign"].get("sent_count", 0),
+            total_sent,
             len(report["errors"]),
         )
         return report
+
+    def _iter_campaign_lines(self, cfg: dict[str, Any]):
+        """"default" es el dict plano de siempre — la UI actual (un unico
+        formulario) sigue leyendo/escribiendo exactamente esta forma, sin
+        cambios. Se pausa con "default_enabled": false (NO con "enabled",
+        que es el interruptor global de todo run_daily — follow-ups
+        incluidos). additional_campaigns es una lista opcional de lineas
+        extra (ej. la vía IA) — todavia sin editor propio en la UI, se
+        edita el JSON de data/campaigns/daily_config.json directamente
+        hasta que exista esa pantalla."""
+        yield "default", cfg
+        for index, extra in enumerate(cfg.get("additional_campaigns") or []):
+            name = extra.get("name") or f"linea_{index + 1}"
+            yield name, extra
 
     # ── Follow-ups ────────────────────────────────────────────────────────────
 
@@ -369,7 +404,7 @@ class CampaignAgent:
     # uno. Estos 3 metodos son el unico camino para pasar de "descubierto" a
     # "contactado" en ese modo.
 
-    async def list_pending_review(self) -> list[dict[str, Any]]:
+    async def list_pending_review(self, *, vertical: str | None = None) -> list[dict[str, Any]]:
         """Leads QUALIFIED de cualquier run reciente que aun no se han
         contactado ni descartado — la cola que el usuario revisa antes de
         decidir a quien escribir.
@@ -389,12 +424,19 @@ class CampaignAgent:
         lead recien calificado ya tiene crm_state="created" de inmediato,
         nunca "pending". Lo que de verdad saca un lead de esta cola es que su
         lead_stage deje de ser QUALIFIED (send_to_prospect -> CONTACTED,
-        discard_prospect -> DISCARDED)."""
+        discard_prospect -> DISCARDED).
+
+        vertical filtra por linea de campaña (ej. "ia_adopcion") — dos colas
+        de revision separadas pedidas explicitamente por el usuario al
+        bifurcar la Campaña en IA/OT; None devuelve todas juntas (como antes)."""
         payload = await self._prospecting.list_results(lead_stage="QUALIFIED")
-        return [
+        results = [
             r for r in payload.get("results", [])
             if r.get("email") and r.get("opportunity_score") is not None
         ]
+        if vertical:
+            results = [r for r in results if r.get("vertical") == vertical]
+        return results
 
     async def list_pending(self) -> list[dict[str, Any]]:
         """Adaptador para NexusCoordinator.list_pending_actions() — misma

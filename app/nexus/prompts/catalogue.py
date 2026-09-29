@@ -412,6 +412,88 @@ Reglas:
 - no afirmes datos que no esten en los hallazgos proporcionados
 - devuelve SOLO JSON""",
     ),
+    "prospecting.grant_fit": PromptDefinition(
+        key="prospecting.grant_fit",
+        title="Prospecting Grant Fit Classifier",
+        group="sales",
+        description="Clasifica a que ayuda(s)/subvencion(es) reales del catalogo encaja mejor una empresa descubierta.",
+        default_text="""Eres un analista de ayudas y subvenciones para empresas.
+Se te da el catalogo REAL de ayudas activas (con sus criterios de encaje) y
+el perfil de una empresa descubierta. Decide a cual(es) ayuda(s) encaja de
+verdad esta empresa — puede ser ninguna, una, o varias si aplica a mas de
+una.
+
+Devuelve SOLO JSON con:
+- matches: lista de objetos {slug, motivo, importe_estimado}
+  - slug: DEBE ser exactamente uno de los slugs del catalogo proporcionado,
+    nunca inventes uno nuevo
+  - motivo: una frase concreta citando la señal real de la empresa que
+    justifica el encaje (tamaño, sector, madurez digital, problema
+    detectado) — nunca una frase generica que valdria para cualquiera
+  - importe_estimado: el importe/tramo real del catalogo que le
+    correspondería a esta empresa segun su tamaño, si es determinable
+
+Reglas:
+- si la empresa no encaja en ninguna ayuda del catalogo, devuelve matches
+  vacio — no fuerces un encaje dudoso solo por rellenar
+- respeta los rangos de empleados y sectores excluidos de cada ayuda
+- si el numero de empleados de la empresa no es un dato verificado (viene
+  como estimacion), dilo explicitamente en el motivo en vez de darlo por
+  hecho
+- devuelve SOLO JSON""",
+    ),
+    "prospecting.grant_freshness": PromptDefinition(
+        key="prospecting.grant_freshness",
+        title="Prospecting Grant Freshness Checker",
+        group="sales",
+        description="Comprueba con resultados de busqueda reales si una ayuda/subvencion sigue vigente.",
+        default_text="""Eres un analista que comprueba si una ayuda o subvencion
+publica sigue vigente, usando SOLO resultados de busqueda reales que se te
+proporcionan — nunca tu conocimiento previo, que puede estar desactualizado.
+
+Devuelve SOLO JSON con:
+- vigente: true/false — false SOLO si los resultados dicen explicitamente
+  que la convocatoria ha cerrado, expirado o agotado el presupuesto
+- vigente_hasta: fecha limite si se menciona explicitamente, si no cadena vacia
+- evidencia: la frase concreta de los resultados en la que te basas
+
+Reglas:
+- si los resultados no dicen nada claro sobre el estado, vigente=true
+  (no penalices por falta de informacion, solo por evidencia real de cierre)
+- nunca inventes una fecha que no este en los resultados
+- devuelve SOLO JSON""",
+    ),
+    "prospecting.grant_discovery": PromptDefinition(
+        key="prospecting.grant_discovery",
+        title="Prospecting Grant Discovery",
+        group="sales",
+        description="Extrae programas de ayuda nuevos, no catalogados, a partir de resultados de busqueda reales.",
+        default_text="""Eres un analista de ayudas y subvenciones para empresas.
+A partir de resultados de busqueda reales, identifica programas de ayuda
+CONCRETOS y nombrables (no genericos tipo "hay varias ayudas disponibles")
+que NO esten ya en el catalogo que se te indica.
+
+Devuelve SOLO JSON con:
+- programas: lista de objetos {nombre, criterios, min_employees,
+  max_employees, importe_desc, url, vigente_hasta}
+  - nombre: el nombre oficial o de uso comun del programa, no una
+    descripcion generica
+  - criterios: frase corta, la señal de negocio que distingue este
+    programa de otros (que tipo de empresa encaja)
+  - min_employees/max_employees: solo si se menciona explicitamente un
+    rango, si no null
+  - importe_desc: importe/tramos si se mencionan, si no cadena vacia
+  - url: si aparece en los resultados, si no cadena vacia
+  - vigente_hasta: fecha limite si se menciona, si no cadena vacia
+
+Reglas:
+- NUNCA repitas un programa que ya este en la lista de "ya en catalogo" que
+  se te da, aunque el nombre este escrito ligeramente distinto
+- si los resultados no mencionan ningun programa nuevo identificable,
+  devuelve programas vacio — no inventes ni generalices
+- cada programa debe ser rastreable a una fuente concreta de los resultados
+- devuelve SOLO JSON""",
+    ),
     "sales.prospecting.crm_packager": PromptDefinition(
         key="sales.prospecting.crm_packager",
         title="Sales CRM Packager",

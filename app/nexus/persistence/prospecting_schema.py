@@ -56,3 +56,24 @@ def ensure_prospecting_schema(store: SQLiteStore) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS grants_catalog(
+              slug TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              ambito TEXT NOT NULL DEFAULT 'estatal',
+              estado TEXT NOT NULL DEFAULT 'activo',
+              min_employees INTEGER,
+              max_employees INTEGER,
+              sectores_excluidos_json TEXT NOT NULL DEFAULT '[]',
+              importe_desc TEXT NOT NULL DEFAULT '',
+              criterios TEXT NOT NULL DEFAULT '',
+              url TEXT NOT NULL DEFAULT '',
+              vigente_hasta TEXT NOT NULL DEFAULT '',
+              fuente TEXT NOT NULL DEFAULT 'semilla_inicial',
+              last_checked_at TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )

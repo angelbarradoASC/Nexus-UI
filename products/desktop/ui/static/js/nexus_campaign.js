@@ -297,19 +297,31 @@ async function saveConfig(event) {
 
 // ── Cola de revisión — nadie se contacta sin pasar por aquí ────────────────
 
+// Dos colas de revision separadas (vía general / vía IA) — bifurcacion de
+// Campaña pedida explicitamente por el usuario. Un unico fetch sin filtrar
+// (evita duplicar leads o depender de dos llamadas coherentes entre si),
+// particionado en el cliente por item.vertical — igual de simple y evita
+// añadir al backend un filtro de "todo menos X" que no hace falta.
+const IA_TRACK_VERTICAL = 'ia_adopcion';
+
 async function loadPending() {
     try {
         const res = await fetch(`${API}/pending`);
         const data = await res.json();
-        renderPending(data.pending || []);
+        const items = data.pending || [];
+        const iaItems = items.filter(item => item.vertical === IA_TRACK_VERTICAL);
+        const otherItems = items.filter(item => item.vertical !== IA_TRACK_VERTICAL);
+        renderPending(otherItems, 'pendingList_default', 'pendingCount_default');
+        renderPending(iaItems, 'pendingList_ia_adopcion', 'pendingCount_ia_adopcion');
     } catch (err) {
-        renderPending([]);
+        renderPending([], 'pendingList_default', 'pendingCount_default');
+        renderPending([], 'pendingList_ia_adopcion', 'pendingCount_ia_adopcion');
     }
 }
 
-function renderPending(items) {
-    const list = document.getElementById('pendingList');
-    const countBadge = document.getElementById('pendingCount');
+function renderPending(items, listId, countId) {
+    const list = document.getElementById(listId);
+    const countBadge = document.getElementById(countId);
     if (!list) return;
 
     if (countBadge) countBadge.textContent = String(items.length);
@@ -337,6 +349,18 @@ function renderPending(items) {
             ...proposalItems.map(p => `→ ${p.observation}\n  Propuesta: ${p.recommendation}`),
         ];
 
+        // grant_matches: por que este lead encaja en una ayuda real — la
+        // "visibilidad" que pedia el usuario, no solo un badge de track.
+        const grantMatches = item.grant_matches || [];
+        const grantsBlock = grantMatches.length
+            ? `<div class="camp-pending-grants">${grantMatches.map(g => `
+                <div class="camp-grant-chip">
+                    <strong>${escapeHtml(g.nombre || '')}</strong>${g.importe_estimado ? ` · ${escapeHtml(g.importe_estimado)}` : ''}
+                    <div class="camp-grant-motivo">${escapeHtml(g.motivo || '')}</div>
+                </div>
+            `).join('')}</div>`
+            : '';
+
         return `<div class="camp-pending-card" data-result-id="${resultId}">
             <div class="camp-pending-card-head">
                 <div>
@@ -346,6 +370,7 @@ function renderPending(items) {
                 ${oppCell}
             </div>
             ${lines.length ? `<div class="camp-pending-findings">${escapeHtml(lines.join('\n'))}</div>` : ''}
+            ${grantsBlock}
             <div class="camp-pending-actions">
                 <button class="camp-btn camp-btn--danger" type="button" onclick="discardPending('${resultId}')">Descartar</button>
                 <button class="camp-btn camp-btn--primary" type="button" onclick="sendPending('${resultId}')" ${item.email ? '' : 'disabled title="Sin email de contacto"'}>Enviar</button>

@@ -22,11 +22,15 @@ def verticals(tmp_path) -> SalesVerticalsRepository:
 
 # ── Seed ───────────────────────────────────────────────────────────────────
 
-def test_seed_creates_the_eight_default_verticals(verticals):
+def test_seed_creates_the_default_verticals(verticals):
+    # Sin numero en el nombre del test a proposito — un test llamado
+    # "..._the_eight_..." se queda desincronizado en cuanto se añade una
+    # vertical nueva a _DEFAULT_SEED (paso exactamente por esto al añadir
+    # ia_adopcion). El set explicito de abajo ya deja claro cuantas hay.
     slugs = {v.slug for v in verticals.list_all()}
     assert slugs == {
         "asesoria", "inmobiliaria", "public_administration", "restaurants",
-        "salud", "zapaterias", "talleres", "custom",
+        "salud", "zapaterias", "talleres", "ia_adopcion", "custom",
     }
     custom = verticals.get("custom")
     assert custom.is_fallback is True
@@ -39,7 +43,7 @@ def test_seed_is_idempotent_across_repository_instances(tmp_path):
     second = SalesVerticalsRepository(tmp_path / "prospecting")
     slugs = {v.slug for v in second.list_all()}
     assert "grabaciones" in slugs  # no re-seedea sobre datos ya existentes
-    assert len(second.list_all()) == 9
+    assert len(second.list_all()) == 10  # 9 de la semilla + "grabaciones"
 
 
 # ── Resolucion por lenguaje natural (nombre + aliases) ──────────────────────

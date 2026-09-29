@@ -84,7 +84,7 @@ class _FakeCRMService:
         return {"status": "ok"}
 
 
-def _qualified_result(result_id: str, name: str) -> dict:
+def _qualified_result(result_id: str, name: str, *, vertical: str = "") -> dict:
     return {
         "result_id": result_id,
         "name": name,
@@ -93,6 +93,7 @@ def _qualified_result(result_id: str, name: str) -> dict:
         "crm_state": "pending",
         "crm_ready": True,
         "opportunity_score": 70,
+        "vertical": vertical,
     }
 
 
@@ -226,6 +227,85 @@ async def test_list_pending_review_excludes_plain_search_qualified_without_score
     pending = await agent.list_pending_review()
 
     assert [r["result_id"] for r in pending] == ["r1"]
+
+
+@pytest.mark.asyncio
+async def test_list_pending_review_filters_by_track(tmp_path):
+    """Dos colas de revision separadas (IA/OT) pedidas explicitamente por el
+    usuario al bifurcar la Campaña — vertical filtra, sin el sigue
+    devolviendo todo junto (comportamiento previo intacto)."""
+    ia_lead = _qualified_result("r1", "Empresa IA", vertical="ia_adopcion")
+    default_lead = _qualified_result("r2", "Peluqueria Ana", vertical="custom")
+    agent, *_ = _agent(tmp_path, results=[ia_lead, default_lead])
+
+    ia_only = await agent.list_pending_review(vertical="ia_adopcion")
+    default_only = await agent.list_pending_review(vertical="custom")
+    everything = await agent.list_pending_review()
+
+    assert [r["result_id"] for r in ia_only] == ["r1"]
+    assert [r["result_id"] for r in default_only] == ["r2"]
+    assert {r["result_id"] for r in everything} == {"r1", "r2"}
+
+
+@pytest.mark.asyncio
+async def test_run_daily_runs_default_and_additional_campaign_lines(tmp_path):
+    """La UI actual (formulario unico) sigue editando/leyendo 'default' sin
+    cambios — additional_campaigns son lineas extra (ej. la vía IA) que
+    corren en la misma pasada diaria, cada una con su propio vertical."""
+    agent, prospecting, *_ = _agent(tmp_path, results=[])
+    cfg = agent.load_config()
+    cfg["additional_campaigns"] = [{
+        "name": "ia_adopcion", "enabled": True, "vertical": "ia_adopcion",
+        "target_description": "empresa mediana", "geography": "Zaragoza, España",
+        "desired_count": 10, "opportunity_threshold": 55, "require_manual_approval": True,
+    }]
+    agent.save_config(cfg)
+
+    report = await agent.run_daily()
+
+    assert set(report["campaigns"].keys()) == {"default", "ia_adopcion"}
+    assert len(prospecting.run_calls) == 2
+    verticals_requested = {r.vertical for r in prospecting.run_calls}
+    assert "ia_adopcion" in verticals_requested
+    # retrocompat: new_campaign sigue apuntando a la linea 'default'
+    assert report["new_campaign"] == report["campaigns"]["default"]
+
+
+@pytest.mark.asyncio
+async def test_run_daily_default_enabled_false_pauses_only_default_line(tmp_path):
+    """Bug real encontrado al construir esto: reusar cfg['enabled'] (el
+    interruptor global de todo run_daily, follow-ups incluidos) para decidir
+    si la linea 'default' corre habria apagado TODO el ciclo, no solo esa
+    linea. default_enabled es el campo correcto para pausar solo el default
+    manteniendo encendidas las lineas nuevas."""
+    agent, prospecting, *_ = _agent(tmp_path, results=[])
+    cfg = agent.load_config()
+    cfg["default_enabled"] = False
+    cfg["additional_campaigns"] = [{"name": "ia_adopcion", "enabled": True, "vertical": "ia_adopcion"}]
+    agent.save_config(cfg)
+
+    report = await agent.run_daily()
+
+    assert report["status"] == "ok"  # el ciclo global sigue corriendo
+    assert "default" not in report["campaigns"]
+    assert "ia_adopcion" in report["campaigns"]
+    assert len(prospecting.run_calls) == 1
+    assert prospecting.run_calls[0].vertical == "ia_adopcion"
+
+
+@pytest.mark.asyncio
+async def test_run_daily_skips_disabled_additional_campaign_line(tmp_path):
+    agent, prospecting, *_ = _agent(tmp_path, results=[])
+    cfg = agent.load_config()
+    cfg["additional_campaigns"] = [{
+        "name": "ia_adopcion", "enabled": False, "vertical": "ia_adopcion",
+    }]
+    agent.save_config(cfg)
+
+    report = await agent.run_daily()
+
+    assert "ia_adopcion" not in report["campaigns"]
+    assert len(prospecting.run_calls) == 1  # solo la linea default
 
 
 @pytest.mark.asyncio

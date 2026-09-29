@@ -204,6 +204,19 @@ class CampaignAgent:
         represented_by = cfg.get("represented_by", "assets")
         require_manual_approval = bool(cfg.get("require_manual_approval", True))
 
+        # La UI pide "Geografía" como texto libre tipo "Zaragoza, España" (ver
+        # placeholder en nexus_campaign.html) y esto se mandaba entero como
+        # city=. _matches_requested_geography compara brief.city como
+        # substring exacto contra la direccion real extraida — "zaragoza,
+        # espana" (con coma) nunca aparece asi en una direccion real, asi que
+        # TODOS los candidatos reales de Zaragoza se rechazaban por
+        # geography_mismatch (verificado en vivo: 100% de rechazo tras
+        # arreglar el troceo de categorias). Se trocea en la parte de ciudad
+        # (lo unico que de verdad compara el guardrail) y el resto.
+        city_part, _, region_part = geography.partition(",")
+        city = city_part.strip()
+        region = region_part.strip()
+
         logger.info(
             "Prospección nueva | vertical={} | deseados={} | cap={} | umbral_oportunidad={}",
             vertical, desired, daily_cap, opportunity_threshold,
@@ -214,7 +227,8 @@ class CampaignAgent:
         request = ProspectingRunRequest(
             vertical=vertical,
             target_description=target_desc,
-            city=geography,
+            city=city,
+            region=region,
             desired_count=desired,
             minimum_score=minimum_score,
             opportunity_threshold=opportunity_threshold,
@@ -222,6 +236,12 @@ class CampaignAgent:
             dry_run=False,
             async_mode=False,
             enrich_candidates=True,
+            # Default de 10min (ProspectingRunRequest) se queda corto para el
+            # enriquecimiento con LLM local — verificado en vivo: ~1 min por
+            # candidato (auditoria + propuesta + guardrail), asi que con 10
+            # nunca se llega a evaluar mas de 6-8 aunque desired_count pida
+            # 30. La campana diaria no tiene prisa (no es un chat esperando).
+            max_run_minutes=20,
         )
         pros_summary = await self._prospecting.run(request)
 

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+from loguru import logger
+
 from nexus.prospecting.filters import BLOCKED_EXACT_DOMAINS
 from nexus.prospecting.repository import ProspectingRepository
 
@@ -106,7 +108,16 @@ class DdgSearchClient:
             from duckduckgo_search import DDGS  # already in requirements
             with DDGS() as ddgs:
                 raw = ddgs.text(query, max_results=count) or []
-        except Exception:
+        except Exception as exc:
+            # Antes esto devolvia [] en silencio para CUALQUIER fallo —
+            # indistinguible de "no habia nada que encontrar" en los logs del
+            # run. DDG bloquea/rate-limita con bastante frecuencia (verificado
+            # en vivo: 0 resultados consistentes en varios runs reales
+            # seguidos) — sin este log, ese bloqueo pasaba desapercibido.
+            logger.warning(
+                "DDG search fallo (posible bloqueo/rate-limit) | query={} | {}: {}",
+                query[:80], type(exc).__name__, exc,
+            )
             return []
         results = []
         for item in raw:

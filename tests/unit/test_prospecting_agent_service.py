@@ -95,9 +95,14 @@ class _FakeBrave:
 class _FakePlaces:
     enabled = True
 
-    def __init__(self, results=None, api_calls: int = 1) -> None:
+    def __init__(self, results=None, api_calls: int = 1, *, results_by_target: dict[str, list] | None = None) -> None:
         self._results = list(results or [])
         self._api_calls = api_calls
+        # target_description -> resultados especificos, para probar el troceo
+        # multi-categoria (una llamada real por categoria, cada una puede
+        # devolver negocios distintos — o el mismo, para probar dedupe).
+        self._results_by_target = results_by_target or {}
+        self.calls: list[dict[str, Any]] = []
 
     async def search_by_brief(
         self,
@@ -109,6 +114,9 @@ class _FakePlaces:
         target_description: str = "",
         places_queries: list[dict] | None = None,
     ):
+        self.calls.append({"vertical": vertical, "target_description": target_description, "places_queries": places_queries})
+        if target_description in self._results_by_target:
+            return list(self._results_by_target[target_description]), self._api_calls
         return list(self._results), self._api_calls
 
 
@@ -463,6 +471,129 @@ def test_query_generation_for_restaurants(prospecting_cfg):
     )
     assert any("restaurante" in query.lower() for query in queries)
     assert any("eventos empresa" in query.lower() for query in queries)
+
+
+def _service_for_query_tests(prospecting_cfg, places_client=None) -> ProspectingAgentService:
+    return ProspectingAgentService(
+        cfg=prospecting_cfg,
+        repository=ProspectingRepository(prospecting_cfg.prospecting_data_dir),
+        connector=_FakeConnector(),
+        brave_client=_FakeBrave(),
+        places_client=places_client or _FakePlaces([]),
+        extractor=_FakeExtractor(),
+        domain_validator=_FakeDomainValidator(),
+        mx_validator=_FakeMXValidator(),
+    )
+
+
+def test_generate_queries_splits_multi_category_target_description(prospecting_cfg):
+    """Regresion real: una descripcion libre multi-categoria ('peluquerias,
+    talleres mecanicos y restaurantes') se mandaba ENTERA como una sola
+    query — DDG/Brave devolvian paginas de listados en vez de negocios
+    reales (verificado en vivo: run pros-0a0da7c6cc, 27 candidatos -> 0
+    usables). Ahora cada categoria genera su propia query."""
+    service = _service_for_query_tests(prospecting_cfg)
+    brief = service._normalize_brief(
+        ProspectingRunRequest(
+            vertical="custom",
+            target_description="peluquerias, talleres mecanicos y restaurantes",
+            city="Zaragoza",
+        )
+    )
+
+    queries = [q.lower() for q in service.generate_queries(brief)]
+
+    assert any("peluquerias" in q and "talleres" not in q and "restaurantes" not in q for q in queries)
+    assert any("talleres mecanicos" in q and "peluquerias" not in q for q in queries)
+    assert any("restaurantes" in q and "peluquerias" not in q for q in queries)
+
+
+def test_generate_queries_single_category_unchanged(prospecting_cfg):
+    """Con una sola categoria, mismo resultado que antes del troceo — dos
+    queries (contacto / email telefono) con el texto completo, sin cambios
+    de comportamiento para el caso normal de Sales."""
+    service = _service_for_query_tests(prospecting_cfg)
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical="custom", target_description="peluquerias", city="Zaragoza")
+    )
+
+    queries = service.generate_queries(brief)
+
+    assert "peluquerias Zaragoza contacto" in queries
+    assert "peluquerias Zaragoza email teléfono" in queries
+
+
+@pytest.mark.asyncio
+async def test_discover_with_places_splits_multi_category_and_dedupes(prospecting_cfg):
+    """Mismo troceo que generate_queries, aplicado a Google Places — una
+    llamada real por categoria (acotado a 3), deduplicando negocios que
+    aparezcan en mas de una categoria."""
+    shared_result = {**_sample_places_result(), "place_id": "place-shared"}
+    only_in_talleres = {**_sample_places_result(), "place_id": "place-talleres", "title": "Taller Pepe"}
+    places = _FakePlaces(results_by_target={
+        "peluquerias": [shared_result],
+        "talleres mecanicos": [shared_result, only_in_talleres],
+        "restaurantes": [],
+    })
+    service = _service_for_query_tests(prospecting_cfg, places_client=places)
+    brief = service._normalize_brief(
+        ProspectingRunRequest(
+            vertical="custom",
+            target_description="peluquerias, talleres mecanicos y restaurantes",
+            city="Zaragoza",
+        )
+    )
+
+    raw_hits, queries_used = await service._discover_with_places(
+        {}, brief, geography=brief.geography_label
+    )
+
+    assert len(places.calls) == 3
+    called_targets = {c["target_description"] for c in places.calls}
+    assert called_targets == {"peluquerias", "talleres mecanicos", "restaurantes"}
+    # "place-shared" aparecio en dos categorias — solo debe contarse una vez
+    place_ids = [hit["place_id"] for hit in raw_hits]
+    assert place_ids.count("place-shared") == 1
+    assert "place-talleres" in place_ids
+    assert len(queries_used) == 3
+
+
+@pytest.mark.asyncio
+async def test_discover_with_places_single_category_makes_one_call(prospecting_cfg):
+    """Con una sola categoria, una unica llamada — igual que antes del troceo."""
+    places = _FakePlaces([_sample_places_result()])
+    service = _service_for_query_tests(prospecting_cfg, places_client=places)
+    brief = service._normalize_brief(
+        ProspectingRunRequest(vertical="custom", target_description="peluquerias", city="Zaragoza")
+    )
+
+    raw_hits, queries_used = await service._discover_with_places(
+        {}, brief, geography=brief.geography_label
+    )
+
+    assert len(places.calls) == 1
+    assert len(raw_hits) == 1
+    assert len(queries_used) == 1
+
+
+@pytest.mark.asyncio
+async def test_discover_with_places_curated_vertical_ignores_category_split(prospecting_cfg):
+    """Un vertical con plantillas curadas (places_queries en discovery_config)
+    nunca debe trocearse por categoria, aunque su target_description tenga
+    comas — ese camino ya tiene su propia logica de queries."""
+    places = _FakePlaces([_sample_places_result()])
+    service = _service_for_query_tests(prospecting_cfg, places_client=places)
+    brief = service._normalize_brief(
+        ProspectingRunRequest(
+            vertical="restaurants",
+            target_description="restaurantes, bares y cafeterias",
+            city="Zaragoza",
+        )
+    )
+
+    await service._discover_with_places({}, brief, geography=brief.geography_label)
+
+    assert len(places.calls) == 1
 
 
 def test_email_validator_flags_generic_and_personal():

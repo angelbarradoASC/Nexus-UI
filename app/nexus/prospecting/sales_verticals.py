@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from nexus.persistence.prospecting_schema import ensure_prospecting_schema
 from nexus.persistence.sqlite_store import SQLiteStore
 
@@ -387,6 +389,48 @@ _DEFAULT_SEED: list[dict[str, Any]] = [
         "crm_sector": "otros",
     },
     {
+        # Vertical nueva del pivote de Campaña (2026-09-29): dejar de
+        # prospectar pyme pequeña y apuntar a empresa mediana-casi-grande
+        # (50-250 empleados) con necesidad real de adopcion de IA,
+        # explotando ayudas reales (grants_ambito -> GrantsRepository, ver
+        # service.py:_classify_grant_fit). El filtro de tamaño es
+        # aproximado hoy (sin fuente de empleados verificada) — se declara
+        # como tal en cada lead, nunca como dato comprobado.
+        "slug": "ia_adopcion", "nombre": "Adopción de IA (empresa mediana)",
+        # "ia" a secas NUNCA como alias — es substring de cualquier palabra
+        # terminada en "-ia"/"-ias" (peluquerias, zapaterias, gestorias...),
+        # normalize_slug() le quita acentos, asi que "peluquerías" tambien
+        # cae. Bug real encontrado en tests: resolve("busco peluquerias en
+        # Alicante") devolvia esta vertical en vez de "peluquerias".
+        "aliases": ["inteligencia artificial", "adopcion de ia", "adopcion ia", "transformacion digital ia"],
+        "scoring_rules": {
+            "relevance_signals": ["empresa", "sector", "equipo", "departamento", "procesos", "sede", "planta"],
+            "premium_signals": ["varias sedes", "grupo", "filial", "certificacion iso", "departamento tecnico", "director de operaciones", "responsable de sistemas"],
+            "reason_relevant": "empresa mediana con procesos susceptibles de digitalizar/adoptar IA",
+            "reason_irrelevant": "no parece empresa mediana con necesidad real de adopcion de IA",
+            "organization_type": "empresa_mediana",
+            "requires_direct_contact": True,
+            "point_criteria": dict(_GENERIC_POINT_CRITERIA),
+        },
+        "discovery_config": {
+            "ddg_templates": [
+                "empresa {geo} procesos manuales sin digitalizar contacto",
+                "empresa mediana {geo} 50 a 250 empleados contacto email",
+                "empresa {geo} adopcion inteligencia artificial digitalizacion",
+                "empresa {geo} departamento sistemas director operaciones contacto",
+                "grupo empresarial {geo} varias sedes contacto",
+            ],
+            # Ambitos de GrantsRepository.list_active() a considerar para
+            # esta vertical — estatal (Kit Consulting/CDTI) + aragon
+            # (Ayudas Aragón PYME Digitalización). Sin esto, ninguna
+            # vertical dispara clasificacion de ayudas (coste cero para
+            # restaurants/talleres/etc, que no lo llevan).
+            "grants_ambito": ["estatal", "aragon"],
+        },
+        "crm_tags": ["ia-adopcion", "kit-consulting", "empresa-mediana", "prospeccion-nexus"],
+        "crm_sector": "otros",
+    },
+    {
         "slug": FALLBACK_SLUG, "nombre": "Otros",
         "aliases": [],
         "is_fallback": True,
@@ -419,6 +463,7 @@ class SalesVerticalsRepository:
         ensure_prospecting_schema(self._store)
         self._seed_defaults_if_empty()
         self._backfill_point_criteria_if_missing()
+        self._backfill_new_seed_verticals()
 
     def _seed_defaults_if_empty(self) -> None:
         with self._store.transaction() as conn:
@@ -470,6 +515,41 @@ class SalesVerticalsRepository:
                     "UPDATE sales_verticals SET scoring_rules_json = ?, updated_at = ? WHERE slug = ?",
                     (json.dumps(rules, ensure_ascii=False), now, row["slug"]),
                 )
+
+    def _backfill_new_seed_verticals(self) -> None:
+        """_seed_defaults_if_empty() solo siembra en una tabla vacia — una
+        instalacion real ya tiene datos (leads/CRM reales), asi que una
+        vertical nueva añadida a _DEFAULT_SEED (ej. ia_adopcion) nunca
+        llegaria a esa BBDD sin esto. Migracion idempotente: solo inserta
+        los slugs de la semilla que todavia no existen."""
+        with self._store.transaction() as conn:
+            existing = {row["slug"] for row in conn.execute("SELECT slug FROM sales_verticals").fetchall()}
+            now = _now_iso()
+            for seed in _DEFAULT_SEED:
+                if seed["slug"] in existing:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO sales_verticals(
+                        slug, nombre, aliases_json, activo, is_fallback,
+                        scoring_rules_json, discovery_config_json, crm_tags_json,
+                        crm_sector, created_at, updated_at
+                    ) VALUES(?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        seed["slug"],
+                        seed["nombre"],
+                        json.dumps(seed["aliases"], ensure_ascii=False),
+                        1 if seed.get("is_fallback") else 0,
+                        json.dumps(seed["scoring_rules"], ensure_ascii=False),
+                        json.dumps(seed["discovery_config"], ensure_ascii=False),
+                        json.dumps(seed["crm_tags"], ensure_ascii=False),
+                        seed["crm_sector"],
+                        now,
+                        now,
+                    ),
+                )
+                logger.info("SalesVerticalsRepository | vertical nueva sembrada por backfill: {}", seed["slug"])
 
     # ── Lectura ─────────────────────────────────────────────────────────────
 

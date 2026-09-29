@@ -22,6 +22,7 @@ from nexus.prospecting.google_places import GooglePlacesClient, GooglePlacesSett
 from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
+from nexus.prospecting.grants import Grant, GrantsRepository
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
 from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, PlacesApiBudget
@@ -56,6 +57,7 @@ class ProspectingAgentService:
         scorer: ProspectScorer | None = None,
         auditor: WebAuditor | None = None,
         opportunity_scorer: OpportunityScorer | None = None,
+        grants_repository: GrantsRepository | None = None,
     ) -> None:
         self._cfg = cfg
         self._repository = repository or ProspectingRepository(cfg.prospecting_data_dir)
@@ -131,6 +133,7 @@ class ProspectingAgentService:
         self._autonomy = SalesAutonomousSystem()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._verticals = SalesVerticalsRepository(cfg.prospecting_data_dir)
+        self._grants = grants_repository or GrantsRepository(cfg.prospecting_data_dir)
         self._geocode_cache = GeocodeCache()
 
     @property
@@ -140,6 +143,12 @@ class ProspectingAgentService:
         models.py y el listado en vivo contra el CRM.
         """
         return self._verticals
+
+    @property
+    def grants(self) -> GrantsRepository:
+        """Catalogo de ayudas/subvenciones — ver _classify_grant_fit() para como
+        se usa durante el enriquecimiento de un lead."""
+        return self._grants
 
     @property
     def local_llm(self) -> LocalLLMClient:
@@ -350,6 +359,37 @@ class ProspectingAgentService:
         result["lead_stage"] = lead_stage
         await self._repository.save_runs(runs)
         return {"status": "ok", "result_id": result_id, "lead_stage": lead_stage}
+
+    async def refresh_grants_catalog(self) -> dict[str, Any]:
+        """Comprueba vigencia del catalogo de ayudas y busca programas nuevos
+        — pedido explicito del usuario: un catalogo sembrado a mano se queda
+        obsoleto solo (mismo problema visto con el .env desincronizado del
+        build empaquetado). Reutiliza GrantsDiscoveryService (misma
+        infraestructura de busqueda/LLM que ya tiene este servicio, sin
+        crear nada nuevo)."""
+        from nexus.prospecting.grants_discovery import GrantsDiscoveryService
+
+        discovery = GrantsDiscoveryService(grants=self._grants, llm=self._llm, brave=self._brave, ddg=self._ddg)
+        if not discovery.enabled:
+            return {"status": "skipped", "reason": "LLM local o busqueda no disponibles"}
+
+        freshness = await discovery.check_freshness()
+        discovery_result = await discovery.discover_new(
+            ambito="estatal",
+            hints=[
+                "nuevas ayudas subvenciones adopcion inteligencia artificial empresas españa 2026",
+                "nuevas ayudas digitalización pyme españa 2026 convocatoria",
+            ],
+        )
+        discovery_aragon = await discovery.discover_new(
+            ambito="aragon",
+            hints=["nuevas ayudas Aragón digitalización empresas 2026 convocatoria"],
+        )
+        return {
+            "status": "ok",
+            "freshness": freshness,
+            "discovered": discovery_result.get("discovered", []) + discovery_aragon.get("discovered", []),
+        }
 
     async def push_result_to_crm(self, result_id: str, *, dry_run: bool = True) -> dict[str, Any]:
         runs = await self._repository.load_runs()
@@ -972,6 +1012,81 @@ class ProspectingAgentService:
             run,
             f"Score de oportunidad: {cname} | {opportunity['opportunity_score']} ({opportunity['opportunity_confidence']}) | umbral={brief.opportunity_threshold}",
         )
+
+        if extracted["lead_stage"] == "QUALIFIED":
+            grant_matches = await self._classify_grant_fit(extracted=extracted, business_profile=business_profile, brief=brief)
+            if grant_matches:
+                extracted["grant_matches"] = grant_matches
+                self._log(run, f"Ayudas encajadas: {cname} | {', '.join(m['nombre'] for m in grant_matches)}")
+
+    async def _classify_grant_fit(
+        self,
+        *,
+        extracted: dict[str, Any],
+        business_profile: dict[str, Any],
+        brief: ProspectingBrief,
+    ) -> list[dict[str, Any]]:
+        """Clasifica el lead ya cualificado contra el catalogo REAL de ayudas
+        (GrantsRepository) — solo se ejecuta si el vertical pedido tiene
+        grants_ambito configurado (verticales normales como restaurants/
+        peluquerias no lo tienen, cero coste extra para ellas). Pedido
+        explicito del usuario: no una busqueda por ayuda, sino "busca el
+        lead, mira a ver en cual encaja mejor, y continua avanzando"."""
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        grants_ambito = vertical.discovery_config.get("grants_ambito")
+        if not grants_ambito or not self._llm.enabled:
+            return []
+        grants = self._grants.list_active(ambito=grants_ambito)
+        if not grants:
+            return []
+
+        catalog_block = "\n".join(
+            f"- slug={g.slug} | {g.nombre} | empleados {g.min_employees or '?'}-{g.max_employees or '?'} | {g.criterios}"
+            for g in grants
+        )
+        company_block = (
+            f"Nombre: {extracted.get('name', '')}\n"
+            f"A que se dedica: {business_profile.get('what_they_do', '')}\n"
+            f"Madurez digital: {business_profile.get('digital_maturity', '')}\n"
+            f"Puntos de friccion: {business_profile.get('friction_points', [])}\n"
+            f"Empleados: {self._extract_employee_hint(extracted)}\n"
+        )
+        try:
+            result = await self._llm.extract_json(
+                system_prompt=resolve_prompt_sync("prospecting.grant_fit"),
+                user_prompt=f"Catalogo de ayudas activas:\n{catalog_block}\n\nEmpresa:\n{company_block}",
+                schema_hint={"matches": [{"slug": "", "motivo": "", "importe_estimado": ""}]},
+            )
+        except Exception:
+            return []
+
+        valid = {g.slug: g for g in grants}
+        matches: list[dict[str, Any]] = []
+        for m in (result or {}).get("matches") or []:
+            grant = valid.get(str(m.get("slug") or ""))
+            if grant is None:
+                # El LLM nunca puede colar una ayuda que no exista de verdad
+                # en el catalogo — mismo guardarrail que ya usa la
+                # resolucion de verticales (SalesVerticalsRepository.resolve).
+                continue
+            matches.append({
+                "slug": grant.slug,
+                "nombre": grant.nombre,
+                "motivo": str(m.get("motivo") or "").strip(),
+                "importe_estimado": str(m.get("importe_estimado") or "").strip(),
+            })
+        return matches
+
+    @staticmethod
+    def _extract_employee_hint(extracted: dict[str, Any]) -> str:
+        """Busca una mencion textual de plantilla/empleados en las notas ya
+        extraidas — señal aproximada, no un dato verificado (no hay fuente
+        de RRHH/directorio empresarial conectada todavia). Se etiqueta como
+        tal para que el LLM no lo trate como un hecho comprobado."""
+        notes = extracted.get("notes") or []
+        text = " ".join(str(n) for n in notes) if isinstance(notes, list) else str(notes)
+        match = re.search(r"(\d{1,4})\s*(?:empleados|trabajadores|personas en plantilla)", text, re.IGNORECASE)
+        return f"~{match.group(1)} (mencion textual encontrada, no verificada)" if match else "no mencionado en el texto disponible"
 
     async def _run_technical_audit(self, extracted: dict[str, Any]) -> dict[str, Any] | None:
         website = extracted.get("website") or ""

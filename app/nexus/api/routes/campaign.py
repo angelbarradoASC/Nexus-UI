@@ -80,11 +80,18 @@ async def trigger_campaign(request: Request) -> dict[str, Any]:
 
 
 @router.get("/pending")
-async def campaign_pending(agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+async def campaign_pending(
+    track: str | None = None,
+    agent: CampaignAgent = Depends(get_campaign_agent),
+) -> dict[str, Any]:
     """Leads QUALIFIED en cola de revision — nada se envia hasta que el
-    usuario elija por cada uno via /pending/{result_id}/send."""
-    pending = await agent.list_pending_review()
-    return {"status": "ok", "total": len(pending), "pending": pending}
+    usuario elija por cada uno via /pending/{result_id}/send.
+
+    track filtra por vertical/linea de campaña (ej. ?track=ia_adopcion) —
+    dos colas de revision separadas para las vias IA/OT; sin track devuelve
+    todas juntas (comportamiento previo, sigue igual para quien no lo use)."""
+    pending = await agent.list_pending_review(vertical=track)
+    return {"status": "ok", "total": len(pending), "pending": pending, "track": track}
 
 
 @router.post("/pending/{result_id}/send")
@@ -131,3 +138,59 @@ async def campaign_decompose_verify(
     verifica de ida y vuelta contra el LLM local — ver
     nexus.prospecting.campaign_decompose.CampaignDecomposer."""
     return await decomposer.decompose_and_verify(payload.text)
+
+
+# ── Catalogo de ayudas/subvenciones ──────────────────────────────────────────
+# Pedido explicito del usuario: la propia campaña debe mantener su catalogo
+# de ayudas fresco (que sigue vigente, que ha caducado, que hay nuevo) — ver
+# nexus.prospecting.grants_discovery.GrantsDiscoveryService.
+
+@router.get("/grants")
+async def list_grants(
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    """Catalogo completo (activas, pendientes de revision y expiradas) —
+    la UI distingue por el campo 'estado' de cada una."""
+    grants = prospecting.grants.list_all()
+    return {"status": "ok", "total": len(grants), "grants": [g.to_dict() for g in grants]}
+
+
+@router.post("/grants/refresh")
+async def refresh_grants(
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    """Dispara la comprobacion de vigencia + busqueda de ayudas nuevas.
+    Las nuevas entran como pendiente_revision — nunca se activan solas."""
+    return await prospecting.refresh_grants_catalog()
+
+
+@router.post("/grants/{slug}/approve")
+async def approve_grant(
+    slug: str,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    """Aprueba una ayuda descubierta automaticamente — pasa a activa y
+    empieza a influir en la clasificacion de leads a partir de ahora."""
+    grant = prospecting.grants.set_estado(slug, "activo")
+    if grant is None:
+        return JSONResponse({"status": "not_found", "slug": slug}, status_code=404)
+    return {"status": "ok", "grant": grant.to_dict()}
+
+
+@router.post("/grants/{slug}/reject")
+async def reject_grant(
+    slug: str,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    """Descarta una ayuda descubierta automaticamente que no era real/no
+    aplica — se borra, a diferencia de 'expirado' (que si fue real)."""
+    grant = prospecting.grants.get(slug)
+    if grant is None:
+        return JSONResponse({"status": "not_found", "slug": slug}, status_code=404)
+    if grant.fuente == "semilla_inicial":
+        return JSONResponse(
+            {"status": "error", "error": "No se puede rechazar una ayuda de la semilla inicial — usa expirar en su lugar."},
+            status_code=400,
+        )
+    prospecting.grants.delete(slug)
+    return {"status": "ok", "slug": slug}

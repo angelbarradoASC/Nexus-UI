@@ -85,6 +85,29 @@
     white-space: pre-line;
 }
 
+/* Por que este lead encaja en una ayuda real — la "visibilidad" de la vía
+   IA pedida por el usuario, no solo un badge de track sin explicar. */
+.camp-pending-grants {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.camp-grant-chip {
+    font-size: 0.82rem;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--gold-soft);
+    border: 1px solid rgba(169, 123, 47, 0.3);
+    color: var(--forest);
+}
+
+.camp-grant-motivo {
+    margin-top: 2px;
+    color: var(--muted);
+    font-weight: 400;
+}
+
 .camp-pending-actions {
     display: flex;
     gap: 8px;

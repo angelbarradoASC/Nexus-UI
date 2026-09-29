@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260829a">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260929a">
 </head>
 <body>
     <main class="workspace workspace-campaign">
@@ -147,17 +147,33 @@
                 </div>
             </section>
 
-            <!-- ── Panel: cola de revisión — nadie se contacta sin pasar por aquí ── -->
+            <!-- ── Panel: cola de revisión, vía general — nadie se contacta sin pasar por aquí ── -->
             <section class="campaign-panel campaign-pending-panel">
                 <div class="camp-header">
                     <div>
-                        <p class="eyebrow eyebrow-tight">Requiere tu decisión</p>
+                        <p class="eyebrow eyebrow-tight">Requiere tu decisión — vía general</p>
                         <h2>Pendientes de contactar</h2>
                     </div>
-                    <span id="pendingCount" class="camp-badge camp-badge--unknown">—</span>
+                    <span id="pendingCount_default" class="camp-badge camp-badge--unknown">—</span>
                 </div>
                 <div class="campaign-panel-body">
-                    <div id="pendingList" class="camp-pending-list">
+                    <div id="pendingList_default" class="camp-pending-list">
+                        <div class="camp-report camp-report--empty">Sin leads pendientes de revisión</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Panel: cola de revisión, vía IA — ayudas reales encajadas por lead ── -->
+            <section class="campaign-panel campaign-pending-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Requiere tu decisión — vía IA</p>
+                        <h2>Adopción de IA (empresa mediana)</h2>
+                    </div>
+                    <span id="pendingCount_ia_adopcion" class="camp-badge camp-badge--unknown">—</span>
+                </div>
+                <div class="campaign-panel-body">
+                    <div id="pendingList_ia_adopcion" class="camp-pending-list">
                         <div class="camp-report camp-report--empty">Sin leads pendientes de revisión</div>
                     </div>
                 </div>
@@ -195,6 +211,6 @@
 
     <div id="toast" class="camp-toast" aria-live="polite"></div>
 
-    <script src="/static/js/nexus_campaign.js?v=20260829a"></script>
+    <script src="/static/js/nexus_campaign.js?v=20260929a"></script>
 </body>
 </html>

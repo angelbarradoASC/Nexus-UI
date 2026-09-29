@@ -120,6 +120,29 @@ async def test_manual_approval_default_is_true_on_fresh_config(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_new_prospects_splits_geography_into_city_and_region(tmp_path):
+    """Bug real encontrado en vivo: 'geography' en config es texto libre tipo
+    'Zaragoza, España' (placeholder de la UI) y se mandaba ENTERO como
+    ProspectingRunRequest.city. _matches_requested_geography compara
+    brief.city como substring literal contra la direccion real extraida —
+    'zaragoza, espana' (con coma) nunca aparece asi en una direccion real,
+    asi que TODOS los candidatos reales se rechazaban por
+    geography_mismatch (verificado en vivo tras arreglar el troceo de
+    categorias: 100% de rechazo). city debe llevar solo la ciudad."""
+    agent, prospecting, *_ = _agent(tmp_path)
+    cfg = agent.load_config()
+    cfg["geography"] = "Zaragoza, España"
+    agent.save_config(cfg)
+
+    await agent._run_new_prospects(agent.load_config())
+
+    assert len(prospecting.run_calls) == 1
+    request = prospecting.run_calls[0]
+    assert request.city == "Zaragoza"
+    assert request.region == "España"
+
+
+@pytest.mark.asyncio
 async def test_run_new_prospects_with_manual_approval_does_not_send(tmp_path):
     results = [_qualified_result("r1", "Panaderia Ana"), _qualified_result("r2", "Taller Luis")]
     agent, prospecting, outreach, crm = _agent(tmp_path, results=results, require_manual_approval=True)

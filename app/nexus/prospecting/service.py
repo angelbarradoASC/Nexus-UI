@@ -28,6 +28,7 @@ from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, Pl
 from nexus.prospecting.filters import BLOCKED_HINT_PREFIXES
 from nexus.utils.geocoding import GeocodeCache, haversine_km
 from nexus.utils.text import normalize_text as _normalize_text
+from nexus.utils.text import split_target_categories
 from nexus.prospecting.opportunity_scoring import OpportunityScorer
 from nexus.prospecting.repository import ProspectingRepository
 from nexus.prospecting.scoring import ProspectScorer
@@ -403,7 +404,10 @@ class ProspectingAgentService:
         geography = brief.geography_label or brief.target_description or "España"
         vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
         templates = vertical.discovery_config.get("ddg_templates")
-        if templates:
+        if templates and not vertical.is_fallback:
+            # Vertical curado con plantillas propias (restaurants, salud...) —
+            # sin cambios: {target} aqui es texto libre opcional que estas
+            # plantillas ya usan con cuidado, no una lista de categorias.
             default_target = vertical.discovery_config.get("default_target", "")
             target = brief.target_description or default_target
             base = [tpl.replace("{geo}", geography).replace("{target}", target) for tpl in templates]
@@ -423,10 +427,16 @@ class ProspectingAgentService:
                 f"{desc} polígono industrial \"{zone}\" {prov}",
             ]
         else:
-            base = [
-                f"{brief.target_description} {geography} contacto",
-                f"{brief.target_description} {geography} email teléfono",
-            ]
+            # Una descripcion libre como "peluquerias, talleres y tiendas"
+            # troceada en categorias individuales — una sola query mezclando
+            # todo devuelve paginas de listados, no negocios reales
+            # (verificado en vivo, ver split_target_categories). Con una
+            # sola categoria, el resultado es identico al de antes.
+            categories = split_target_categories(brief.target_description) or [brief.target_description]
+            base = []
+            for category in categories:
+                base.append(f"{category} {geography} contacto")
+                base.append(f"{category} {geography} email teléfono")
 
         # Employee range hint in queries
         if brief.min_employees or brief.max_employees:
@@ -1090,21 +1100,59 @@ class ProspectingAgentService:
             run["finished_at"] = datetime.now(timezone.utc).isoformat()
             return None
         budget_before = self._budget.status()
+        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+        places_queries = vertical.discovery_config.get("places_queries")
+        # Solo troceamos por categoria cuando no hay plantillas curadas para
+        # este vertical (mismo criterio que generate_queries) — acotado a 3
+        # para cuidar el presupuesto de Places (llamada real por categoria).
+        categories = [] if places_queries else split_target_categories(brief.target_description, max_categories=3)
+
         self._log(
             run,
-            f"Buscando en Google Places: {brief.vertical} en {geography}",
+            f"Buscando en Google Places: {brief.target_description or brief.vertical} en {geography}",
             budget_calls=budget_before["calls"],
             budget_remaining=budget_before["remaining"],
         )
-        vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
-        raw_hits, api_calls_made = await self._places.search_by_brief(
-            vertical=brief.vertical,
-            geography=geography,
-            max_results=brief.desired_count * 2,
-            language=brief.language,
-            target_description=brief.target_description,
-            places_queries=vertical.discovery_config.get("places_queries"),
-        )
+
+        if len(categories) > 1:
+            raw_hits = []
+            api_calls_made = 0
+            for category in categories:
+                hits, calls = await self._places.search_by_brief(
+                    vertical=brief.vertical,
+                    geography=geography,
+                    max_results=brief.desired_count * 2,
+                    language=brief.language,
+                    target_description=category,
+                    places_queries=None,
+                )
+                raw_hits.extend(hits)
+                api_calls_made += calls
+            # search_by_brief dedupe por place_id es solo dentro de su propia
+            # llamada — con varias categorias hay que deduplicar tambien entre
+            # ellas (dos categorias distintas pueden devolver el mismo negocio).
+            seen_ids: set[str] = set()
+            deduped = []
+            for hit in raw_hits:
+                pid = hit.get("place_id", "")
+                if pid and pid in seen_ids:
+                    continue
+                if pid:
+                    seen_ids.add(pid)
+                deduped.append(hit)
+            raw_hits = deduped
+            queries_used = [f"[Places] {category} en {geography}" for category in categories]
+        else:
+            raw_hits, api_calls_made = await self._places.search_by_brief(
+                vertical=brief.vertical,
+                geography=geography,
+                max_results=brief.desired_count * 2,
+                language=brief.language,
+                target_description=brief.target_description,
+                places_queries=places_queries,
+            )
+            queries_used = [f"[Places] {brief.target_description or brief.vertical} en {geography}"]
+
         new_total = await self._budget.increment(api_calls_made)
         run["places_api_calls"] = run.get("places_api_calls", 0) + api_calls_made
         self._log(
@@ -1114,7 +1162,7 @@ class ProspectingAgentService:
             api_calls=api_calls_made,
             budget_total=new_total,
         )
-        return raw_hits, [f"[Places] {brief.vertical} en {geography}"]
+        return raw_hits, queries_used
 
     async def _discover_with_brave(
         self,

@@ -23,6 +23,7 @@ from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
 from nexus.prospecting.grants import Grant, GrantsRepository
+from nexus.prospecting.regulations import RegulationsRepository
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
 from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, PlacesApiBudget
@@ -58,6 +59,7 @@ class ProspectingAgentService:
         auditor: WebAuditor | None = None,
         opportunity_scorer: OpportunityScorer | None = None,
         grants_repository: GrantsRepository | None = None,
+        regulations_repository: RegulationsRepository | None = None,
     ) -> None:
         self._cfg = cfg
         self._repository = repository or ProspectingRepository(cfg.prospecting_data_dir)
@@ -134,6 +136,7 @@ class ProspectingAgentService:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._verticals = SalesVerticalsRepository(cfg.prospecting_data_dir)
         self._grants = grants_repository or GrantsRepository(cfg.prospecting_data_dir)
+        self._regulations = regulations_repository or RegulationsRepository(cfg.prospecting_data_dir)
         self._geocode_cache = GeocodeCache()
 
     @property
@@ -149,6 +152,14 @@ class ProspectingAgentService:
         """Catalogo de ayudas/subvenciones — ver _classify_grant_fit() para como
         se usa durante el enriquecimiento de un lead."""
         return self._grants
+
+    @property
+    def regulations(self) -> RegulationsRepository:
+        """Catalogo de normativas -> sectores reales (ej. NIS2) — ver
+        _regulations_block() en nexus.api.routes.prospecting, usado para que
+        un criterio indirecto ("empresas afectadas por NIS2") se traduzca a
+        una busqueda real en vez del nombre literal de la ley."""
+        return self._regulations
 
     @property
     def local_llm(self) -> LocalLLMClient:

@@ -34,6 +34,7 @@ from loguru import logger
 from nexus.prompts import resolve_prompt_sync
 from nexus.prospecting.embeddings import LocalEmbeddingsClient, cosine_similarity
 from nexus.prospecting.llm import LocalLLMClient
+from nexus.prospecting.regulations import RegulationsRepository, build_regulations_block
 from nexus.prospecting.sales_verticals import SalesVerticalsRepository
 
 SIMILARITY_THRESHOLD = 0.95
@@ -50,7 +51,21 @@ _DECOMPOSE_TOOL: list[dict[str, Any]] = [
                     "vertical": {"type": "string", "description": "Slug del vertical, de la lista de verticales disponibles."},
                     "business_type": {"type": "string", "description": "Tipo de negocio tal como lo pidió el usuario, literal."},
                     "city": {"type": "string"},
+                    "province": {"type": "string", "description": "Provincia, si el usuario la menciona o se infiere de la ciudad."},
                     "radius_km": {"type": "integer"},
+                    "must_have": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Si el usuario pide explicitamente email o telefono de contacto, incluye 'email'/'telefono'; si no, [].",
+                    },
+                    "regulation_slug": {
+                        "type": "string",
+                        "description": (
+                            "SOLO si el usuario pide empresas afectadas por una ley/normativa de "
+                            "cumplimiento (ej. NIS2) en vez de un tipo de negocio literal — usa el "
+                            "slug EXACTO de la lista de normativas del contexto. Si ninguna encaja, omite."
+                        ),
+                    },
                     "clean_intent": {
                         "type": "string",
                         "description": "La petición reescrita limpia y neutra, sin verbos de instrucción — solo el qué y el dónde.",
@@ -74,11 +89,13 @@ class CampaignDecomposer:
         local_llm: LocalLLMClient,
         embeddings: LocalEmbeddingsClient,
         verticals: SalesVerticalsRepository,
+        regulations: RegulationsRepository | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._local_llm = local_llm
         self._embeddings = embeddings
         self._verticals = verticals
+        self._regulations = regulations
 
     async def decompose_and_verify(self, text: str) -> dict[str, Any]:
         text = text.strip()
@@ -125,10 +142,14 @@ class CampaignDecomposer:
 
     async def _decompose(self, text: str) -> dict[str, Any] | None:
         verticals_block = self._verticals_block()
+        system_content = resolve_prompt_sync("campaign.decompose") + "\n\n" + verticals_block
+        regulations_block = self._regulations_block()
+        if regulations_block:
+            system_content += "\n\n" + regulations_block
         try:
             response = await self._llm_router.call(
                 messages=[
-                    {"role": "system", "content": resolve_prompt_sync("campaign.decompose") + "\n\n" + verticals_block},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": text},
                 ],
                 tools=_DECOMPOSE_TOOL,
@@ -155,13 +176,33 @@ class CampaignDecomposer:
 
         vertical = self._verticals.resolve(args.get("vertical", ""), fallback_text=business_type).slug
         radius_km = args.get("radius_km")
-        return {
+        must_have = [str(v).strip() for v in (args.get("must_have") or []) if str(v).strip()]
+        query = {
             "vertical": vertical,
             "business_type": business_type,
             "city": str(args.get("city") or "").strip(),
+            "province": str(args.get("province") or "").strip(),
             "radius_km": int(radius_km) if isinstance(radius_km, (int, float)) else None,
+            "must_have": must_have,
             "clean_intent": clean_intent,
         }
+        self._ground_regulation(args, query)
+        return query
+
+    def _ground_regulation(self, args: dict[str, Any], query: dict[str, Any]) -> None:
+        """Si el LLM identifico una normativa real (regulation_slug), sustituye
+        business_type por los sectores REALES de esa normativa — nunca se
+        confia en que el LLM los redacte bien (mismo guardarrail que
+        _classify_grant_fit con las ayudas: lo que no esta en el catalogo
+        real no se usa). Muta query in-place."""
+        slug = str(args.get("regulation_slug") or "").strip()
+        if not slug or self._regulations is None:
+            return
+        regulation = self._regulations.get(slug)
+        if regulation is None or not regulation.activo:
+            return
+        query["regulation_slug"] = regulation.slug
+        query["business_type"] = ", ".join(regulation.sectores)
 
     async def _reconstruct(self, query: dict[str, Any]) -> str | None:
         if not self._local_llm.enabled:
@@ -182,3 +223,17 @@ class CampaignDecomposer:
             return "VERTICALES DISPONIBLES: ninguna configurada. Usa 'custom'."
         lines = "\n".join(f"- {v.slug} ({v.nombre})" for v in active)
         return "VERTICALES DISPONIBLES (usa el slug que mejor encaje, o 'custom' si ninguno):\n" + lines
+
+    def _regulations_block(self) -> str:
+        if self._regulations is None:
+            return ""
+        active = self._regulations.list_active()
+        if not active:
+            return ""
+        return (
+            "NORMATIVAS DE CUMPLIMIENTO CONOCIDAS — si el usuario pide empresas afectadas por "
+            "una ley/normativa de este catalogo, NUNCA copies el nombre de la ley como "
+            "business_type — identifica el slug real en regulation_slug, el sistema "
+            "construira business_type a partir de los sectores REALES. Si ninguna encaja, "
+            "omite regulation_slug:\n" + build_regulations_block(active)
+        )

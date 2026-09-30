@@ -174,6 +174,7 @@ def build_runtime(cfg) -> NexusRuntime:
             ),
         ),
         verticals=prospecting.verticals,
+        regulations=prospecting.regulations,
     )
     # outreach/crm/campaign se construyen aqui (no mas abajo, donde estaban
     # antes) porque NexusCoordinator ahora necesita campaign_agent para

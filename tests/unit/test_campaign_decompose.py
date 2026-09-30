@@ -13,6 +13,7 @@ import json
 import pytest
 
 from nexus.prospecting.campaign_decompose import SIMILARITY_THRESHOLD, CampaignDecomposer
+from nexus.prospecting.regulations import RegulationsRepository
 from nexus.prospecting.sales_verticals import SalesVerticalsRepository
 
 
@@ -62,12 +63,13 @@ def _verticals(tmp_path) -> SalesVerticalsRepository:
     return SalesVerticalsRepository(data_dir=tmp_path)
 
 
-def _decomposer(tmp_path, *, llm_router, local_llm, embeddings) -> CampaignDecomposer:
+def _decomposer(tmp_path, *, llm_router, local_llm, embeddings, regulations=None) -> CampaignDecomposer:
     return CampaignDecomposer(
         llm_router=llm_router,
         local_llm=local_llm,
         embeddings=embeddings,
         verticals=_verticals(tmp_path),
+        regulations=regulations,
     )
 
 
@@ -216,3 +218,80 @@ async def test_radius_km_omitted_when_not_mentioned(tmp_path):
     result = await decomposer.decompose_and_verify("busca peluquerías en Zaragoza")
 
     assert result["query"]["radius_km"] is None
+
+
+# ── province / must_have — paridad con el brief de Sales ───────────────────
+
+@pytest.mark.asyncio
+async def test_province_and_must_have_are_extracted(tmp_path):
+    llm_router = _FakeLLMRouter([
+        _FakeLLMResponse(tool_calls=[_tool_call(
+            "c1", vertical="custom", business_type="asesorias fiscales", city="Toledo",
+            province="Toledo", must_have=["telefono"], clean_intent="asesorias fiscales en Toledo",
+        )]),
+    ])
+    local_llm = _FakeLocalLLM(reconstruction="asesorias fiscales en Toledo")
+    embeddings = _FakeEmbeddings({"asesorias fiscales en Toledo": [1.0, 0.0]})
+    decomposer = _decomposer(tmp_path, llm_router=llm_router, local_llm=local_llm, embeddings=embeddings)
+
+    result = await decomposer.decompose_and_verify("busca asesorias fiscales en Toledo, con telefono")
+
+    assert result["query"]["province"] == "Toledo"
+    assert result["query"]["must_have"] == ["telefono"]
+
+
+# ── Criterio indirecto (normativa) — pedido explicito del usuario ──────────
+# "quiero empresas afectadas por NIS2" no debe buscar el nombre literal de
+# la ley (nadie se describe asi online) — debe usar los sectores REALES
+# del catalogo, nunca lo que el LLM redacte por su cuenta.
+
+@pytest.mark.asyncio
+async def test_regulation_slug_grounds_business_type_in_real_sectors(tmp_path):
+    regulations = RegulationsRepository(tmp_path)
+    llm_router = _FakeLLMRouter([
+        _FakeLLMResponse(tool_calls=[_tool_call(
+            "c1", vertical="custom", business_type="empresas afectadas por la normativa NIS2",
+            city="Zaragoza", province="Zaragoza", must_have=["telefono"], regulation_slug="nis2",
+            clean_intent="empresas de Zaragoza afectadas por NIS2",
+        )]),
+    ])
+    local_llm = _FakeLocalLLM(reconstruction="empresas de Zaragoza afectadas por NIS2")
+    embeddings = _FakeEmbeddings({"empresas de Zaragoza afectadas por NIS2": [1.0, 0.0]})
+    decomposer = _decomposer(
+        tmp_path, llm_router=llm_router, local_llm=local_llm, embeddings=embeddings, regulations=regulations,
+    )
+
+    result = await decomposer.decompose_and_verify(
+        "quiero empresas de la provincia de Zaragoza afectadas por la normativa NIS2, con telefono"
+    )
+
+    query = result["query"]
+    assert query["regulation_slug"] == "nis2"
+    assert "NIS2" not in query["business_type"]  # nunca el nombre literal de la ley
+    assert "energía" in query["business_type"]  # sectores reales del catalogo
+    assert query["must_have"] == ["telefono"]
+
+
+@pytest.mark.asyncio
+async def test_hallucinated_regulation_slug_is_discarded(tmp_path):
+    """El LLM nunca puede colar una normativa que no exista de verdad en el
+    catalogo — mismo guardarrail que ya usa la clasificacion de ayudas."""
+    regulations = RegulationsRepository(tmp_path)
+    llm_router = _FakeLLMRouter([
+        _FakeLLMResponse(tool_calls=[_tool_call(
+            "c1", vertical="custom", business_type="empresas afectadas por normativa inventada",
+            city="Zaragoza", regulation_slug="normativa_que_no_existe",
+            clean_intent="empresas afectadas por normativa inventada en Zaragoza",
+        )]),
+    ])
+    local_llm = _FakeLocalLLM(reconstruction="empresas afectadas por normativa inventada en Zaragoza")
+    embeddings = _FakeEmbeddings({"empresas afectadas por normativa inventada en Zaragoza": [1.0, 0.0]})
+    decomposer = _decomposer(
+        tmp_path, llm_router=llm_router, local_llm=local_llm, embeddings=embeddings, regulations=regulations,
+    )
+
+    result = await decomposer.decompose_and_verify("empresas afectadas por normativa inventada en Zaragoza")
+
+    query = result["query"]
+    assert "regulation_slug" not in query
+    assert query["business_type"] == "empresas afectadas por normativa inventada"

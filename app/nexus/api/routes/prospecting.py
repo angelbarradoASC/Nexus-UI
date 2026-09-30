@@ -90,6 +90,16 @@ _PROSPECTING_BRIEF_CORE_PROPERTIES: dict[str, dict] = {
     "desired_count": {"type": "integer"},
     "represented_by": {"type": "string", "enum": ["assets", "automato", "other"]},
     "must_have": {"type": "array", "items": {"type": "string"}},
+    "regulation_slug": {
+        "type": "string",
+        "description": (
+            "SOLO si el usuario pide empresas afectadas por una ley/normativa/obligacion de "
+            "cumplimiento (ej. 'NIS2', 'normativa de ciberseguridad') en vez de un tipo de "
+            "negocio literal — usa el slug EXACTO de la lista de normativas del contexto. "
+            "Si no hay ninguna que encaje, o el usuario no menciono ninguna normativa, omite "
+            "este campo. NUNCA inventes un slug."
+        ),
+    },
 }
 
 # Mismo mecanismo que el bucle de PEPO (desktop/local_agents/system_task_agent.py):
@@ -268,23 +278,51 @@ def _verticals_context_block(prospecting: ProspectingAgentService) -> str:
     )
 
 
+def _regulations_context_block(prospecting: ProspectingAgentService) -> str:
+    """Bloque de contexto con las normativas reales del catalogo (NIS2, etc.)
+    y los sectores REALES a los que aplican — evita que target_description
+    salga como el nombre literal de la ley ("empresas afectadas por NIS2"),
+    que ninguna empresa usa para describirse online y no encuentra nada.
+    Mismo patron que _verticals_context_block: dato real + instruccion
+    inline, nunca hardcodeado en el prompt estatico."""
+    from nexus.prospecting.regulations import build_regulations_block
+
+    active = prospecting.regulations.list_active()
+    if not active:
+        return ""
+    return (
+        "NORMATIVAS DE CUMPLIMIENTO CONOCIDAS — si el usuario pide empresas afectadas por "
+        "una ley/normativa/obligacion de este catalogo (aunque la nombre distinto, ej. 'la "
+        "NIS2', 'normativa de ciberseguridad'), NUNCA copies el nombre de la ley como "
+        "target_description — en su lugar, identifica el slug real en regulation_slug. El "
+        "sistema construira target_description a partir de los sectores REALES de esa "
+        "normativa, no de tu redaccion. Si ninguna normativa listada encaja, omite "
+        "regulation_slug y trata el texto como una descripcion de negocio normal:\n"
+        + build_regulations_block(active)
+    )
+
+
 async def _run_interpret_llm(
     text: str,
     verticals_block: str,
     verticals,
     *,
     extra_context: str = "",
+    regulations_block: str = "",
 ) -> dict:
     """Una pasada de extraccion LLM (con fallback heuristico). Separado de la
     ruta para poder reintentar con feedback sin duplicar la logica de parseo."""
     llm = get_router()
     user_content = text if not extra_context else f"{text}\n\n{extra_context}"
+    system_content = resolve_prompt_sync("sales.prospecting.interpret") + "\n\n" + verticals_block
+    if regulations_block:
+        system_content += "\n\n" + regulations_block
     response = None
     try:
         response = await asyncio.wait_for(
             llm.call(
                 messages=[
-                    {"role": "system", "content": resolve_prompt_sync("sales.prospecting.interpret") + "\n\n" + verticals_block},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": user_content},
                 ],
                 tools=_INTERPRET_BRIEF_TOOL,
@@ -321,6 +359,24 @@ async def _run_interpret_llm(
     return brief
 
 
+def _ground_regulation(brief: dict, prospecting: ProspectingAgentService) -> dict:
+    """Si el LLM identifico una normativa real (regulation_slug), sustituye
+    target_description por los sectores REALES de esa normativa — nunca se
+    confia en que el LLM los redacte bien, se copian literales del
+    catalogo (RegulationsRepository). Si el slug no existe de verdad en el
+    catalogo (alucinado), se descarta sin tocar target_description — mismo
+    guardarrail que _classify_grant_fit con las ayudas."""
+    slug = (brief.get("regulation_slug") or "").strip()
+    if not slug:
+        return brief
+    regulation = prospecting.regulations.get(slug)
+    if regulation is None or not regulation.activo:
+        brief.pop("regulation_slug", None)
+        return brief
+    brief["target_description"] = ", ".join(regulation.sectores)
+    return brief
+
+
 @router.post("/prospecting/interpret")
 async def interpret_brief(
     payload: InterpretRequest,
@@ -339,11 +395,18 @@ async def interpret_brief(
 
     text = payload.text.strip()
     verticals_block = _verticals_context_block(prospecting)
+    regulations_block = _regulations_context_block(prospecting)
 
-    brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals)
+    brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals, regulations_block=regulations_block)
+    brief = _ground_regulation(brief, prospecting)
     # Cierre canonico compartido con /prospecting/chat: resuelve vertical contra
     # BBDD (puerta unica) + orquesta. Ver ProspectingAgentService.finalize_brief.
     orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+    # El refinamiento de orchestrate_brief PUEDE reescribir target_description
+    # (es uno de los campos que el paso "refine" tiene permitido mejorar, ver
+    # sales.prospecting.refine) — sin fundamentar otra vez aqui, el paso de
+    # refino podria deshacer en silencio la sustitucion por sectores reales.
+    orchestrated["brief"] = _ground_regulation(orchestrated["brief"], prospecting)
     verification = orchestrated.get("orchestration", {}).get("verification", {})
 
     retried = False
@@ -353,8 +416,10 @@ async def interpret_brief(
             "La primera extraccion de este mismo texto tenia estos problemas — corrigelos:\n- "
             + "\n- ".join(verification["issues"])
         )
-        brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals, extra_context=feedback)
+        brief = await _run_interpret_llm(text, verticals_block, prospecting.verticals, extra_context=feedback, regulations_block=regulations_block)
+        brief = _ground_regulation(brief, prospecting)
         orchestrated = await prospecting.finalize_brief(brief, original_text=text)
+        orchestrated["brief"] = _ground_regulation(orchestrated["brief"], prospecting)
         retried = True
 
     return {
@@ -381,6 +446,24 @@ _PROSPECTING_CHAT_TOOLS = [
                 "type": "object",
                 "properties": {"place": {"type": "string"}},
                 "required": ["place"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_regulation_sectors",
+            "description": (
+                "Resuelve una ley/normativa/obligacion de cumplimiento mencionada por el "
+                "usuario (ej. 'NIS2', 'normativa de ciberseguridad') a sus sectores REALES "
+                "usando el catalogo real, no memoria. Usalo SIEMPRE que el usuario pida "
+                "empresas afectadas por una normativa en vez de un tipo de negocio literal — "
+                "nunca copies el nombre de la ley como target_description sin comprobarlo antes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "Nombre de la normativa tal como la menciono el usuario."}},
+                "required": ["query"],
             },
         },
     },
@@ -426,8 +509,12 @@ async def _run_prospecting_chat_loop(history: list[dict], prospecting: Prospecti
     """
     llm = get_router()
     verticals_block = _verticals_context_block(prospecting)
+    regulations_block = _regulations_context_block(prospecting)
+    system_content = resolve_prompt_sync("sales.prospecting.chat") + "\n\n" + verticals_block
+    if regulations_block:
+        system_content += "\n\n" + regulations_block
     messages = [
-        {"role": "system", "content": resolve_prompt_sync("sales.prospecting.chat") + "\n\n" + verticals_block},
+        {"role": "system", "content": system_content},
         *history,
     ]
 
@@ -492,11 +579,27 @@ async def _run_prospecting_chat_loop(history: list[dict], prospecting: Prospecti
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
             continue
 
+        if name == "lookup_regulation_sectors":
+            query = args.get("query", "")
+            regulation = prospecting.regulations.find_by_query(query)
+            if regulation is None:
+                result_text = (
+                    f"'{query}' no esta en el catalogo de normativas conocidas — trata la "
+                    "peticion como una descripcion de negocio normal, sin regulation_slug."
+                )
+            else:
+                result_text = (
+                    f"slug={regulation.slug} | sectores reales: {', '.join(regulation.sectores)}"
+                )
+            messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result_text})
+            continue
+
         if name == "ask_user":
             return {"status": "clarifying", "reply": args.get("question", "¿Puedes darme mas detalles?"), "brief": None}
 
         if name == "finish_brief":
             brief = {k: v for k, v in args.items() if k != "reply"}
+            brief = _ground_regulation(brief, prospecting)
             return {"status": "ready", "reply": args.get("reply", ""), "brief": brief}
 
         return None
@@ -569,6 +672,9 @@ async def prospecting_chat(
         combined_text = " ".join(m["content"] for m in history if m["role"] == "user")
         finalized = await prospecting.finalize_brief(brief, original_text=combined_text)
         brief = finalized["brief"]
+        # Mismo motivo que en /interpret: el refinamiento puede reescribir
+        # target_description, asi que se refundamenta otra vez despues.
+        brief = _ground_regulation(brief, prospecting)
 
     from utils.logger import hito
     if status == "ready" and brief:

@@ -77,3 +77,17 @@ def ensure_prospecting_schema(store: SQLiteStore) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS compliance_regulations(
+              slug TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              activo INTEGER NOT NULL DEFAULT 1,
+              sectores_json TEXT NOT NULL DEFAULT '[]',
+              criterios TEXT NOT NULL DEFAULT '',
+              url TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )

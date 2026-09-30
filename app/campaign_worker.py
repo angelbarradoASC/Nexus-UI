@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI):
             ),
         ),
         verticals=prospecting.verticals,
+        regulations=prospecting.regulations,
     )
 
     # dependency_overrides en vez de app.state.nexus_runtime — las rutas de

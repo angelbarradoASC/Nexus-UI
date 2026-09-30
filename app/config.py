@@ -153,6 +153,24 @@ class AppConfig(BaseSettings):
     thunderbird_priority_accounts: str = ""
     thunderbird_message_limit_per_account: int = Field(default=20, ge=1, le=200)
     thunderbird_priority_total_limit: int = Field(default=30, ge=1, le=200)
+
+    # Microsoft Graph (OAuth PKCE, App Registration "Nexus Desktop" en el
+    # tenant assetsconsultores.es) — compartido entre Teams y Outlook, son
+    # el mismo App Registration con distintos scopes delegados. Sin estos
+    # dos campos, tanto TeamsChatManager como OutlookMailManager lanzan
+    # AttributeError en cuanto los leen — estaban ausentes aqui (bug real,
+    # no teorico: Teams nunca llego a arrancar por esto).
+    azure_client_id: str = ""
+    azure_tenant_id: str = ""
+
+    teams_enabled: bool = False
+    teams_message_limit_per_chat: int = Field(default=20, ge=1, le=200)
+    teams_priority_total_limit: int = Field(default=30, ge=1, le=200)
+
+    outlook_enabled: bool = False
+    outlook_message_limit: int = Field(default=30, ge=1, le=200)
+    outlook_priority_total_limit: int = Field(default=30, ge=1, le=200)
+
     prospecting_http_timeout_seconds: int = Field(default=12, ge=3, le=60)
     prospecting_user_agent: str = "Open-Nexus MunicipalProspector/1.0 (+https://assetsconsultores.es)"
     prospecting_max_pages_per_site: int = Field(default=4, ge=1, le=10)

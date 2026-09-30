@@ -37,7 +37,7 @@ from nexus.prospecting.campaign_decompose import CampaignDecomposer
 from nexus.prospecting.embeddings import LocalEmbeddingsClient, LocalEmbeddingsSettings
 from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.prompts import PromptManager, set_default_prompt_manager
-from nexus.mail import ThunderbirdMailManager
+from nexus.mail import OutlookMailManager, OutlookReplyAgent, ThunderbirdMailManager
 from nexus.teams import TeamsChatManager
 from nexus.pepo import CaseLogStore
 from agents.llm_router import get_router
@@ -63,6 +63,7 @@ class NexusRuntime:
     agent_settings:    Any = None
     mail:              ThunderbirdMailManager = None
     teams:             TeamsChatManager = None
+    outlook:           OutlookMailManager = None
     case_log:          CaseLogStore = None
     jira:              JiraConnector = None
     campaign_decomposer: Any = None
@@ -183,6 +184,11 @@ def build_runtime(cfg) -> NexusRuntime:
     outreach = OutreachManager(cfg=cfg, llm_router=llm_router)
     crm = CRMBridgeService(cfg=cfg)
     campaign = CampaignAgent(prospecting_svc=prospecting, outreach_mgr=outreach, crm_svc=crm)
+    # outlook se adelanta por el mismo motivo que campaign arriba —
+    # NexusCoordinator necesita outlook_reply_agent para su cola de
+    # confirmacion pendiente (list_pending_actions).
+    outlook = OutlookMailManager(cfg=cfg, llm_router=llm_router)
+    outlook_reply_agent = OutlookReplyAgent(outlook)
     coordinator = NexusCoordinator(
         alertmanager=alertmanager,
         grafana=grafana,
@@ -204,12 +210,16 @@ def build_runtime(cfg) -> NexusRuntime:
         runbooks=RunbookRegistry(),
         llm_router=llm_router,
         docker_diagnostics=DockerPreDiagnosticService(),
+        outlook=outlook,
+        outlook_reply_agent=outlook_reply_agent,
     )
     assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router, skill_router=skill_router)
     agent_runtime = AgentRuntimeService()
     case_log = CaseLogStore()
     mail = ThunderbirdMailManager(cfg=cfg, llm_router=llm_router)
     teams = TeamsChatManager(cfg=cfg, llm_router=llm_router, case_log=case_log)
+    # outlook ya se construyo mas arriba (lo necesita NexusCoordinator) —
+    # se reutiliza la misma instancia, no una segunda.
 
     return NexusRuntime(
         coordinator=coordinator,
@@ -228,6 +238,7 @@ def build_runtime(cfg) -> NexusRuntime:
         agent_settings=agent_settings,
         mail=mail,
         teams=teams,
+        outlook=outlook,
         case_log=case_log,
         jira=jira_connector,
         campaign_decomposer=campaign_decomposer,
@@ -344,6 +355,11 @@ def get_mail_manager(request: Request) -> ThunderbirdMailManager:
 def get_teams_manager(request: Request) -> TeamsChatManager:
     """Fetch the Teams chat manager from FastAPI application state."""
     return get_runtime(request).teams
+
+
+def get_outlook_manager(request: Request) -> OutlookMailManager:
+    """Fetch the Outlook mail manager from FastAPI application state."""
+    return get_runtime(request).outlook
 
 
 def get_case_log_store(request: Request) -> CaseLogStore:

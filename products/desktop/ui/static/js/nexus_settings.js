@@ -787,6 +787,85 @@ async function saveItsmConfig() {
     await loadItsmConfig();
 }
 
+// ── Correo (Outlook / Microsoft Graph) ──────────────────────────────────────
+
+function renderOutlookStatus(status) {
+    const badge = document.getElementById("outlookStatusBadge");
+    const info = document.getElementById("outlookAccountInfo");
+    if (!badge) return;
+    if (status.status === "success") {
+        badge.textContent = "conectado";
+        badge.className = "info-badge";
+        if (info) info.textContent = `Cuenta: ${status.account || "?"}`;
+    } else if (status.status === "not_authenticated") {
+        badge.textContent = "sin conectar";
+        badge.className = "info-badge info-badge-muted";
+        if (info) info.textContent = "";
+    } else {
+        badge.textContent = status.status === "disabled" ? "desactivado" : "error";
+        badge.className = "info-badge info-badge-muted";
+        if (info) info.textContent = status.reason || "";
+    }
+}
+
+async function loadOutlookStatus() {
+    const status = await api.get("/api/nexus/outlook/status");
+    renderOutlookStatus(status);
+    return status;
+}
+
+async function connectOutlook() {
+    const note = document.getElementById("outlookConnectNote");
+    const btn = document.getElementById("outlookConnectBtn");
+    btn.disabled = true;
+    note.textContent = "Abriendo el navegador para iniciar sesión…";
+    try {
+        const result = await api.post("/api/nexus/outlook/login", {});
+        if (result.status === "success") {
+            note.textContent = "Conectado.";
+            await loadOutlookStatus();
+            await loadOutlookPriority();
+        } else {
+            note.textContent = result.reason || "No se pudo conectar.";
+        }
+    } catch (error) {
+        note.textContent = error.message || "Error al conectar.";
+    } finally {
+        btn.disabled = false;
+        setTimeout(() => { note.textContent = ""; }, 5000);
+    }
+}
+
+async function loadOutlookPriority() {
+    const list = document.getElementById("outlookPriorityList");
+    if (!list) return;
+    try {
+        const result = await api.get("/api/nexus/outlook/priority");
+        if (result.status !== "success") {
+            list.innerHTML = `<p>${esc(result.reason || "Conecta tu cuenta primero.")}</p>`;
+            return;
+        }
+        const messages = result.messages || [];
+        list.innerHTML = messages.length
+            ? messages.map((m) => `
+                <div class="info-list-row">
+                    <strong>${esc(m.sender_name || m.sender_email || "?")}</strong> — ${esc(m.subject || "(sin asunto)")}
+                    ${m.reason ? `<div class="assets-form-note">${esc(m.reason)}</div>` : ""}
+                </div>
+            `).join("")
+            : "<p>No hay correos destacados ahora mismo.</p>";
+    } catch (error) {
+        list.innerHTML = `<p>${esc(error.message || "Error al cargar la bandeja.")}</p>`;
+    }
+}
+
+async function loadOutlookConfig() {
+    const status = await loadOutlookStatus();
+    if (status.status === "success") {
+        await loadOutlookPriority();
+    }
+}
+
 function wireEvents() {
     document.getElementById("saveRouterBtn").addEventListener("click", () => {
         saveRouterConfig().catch((error) => {
@@ -835,6 +914,12 @@ function wireEvents() {
             document.getElementById("itsmSaveNote").textContent = error.message;
         });
     });
+    document.getElementById("outlookConnectBtn").addEventListener("click", () => {
+        connectOutlook();
+    });
+    document.getElementById("outlookRefreshBtn").addEventListener("click", () => {
+        loadOutlookPriority();
+    });
 }
 
 async function bootstrap() {
@@ -861,6 +946,10 @@ async function bootstrap() {
         }),
         loadItsmConfig().catch(() => {
             const el = document.getElementById("itsmStatus");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadOutlookConfig().catch(() => {
+            const el = document.getElementById("outlookStatusBadge");
             if (el) { el.textContent = "no disponible"; }
         }),
     ]);

@@ -1,0 +1,42 @@
+{
+  "id": "mail.outlook_priority",
+  "name": "Revisar correo de Outlook",
+  "description": "Lee la bandeja de entrada de Outlook del usuario (Microsoft Graph) y devuelve los correos mas importantes, puntuados por relevancia comercial/operativa.",
+  "execution": {
+    "where": "server",
+    "timeout": 25,
+    "retry": 1
+  },
+  "llm": {
+    "required": false,
+    "min_level": "L0",
+    "preferred_level": "L0",
+    "speed_level": "L1"
+  },
+  "cost": {
+    "tokens_estimate": 300,
+    "cache_ttl": 60
+  },
+  "inputs": {
+    "limit": {"type": "int", "required": false}
+  },
+  "outputs": {
+    "messages": "list"
+  },
+  "triggers": [
+    "revisa mi correo",
+    "que correos tengo",
+    "mira mi outlook",
+    "correos importantes",
+    "que hay en mi bandeja de entrada",
+    "tengo correos pendientes",
+    "revisa mi bandeja de entrada",
+    "que me ha llegado por correo"
+  ],
+  "examples": [
+    "revisa mi correo",
+    "que correos importantes tengo hoy",
+    "mira si tengo algo urgente en el email",
+    "que hay en mi bandeja de entrada"
+  ]
+}

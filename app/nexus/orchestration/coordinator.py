@@ -7,6 +7,8 @@ import re
 import uuid
 from typing import Any
 
+from loguru import logger
+
 from agents.generation_agent import GenerationAgent
 from desktop.runtime.skill_router import DesktopSkillRouter
 from nexus.audit.models import AuditEntry
@@ -98,6 +100,8 @@ class NexusCoordinator:
         campaign_decomposer: Any | None = None,
         skill_router: DesktopSkillRouter | None = None,
         ticket_agent: Any | None = None,
+        outlook: Any | None = None,
+        outlook_reply_agent: Any | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
@@ -112,6 +116,8 @@ class NexusCoordinator:
         self._campaign_agent = campaign_agent
         self._mcp_agent = mcp_agent
         self._ticket_agent = ticket_agent or (TicketAgent(operations) if operations is not None else None)
+        self._outlook = outlook
+        self._outlook_reply_agent = outlook_reply_agent
         self._mcp_server_store = mcp_server_store
         self._campaign_decomposer = campaign_decomposer
         self._incident_repository = incident_repository
@@ -144,13 +150,13 @@ class NexusCoordinator:
 
     async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -178,6 +184,8 @@ class NexusCoordinator:
             result = await self._mcp_agent.confirm(context_id, user_reply)
         elif agent is self._ticket_agent:
             result = await self._ticket_agent.confirm(context_id, user_reply)
+        elif agent is self._outlook_reply_agent:
+            result = await self._outlook_reply_agent.confirm(context_id, user_reply)
         else:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
@@ -254,6 +262,10 @@ class NexusCoordinator:
             return await self._handle_sales_prospecting_chat(payload, audit_id)
         if skill_id == "campaign.qualify" and self._campaign_decomposer is not None:
             return await self._handle_campaign_decompose_chat(payload, audit_id)
+        if skill_id == "mail.outlook_priority" and self._outlook is not None:
+            return await self._handle_outlook_priority_chat(payload, audit_id)
+        if skill_id == "mail.outlook_reply" and self._outlook is not None and self._outlook_reply_agent is not None:
+            return await self._handle_outlook_reply_chat(payload, audit_id, context_key)
         if skill_id in {
             "linux.prediagnostico",
             "windows.prediagnostico",
@@ -515,6 +527,184 @@ class NexusCoordinator:
         else:
             lines.append(f"({result.get('note', 'no se pudo verificar')})")
         return "\n".join(lines)
+
+    # ── Outlook (Microsoft Graph) ────────────────────────────────────────────
+
+    async def _handle_outlook_priority_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
+        """Skill de solo lectura — lista la bandeja de entrada puntuada por
+        prioridad, nunca propone nada que confirmar."""
+        result = await self._outlook.get_priority_messages(limit=5)
+        response = self._render_outlook_priority_result(result)
+        status = "accepted" if result.get("status") == "success" else "degraded"
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "mail.outlook_priority",
+                "outlook_status": result.get("status"),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status=status, response=response, agent="mail-outlook", flow="chat", audit_id=audit_id)
+
+    def _render_outlook_priority_result(self, result: dict[str, Any]) -> str:
+        status = result.get("status")
+        if status == "disabled":
+            return "Outlook no esta activado en esta instancia."
+        if status == "not_authenticated":
+            return "No hay sesion de Outlook conectada todavia — conecta tu cuenta desde Configuración → Correo."
+        messages = result.get("messages") or []
+        if not messages:
+            return "No hay correos destacados en tu bandeja ahora mismo."
+        lines = ["Esto es lo más importante en tu bandeja de entrada:"]
+        for m in messages:
+            who = m.get("sender_name") or m.get("sender_email") or "remitente desconocido"
+            why = m.get("reason") or (m.get("preview") or "")[:100]
+            lines.append(f"- {who}: \"{m.get('subject', '(sin asunto)')}\" — {why}")
+        return "\n".join(lines)
+
+    async def _handle_outlook_reply_chat(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+    ) -> ChatResponse:
+        """Responder un correo real es OPERATE — PEPO redacta y muestra el
+        borrador, nunca envia sin que el usuario confirme explicitamente en
+        el siguiente turno (ver OutlookReplyAgent, mismo contrato que los
+        demas agentes con confirmacion en dos pasos)."""
+        if self._outlook_reply_agent.has_pending(context_key):
+            return await self._continue_outlook_reply_confirmation(payload, audit_id, context_key)
+
+        priority = await self._outlook.get_priority_messages(limit=15)
+        if priority.get("status") != "success" or not priority.get("messages"):
+            return ChatResponse(
+                status="degraded",
+                response="No encuentro correos recientes para responder — revisa primero tu bandeja.",
+                agent="mail-outlook", flow="chat", audit_id=audit_id,
+            )
+
+        target = self._match_outlook_message(payload.message, priority["messages"])
+        if target is None:
+            return ChatResponse(
+                status="clarifying",
+                response="¿A qué correo en concreto quieres responder? Dime el nombre de quien lo envió o el asunto.",
+                agent="mail-outlook", flow="chat", audit_id=audit_id,
+            )
+
+        draft_body = await self._draft_outlook_reply(payload.message, target)
+        recipient = target.get("sender_name") or target.get("sender_email", "")
+        self._outlook_reply_agent.propose(
+            context_key,
+            message_id=target["message_id"],
+            subject=target.get("subject", ""),
+            recipient=recipient,
+            draft_body=draft_body,
+        )
+
+        response = (
+            f"Esto es lo que le voy a responder a {recipient} sobre \"{target.get('subject', '')}\":\n\n"
+            f"{draft_body}\n\n¿Lo envío? (sí/no)"
+        )
+        await self._audit(
+            flow="chat", action="handle_chat", actor=payload.user_id, status="accepted",
+            details={
+                "mode": payload.mode, "context_id": payload.context_id,
+                "message_preview": payload.message[:160], "skill_id": "mail.outlook_reply",
+                "target_message_id": target["message_id"], "pending": True,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status="accepted", response=response, agent="mail-outlook", flow="chat", audit_id=audit_id)
+
+    async def _continue_outlook_reply_confirmation(
+        self, payload: ChatRequest, audit_id: str, context_key: str,
+    ) -> ChatResponse:
+        verdict = _match_confirmation(payload.message)
+        if verdict == "yes":
+            result = await self._outlook_reply_agent.confirm(context_key)
+            sent = result.get("status") == "success"
+            response = "Enviado." if sent else f"No se pudo enviar: {result.get('status', 'error')}"
+            status = "accepted" if sent else "degraded"
+        elif verdict == "no":
+            self._outlook_reply_agent.cancel(context_key)
+            response = "Vale, no lo envío."
+            status = "accepted"
+        else:
+            pending = self._outlook_reply_agent.peek(context_key)
+            response = (
+                f"Todavía tengo pendiente de confirmar la respuesta a {pending.recipient if pending else ''} "
+                "— contesta \"sí\" para enviarla o \"no\" para descartarla."
+            )
+            status = "clarifying"
+
+        await self._audit(
+            flow="chat", action="handle_chat", actor=payload.user_id, status=status,
+            details={
+                "mode": payload.mode, "context_id": payload.context_id,
+                "message_preview": payload.message[:160], "skill_id": "mail.outlook_reply",
+                "confirmation_verdict": verdict,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status=status, response=response, agent="mail-outlook", flow="chat", audit_id=audit_id)
+
+    @staticmethod
+    def _match_outlook_message(instruction: str, messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Resuelve a que correo se refiere una instruccion en lenguaje
+        natural ("respondele a Laura...") por coincidencia de nombre/email
+        del remitente contra el texto — sin LLM, determinista. El mensaje
+        mas reciente que coincida gana (los mensajes ya vienen ordenados
+        por prioridad/fecha)."""
+        from nexus.utils.text import normalize_text
+
+        normalized_instruction = normalize_text(instruction)
+        for message in messages:
+            sender_name = normalize_text(message.get("sender_name") or "")
+            sender_email = normalize_text((message.get("sender_email") or "").split("@")[0])
+            candidates = [c for c in (sender_name, sender_email) if c]
+            for candidate in candidates:
+                if candidate and any(part in normalized_instruction for part in candidate.split() if len(part) > 2):
+                    return message
+        return None
+
+    async def _draft_outlook_reply(self, instruction: str, target_message: dict[str, Any]) -> str:
+        if self._llm_router is None:
+            return instruction.strip()
+
+        payload = json.dumps(
+            {
+                "instruccion_usuario": instruction,
+                "correo_original": {
+                    "de": target_message.get("sender_name") or target_message.get("sender_email", ""),
+                    "asunto": target_message.get("subject", ""),
+                    "preview": target_message.get("preview", ""),
+                },
+            },
+            ensure_ascii=False,
+        )
+        try:
+            response = await self._llm_router.call(
+                [
+                    {"role": "system", "content": resolve_prompt_sync("pepo.outlook_draft_reply")},
+                    {"role": "user", "content": payload},
+                ],
+                max_tokens=300,
+                temperature=0.3,
+            )
+        except Exception:
+            logger.exception("DEBUG outlook | fallo redactando respuesta con LLM")
+            return instruction.strip()
+
+        if response.error or not response.content.strip():
+            return instruction.strip()
+        return response.content.strip()
 
     async def _handle_mouse_speed_propose(
         self,

@@ -1,0 +1,41 @@
+{
+  "id": "mail.outlook_reply",
+  "name": "Responder un correo de Outlook",
+  "description": "Redacta y envia una respuesta real a un correo existente de Outlook, dentro del mismo hilo. Accion real sobre el correo de un tercero — exige confirmacion explicita del usuario antes de enviar, nunca se envia de forma automatica.",
+  "execution": {
+    "where": "server",
+    "timeout": 25,
+    "retry": 0
+  },
+  "llm": {
+    "required": true,
+    "min_level": "L0",
+    "preferred_level": "L1",
+    "speed_level": "L1"
+  },
+  "cost": {
+    "tokens_estimate": 350,
+    "cache_ttl": 0
+  },
+  "inputs": {
+    "message_id": {"type": "str", "required": true},
+    "instruccion": {"type": "str", "required": true, "description": "Que quiere decir el usuario en la respuesta, en sus propias palabras."}
+  },
+  "outputs": {
+    "status": "str",
+    "message_id": "str"
+  },
+  "triggers": [
+    "respondele a",
+    "contesta el correo de",
+    "responde ese correo",
+    "escribele diciendo",
+    "envia una respuesta a",
+    "contesta a ese email"
+  ],
+  "examples": [
+    "respondele a Laura diciendo que la llamada es el jueves",
+    "contesta ese correo diciendo que ya lo he revisado",
+    "escribele a Juan que le mando la propuesta mañana"
+  ]
+}

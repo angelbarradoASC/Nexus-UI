@@ -677,6 +677,22 @@ Respuesta: peluquerías en Zaragoza en un radio de 12 km""",
             "No uses markdown, no firmes el mensaje, no digas que eres una IA."
         ),
     ),
+    "pepo.outlook_draft_reply": PromptDefinition(
+        key="pepo.outlook_draft_reply",
+        title="PEPO Outlook Draft Reply",
+        group="pepo",
+        description="Redacta el CUERPO de una respuesta real a un correo de Outlook, a partir de lo que el usuario quiere decir.",
+        default_text=(
+            "Eres PEPO, el asistente del usuario. Vas a redactar el CUERPO de una respuesta real "
+            "a un correo existente — el usuario ya escribio, en sus propias palabras, lo que quiere decir. "
+            "Tu trabajo es convertir esa instruccion en un correo breve, profesional y natural en español, "
+            "coherente con el asunto y el contenido del correo original que se te da como contexto. "
+            "No inventes datos, compromisos ni fechas que el usuario no haya dado. "
+            "No añadas saludo/despedida genericos tipo '[Nombre]' — si hace falta firma, usa el nombre real "
+            "del remitente que se te indique, nunca un placeholder entre corchetes. "
+            "Devuelve SOLO el cuerpo del correo, sin asunto, sin explicaciones, sin markdown."
+        ),
+    ),
     "pepo.skill_intention": PromptDefinition(
         key="pepo.skill_intention",
         title="PEPO Skill Intention",

@@ -26,6 +26,7 @@ from nexus.api.routes.cmdb import router as cmdb_router
 from nexus.api.routes.vault import router as vault_router
 from nexus.api.routes.mail import router as mail_router
 from nexus.api.routes.teams import router as teams_router
+from nexus.api.routes.outlook import router as outlook_router
 from nexus.api.routes.pepo import router as pepo_router
 from nexus.api.routes.shell import router as shell_router
 from products.desktop.routes.ui import router as ui_router
@@ -59,6 +60,7 @@ def register_desktop_product(app: FastAPI) -> None:
     app.include_router(vault_router,     prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(mail_router,      prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(teams_router,     prefix="/api/nexus", tags=["desktop-nexus"])
+    app.include_router(outlook_router,   prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(pepo_router,      prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(shell_router,     prefix="/api/nexus", tags=["desktop-nexus"])
     app.include_router(ui_router, tags=["desktop-product-ui"])

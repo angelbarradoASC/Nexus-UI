@@ -65,6 +65,8 @@ class DesktopSkillRouter:
         "web.busqueda": [],
         "sales.prospecting": [],
         "campaign.qualify": [],
+        "mail.outlook_priority": [],
+        "mail.outlook_reply": [],
         "desktop.mouse_speed": ["desktop.system.control"],
         "desktop.system_task": ["desktop.system.control"],
         "vault.add_credential": ["vault.write"],
@@ -95,6 +97,10 @@ class DesktopSkillRouter:
         "web.busqueda": PermissionLevel.ASSIST,
         "sales.prospecting": PermissionLevel.ASSIST,
         "campaign.qualify": PermissionLevel.OBSERVE,
+        "mail.outlook_priority": PermissionLevel.ASSIST,
+        # OPERATE: envia un correo real a un tercero — mismo nivel que
+        # jira.crear_ticket (escritura externa visible), exige confirmacion.
+        "mail.outlook_reply": PermissionLevel.OPERATE,
         "desktop.mouse_speed": PermissionLevel.OPERATE,
         "desktop.system_task": PermissionLevel.OPERATE,
         "vault.add_credential": PermissionLevel.ADMIN,

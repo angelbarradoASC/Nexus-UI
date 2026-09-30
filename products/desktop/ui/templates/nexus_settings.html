@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
-    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260829a">
+    <link rel="stylesheet" href="/static/css/nexus_settings.css?v=20260930a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
 </head>
 <body>
@@ -34,6 +34,7 @@
                     <button type="button" class="settings-nav-btn" data-section="sales">Sales</button>
                     <button type="button" class="settings-nav-btn" data-section="campana">Campaña</button>
                     <button type="button" class="settings-nav-btn" data-section="itsm">ITSM</button>
+                    <button type="button" class="settings-nav-btn" data-section="correo">Correo</button>
                 </div>
                 <div class="settings-sidebar-note">
                     <p>Todo lo de Nexus Desktop se gobierna desde aqui: modelos, prompts por modulo, integraciones de Operator, y config de Sales y Campana.</p>
@@ -862,10 +863,49 @@
                     </div>
                 </section>
 
+                <section class="card settings-panel" data-panel="correo">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">Microsoft Graph</p>
+                            <h2>Correo</h2>
+                        </div>
+                        <span id="outlookStatusBadge" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Cuenta</p>
+                                <h3>Outlook</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Conecta tu cuenta de Microsoft 365 para que PEPO pueda revisar tu
+                                bandeja de entrada y redactar respuestas (pídelo por chat: "revisa mi
+                                correo", "respóndele a X diciendo Y"). Nunca se envía nada sin que lo
+                                confirmes explícitamente.
+                            </p>
+                            <div class="form-actions">
+                                <button id="outlookConnectBtn" type="button">Conectar Outlook</button>
+                                <span id="outlookConnectNote" class="assets-form-note"></span>
+                            </div>
+                            <div id="outlookAccountInfo" class="assets-form-note"></div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Bandeja</p>
+                                <h3>Correos prioritarios</h3>
+                            </div>
+                            <button id="outlookRefreshBtn" type="button" class="camp-btn camp-btn--secondary">Actualizar</button>
+                            <div id="outlookPriorityList" class="info-list">Conecta tu cuenta primero.</div>
+                        </div>
+                        </div><!-- /module-form-body -->
+                    </div>
+                </section>
+
             </section>
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20260715g"></script>
+    <script src="/static/js/nexus_settings.js?v=20260930a"></script>
 </body>
 </html>

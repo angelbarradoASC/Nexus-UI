@@ -13,8 +13,9 @@ function escapeHtml(value) {
 
 // ── Arranque ──────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     loadStatus();
+    await loadOutreachAccounts(); // antes de loadConfig — el <select> necesita sus <option> ya puestas
     loadConfig();
     loadResults();
     loadPending();
@@ -159,6 +160,12 @@ function renderReport(report) {
     if (report.started_at)   lines.push(`Inicio:          ${formatDt(report.started_at)}`);
     if (report.completed_at) lines.push(`Fin:             ${formatDt(report.completed_at)}`);
 
+    const replies = report.replies || {};
+    const totalReplies = Object.values(replies).reduce((a, b) => a + b, 0);
+    if (totalReplies > 0) {
+        lines.push(`Respuestas:      ${totalReplies} detectadas (${Object.entries(replies).map(([k, v]) => `${k}: ${v}`).join(', ')}) — follow-ups parados para esos leads`);
+    }
+
     const fu = report.followups || {};
     if (fu.campaigns_checked !== undefined)
         lines.push(`Follow-ups:      ${fu.executed_count ?? 0} enviados en ${fu.campaigns_checked} campañas activas`);
@@ -232,6 +239,24 @@ async function triggerCampaign() {
 
 let _fullConfig = {};
 let _currentLine = 'default';
+
+// Cuentas reales de Thunderbird (extraídas con scripts/export_outreach_smtp_
+// credentials.py) — el desplegable de "Cuenta de envío" nunca es texto
+// libre, solo lo que de verdad tiene credenciales guardadas.
+async function loadOutreachAccounts() {
+    const select = document.getElementById('cfgOutreachAccount');
+    if (!select) return;
+    try {
+        const res = await fetch(`${API}/accounts`);
+        const data = await res.json();
+        const accounts = data.accounts || [];
+        select.innerHTML = accounts.length
+            ? accounts.map(a => `<option value="${escapeHtml(a.account_key)}">${escapeHtml(a.account_key)} — ${escapeHtml(a.email)}</option>`).join('')
+            : '<option value="">sin cuentas extraídas — ejecuta export_outreach_smtp_credentials.py</option>';
+    } catch {
+        select.innerHTML = '<option value="">error al cargar cuentas</option>';
+    }
+}
 
 async function loadConfig() {
     try {

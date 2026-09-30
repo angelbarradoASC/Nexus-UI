@@ -39,6 +39,11 @@ _LOGINS_JSON = {
             "hostname": "smtp://smtp.sls.assetsconsultores.es",
             "encryptedUsername": "enc-user",
             "encryptedPassword": "enc-pass",
+        },
+        {
+            "hostname": "imap://imap.sls.assetsconsultores.es",
+            "encryptedUsername": "enc-imap-user",
+            "encryptedPassword": "enc-imap-pass",
         }
     ]
 }
@@ -106,5 +111,25 @@ def test_resolve_outgoing_credentials_returns_none_without_profile(cfg):
     manager = ThunderbirdMailManager(cfg=cfg)
 
     creds = manager.resolve_outgoing_credentials("vicentearaizeta@sls.assetsconsultores.es")
+
+    assert creds is None
+
+
+def test_resolve_incoming_credentials_finds_real_imap_server(cfg):
+    manager = ThunderbirdMailManager(cfg=cfg)
+
+    creds = manager.resolve_incoming_credentials("vicentearaizeta@sls.assetsconsultores.es")
+
+    assert creds is not None
+    assert creds["host"] == "imap.sls.assetsconsultores.es"
+    assert creds["port"] == 993
+    assert creds["username"] == "imap-user"
+    assert creds["password"] == "imap-pass"
+
+
+def test_resolve_incoming_credentials_returns_none_for_unknown_email(cfg):
+    manager = ThunderbirdMailManager(cfg=cfg)
+
+    creds = manager.resolve_incoming_credentials("nadie@dominio-inexistente.es")
 
     assert creds is None

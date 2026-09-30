@@ -110,6 +110,10 @@ class CampaignAgent:
             json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
+    @property
+    def outreach(self):
+        return self._outreach
+
     # ── Entry point ───────────────────────────────────────────────────────────
 
     async def run_daily(self) -> dict[str, Any]:
@@ -130,10 +134,30 @@ class CampaignAgent:
         report: dict[str, Any] = {
             "status":      "ok",
             "started_at":  started,
+            "replies":     {},
             "followups":   {},
             "campaigns":   {},
             "errors":      [],
         }
+
+        # ── 0. Respuestas reales — antes de follow-ups, para no insistir a
+        #      quien ya contesto. Una pasada por cada cuenta de envio usada
+        #      por alguna linea (default + additional_campaigns), sin
+        #      duplicar si varias lineas comparten cuenta.
+        accounts = {
+            line_cfg.get("outreach_account")
+            for _, line_cfg in self._iter_campaign_lines(cfg)
+            if line_cfg.get("outreach_account")
+        }
+        for account_key in sorted(accounts):
+            try:
+                replies = await self._outreach.check_replies(account_key)
+                if replies:
+                    report["replies"][account_key] = len(replies)
+                    logger.info("Respuestas detectadas | cuenta={} | {}", account_key, len(replies))
+            except Exception as exc:
+                logger.error("Error comprobando respuestas | cuenta={} | {}", account_key, exc)
+                report["errors"].append(f"replies[{account_key}]: {exc}")
 
         # ── 1. Follow-ups vencidos (compartido entre lineas) ──────────────────
         try:

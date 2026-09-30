@@ -4,8 +4,10 @@ app/nexus/api/routes/campaign.py
 Endpoints para gestionar y monitorizar la campaña diaria de prospección.
 
 GET  /campaign/status          — estado del scheduler + último informe
+GET  /campaign/accounts        — cuentas reales de envío disponibles (Thunderbird)
 GET  /campaign/config          — configuración de la campaña activa
-PUT  /campaign/config          — actualizar configuración
+PUT  /campaign/config          — actualizar configuración (línea concreta, ver "line")
+PUT  /campaign/global-toggle   — pausar/activar TODO el ciclo diario (todas las líneas)
 POST /campaign/trigger         — lanzar ciclo ahora (trigger manual)
 GET  /campaign/pending         — cola de revision humana (QUALIFIED sin
                                   contactar ni descartar aun)
@@ -54,6 +56,13 @@ async def campaign_status(request: Request) -> dict[str, Any]:
         "status": "ok",
         "scheduler": scheduler.describe(),
     }
+
+
+@router.get("/accounts")
+async def campaign_accounts(agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    """Cuentas reales de envio disponibles (extraidas de Thunderbird) para
+    poblar el selector de "Cuenta de envío" en la UI — nunca texto libre."""
+    return {"status": "ok", "accounts": agent.outreach.list_accounts()}
 
 
 @router.get("/config")

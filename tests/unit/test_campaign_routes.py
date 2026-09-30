@@ -23,9 +23,21 @@ from nexus.api.dependencies.auth import get_campaign_agent, get_prospecting_mana
 from nexus.api.routes import campaign as campaign_routes
 
 
+class _FakeOutreachForAgent:
+    def __init__(self, accounts: list[dict] | None = None):
+        self._accounts = accounts or [
+            {"account_key": "automato", "email": "angel@automato.es"},
+            {"account_key": "sls_assetsconsultores", "email": "vicentearaizeta@sls.assetsconsultores.es"},
+        ]
+
+    def list_accounts(self) -> list[dict]:
+        return self._accounts
+
+
 class _FakeCampaignAgent:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, *, accounts: list[dict] | None = None):
         self._cfg = cfg
+        self.outreach = _FakeOutreachForAgent(accounts)
 
     def load_config(self) -> dict:
         return self._cfg
@@ -142,3 +154,16 @@ def test_results_empty_when_no_report_yet():
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok", "run_ids": [], "results": []}
+
+
+def test_accounts_lists_real_thunderbird_accounts_for_the_ui_selector():
+    """Pedido explicito del usuario: elegir desde cual de las 4 cuentas
+    lanzar cada linea — el desplegable nunca es texto libre, viene de
+    OutreachManager.list_accounts() (CredentialStore, cuentas reales)."""
+    client, _ = _client(cfg=_base_cfg())
+
+    resp = client.get("/campaign/accounts")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {a["account_key"] for a in body["accounts"]} == {"automato", "sls_assetsconsultores"}

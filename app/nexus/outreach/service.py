@@ -23,6 +23,7 @@ from nexus.utils.llm_json import strip_llm_fences
 # (automato / sls_assetsconsultores). Ver
 # scripts/export_outreach_smtp_credentials.py.
 _ACCOUNT_KEY_PREFIX = "outreach_smtp:"
+_IMAP_ACCOUNT_KEY_PREFIX = "outreach_imap:"
 
 
 class OutreachManager:
@@ -37,6 +38,7 @@ class OutreachManager:
         credential_store: CredentialStore | None = None,
         imap_monitor: IMAPMailboxMonitor | None = None,
         transport_factory: Any = None,
+        imap_monitor_factory: Any = None,
     ) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
@@ -44,6 +46,8 @@ class OutreachManager:
         self._credentials = credential_store or CredentialStore()
         self._transport_factory = transport_factory or SMTPOutreachTransport
         self._transports: dict[str, SMTPOutreachTransport] = {}
+        self._imap_monitor_factory = imap_monitor_factory or IMAPMailboxMonitor
+        self._imap_monitors: dict[str, IMAPMailboxMonitor] = {}
         self._imap = imap_monitor or IMAPMailboxMonitor(
             host=cfg.outreach_imap_host,
             port=cfg.outreach_imap_port,
@@ -79,6 +83,94 @@ class OutreachManager:
             for key in self._credentials.list_hosts()
             if key.startswith(_ACCOUNT_KEY_PREFIX)
         )
+
+    def list_accounts(self) -> list[dict[str, str]]:
+        """Cuentas reales disponibles para elegir como outreach_account de
+        una línea — extraídas de Thunderbird (scripts/export_outreach_smtp_
+        credentials.py), nunca inventadas ni tecleadas a mano."""
+        return [
+            {"account_key": key, "email": self._account_email(key)}
+            for key in self._known_account_keys()
+        ]
+
+    def _imap_creds(self, account_key: str) -> dict[str, Any] | None:
+        return self._credentials.get(f"{_IMAP_ACCOUNT_KEY_PREFIX}{account_key}")
+
+    def _imap_monitor_for(self, account_key: str) -> IMAPMailboxMonitor | None:
+        if account_key not in self._imap_monitors:
+            creds = self._imap_creds(account_key)
+            if not creds:
+                return None
+            self._imap_monitors[account_key] = self._imap_monitor_factory(
+                host=creds["host"],
+                port=int(creds.get("port", 993)),
+                username=creds["user"],
+                password=creds["password"],
+            )
+        return self._imap_monitors[account_key]
+
+    async def check_replies(self, account_key: str) -> list[dict[str, Any]]:
+        """Comprueba respuestas REALES en la bandeja de la cuenta que envia
+        esta linea — solo mira prospectos activos (pending/waiting_followup)
+        de campañas lanzadas con esa cuenta. Al detectar una respuesta real
+        (fecha posterior al ultimo contacto), para los follow-ups de ese
+        prospecto (mismo mecanismo que 'completed', next_due_at a None) y
+        registra el evento — nunca se sigue insistiendo a quien ya
+        contesto."""
+        imap = self._imap_monitor_for(account_key)
+        if imap is None:
+            return []
+
+        campaigns = await self._repository.load_campaigns()
+        relevant = [c for c in campaigns if c.get("outreach_account") == account_key]
+        if not relevant:
+            return []
+
+        active: dict[str, tuple[dict[str, Any], dict[str, Any], datetime]] = {}
+        for campaign in relevant:
+            for prospect in campaign.get("prospects", []):
+                if prospect.get("status") in ("completed", "replied"):
+                    continue
+                email = (prospect.get("email") or "").strip().lower()
+                if not email:
+                    continue
+                history = prospect.get("history") or []
+                last_contact = history[-1]["timestamp"] if history else campaign.get("created_at")
+                if not last_contact:
+                    continue
+                active[email] = (campaign, prospect, datetime.fromisoformat(last_contact))
+
+        if not active:
+            return []
+
+        earliest_since = min(since for _, _, since in active.values())
+        found = await asyncio.to_thread(
+            imap.find_replies, from_addresses=list(active.keys()), since=earliest_since,
+        )
+
+        reply_events: list[dict[str, Any]] = []
+        for email, received_at in found.items():
+            campaign, prospect, since = active.get(email, (None, None, None))
+            if prospect is None or datetime.fromisoformat(received_at) <= since:
+                continue
+            prospect["status"] = "replied"
+            prospect["next_due_at"] = None
+            event = {
+                "event_id": f"evt-{uuid.uuid4().hex[:10]}",
+                "event_type": "reply_detected",
+                "timestamp": received_at,
+                "campaign_id": campaign["campaign_id"],
+                "campaign_name": campaign["campaign_name"],
+                "recipient_email": email,
+                "company": prospect.get("company"),
+            }
+            prospect.setdefault("history", []).append(event)
+            await self._repository.append_event(event)
+            reply_events.append(event)
+
+        if reply_events:
+            await self._repository.save_campaigns(campaigns)
+        return reply_events
 
     async def status(self) -> dict[str, Any]:
         campaigns = await self._repository.load_campaigns()

@@ -55,10 +55,16 @@ class _FakeProspectingService:
 
 
 class _FakeOutreachManager:
-    def __init__(self, *, fail_without_sender_name: bool = False, delivery_status: str = "sent"):
+    def __init__(self, *, fail_without_sender_name: bool = False, delivery_status: str = "sent", replies_by_account: dict[str, list[dict]] | None = None):
         self.launch_calls: list[dict] = []
+        self.check_replies_calls: list[str] = []
         self._fail_without_sender_name = fail_without_sender_name
         self._delivery_status = delivery_status
+        self._replies_by_account = replies_by_account or {}
+
+    async def check_replies(self, account_key: str) -> list[dict]:
+        self.check_replies_calls.append(account_key)
+        return self._replies_by_account.get(account_key, [])
 
     async def launch_campaign(self, payload: dict) -> dict:
         self.launch_calls.append(payload)
@@ -306,6 +312,28 @@ async def test_run_daily_skips_disabled_additional_campaign_line(tmp_path):
 
     assert "ia_adopcion" not in report["campaigns"]
     assert len(prospecting.run_calls) == 1  # solo la linea default
+
+
+@pytest.mark.asyncio
+async def test_run_daily_checks_replies_once_per_distinct_outreach_account(tmp_path):
+    """Pedido explicito del usuario: monitorizar respuestas como parte del
+    ciclo diario, antes de los follow-ups. Una pasada por cada cuenta de
+    envio DISTINTA usada por alguna linea — sin duplicar si varias lineas
+    comparten cuenta."""
+    outreach = _FakeOutreachManager(replies_by_account={"automato": [{"recipient_email": "x@example.com"}]})
+    agent, prospecting, *_ = _agent(tmp_path, results=[], outreach=outreach)
+    cfg = agent.load_config()
+    cfg["outreach_account"] = "automato"
+    cfg["additional_campaigns"] = [
+        {"name": "ia_adopcion", "enabled": True, "vertical": "ia_adopcion", "outreach_account": "sls_assetsconsultores"},
+        {"name": "ot_industria", "enabled": True, "vertical": "ot_industria", "outreach_account": "sls_assetsconsultores"},
+    ]
+    agent.save_config(cfg)
+
+    report = await agent.run_daily()
+
+    assert sorted(outreach.check_replies_calls) == ["automato", "sls_assetsconsultores"]
+    assert report["replies"] == {"automato": 1}
 
 
 @pytest.mark.asyncio

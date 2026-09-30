@@ -277,6 +277,42 @@ class ThunderbirdMailManager:
             "password": password,
         }
 
+    def resolve_incoming_credentials(self, email: str) -> dict[str, Any] | None:
+        """Resuelve host/puerto/usuario/contraseña IMAP reales de una cuenta
+        de Thunderbird — mismo perfil que resolve_outgoing_credentials, para
+        que el monitor de respuestas de outreach pueda leer la bandeja de
+        entrada real sin credenciales nuevas. Reutiliza _discover_accounts
+        (ya filtra por servidores tipo "imap") y _resolve_credentials (ya
+        usado por get_priority_messages)."""
+        profile_dir = self._resolve_profile_dir()
+        if profile_dir is None:
+            return None
+
+        account = next(
+            (a for a in self._discover_accounts(profile_dir) if a.email.lower() == email.lower()),
+            None,
+        )
+        if account is None:
+            return None
+
+        store = ThunderbirdCredentialStore(
+            profile_dir,
+            Path(self._cfg.thunderbird_install_dir) if self._cfg.thunderbird_install_dir else None,
+        )
+        logins = self._load_logins(profile_dir)
+        try:
+            username, password = self._resolve_credentials(account, store, logins)
+        except Exception as exc:
+            raise RuntimeError(f"No se pudieron descifrar credenciales IMAP para {email}") from exc
+
+        return {
+            "email": email,
+            "host": account.host,
+            "port": account.port,
+            "username": username,
+            "password": password,
+        }
+
     @staticmethod
     def _find_identity_id(prefs: dict[str, Any], email: str) -> str | None:
         account_ids = [a.strip() for a in str(prefs.get("mail.accountmanager.accounts", "")).split(",") if a.strip()]

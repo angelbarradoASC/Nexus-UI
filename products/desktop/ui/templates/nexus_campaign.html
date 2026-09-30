@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260929a">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260930b">
 </head>
 <body>
     <main class="workspace workspace-campaign">
@@ -31,6 +31,15 @@
             <span class="camp-status-strip-item">Última: <strong id="lastRunAt">—</strong></span>
             <button id="triggerBtn" class="camp-btn camp-btn--secondary" onclick="triggerCampaign()">Ejecutar ahora</button>
             <span id="triggerStatus" class="camp-trigger-status"></span>
+            <!-- Interruptor GLOBAL — para TODO el ciclo diario de TODAS las
+                 lineas, follow-ups incluidos. Deliberadamente separado del
+                 toggle "esta línea" del panel Configuración, para que pausar
+                 una vía no se confunda nunca con pausar todo. -->
+            <label class="camp-toggle camp-toggle--global" title="Pausa TODO el ciclo diario — todas las lineas y los follow-ups de leads ya contactados">
+                <input type="checkbox" id="globalEnabledToggle" onchange="toggleGlobalEnabled(this)">
+                <span class="camp-toggle-track"></span>
+                <span class="camp-toggle-label" id="globalEnabledLabel">cargando</span>
+            </label>
             <details class="camp-status-strip-report">
                 <summary>Último informe</summary>
                 <div id="lastRunReport" class="camp-report camp-report--empty">Sin ejecuciones previas en esta sesión</div>
@@ -75,19 +84,35 @@
                         <p class="eyebrow eyebrow-tight">Parámetros</p>
                         <h2>Configuración</h2>
                     </div>
-                    <label class="camp-toggle" title="Activar o pausar la campaña diaria">
-                        <input type="checkbox" id="enabledToggle" onchange="toggleEnabled(this)">
+                    <label class="camp-toggle" title="Activa o pausa SOLO esta línea (las demás y los follow-ups siguen igual)">
+                        <input type="checkbox" id="enabledToggle" onchange="toggleLineEnabled(this)">
                         <span class="camp-toggle-track"></span>
                         <span class="camp-toggle-label" id="enabledLabel">cargando</span>
                     </label>
                 </div>
 
                 <div class="campaign-panel-body">
+                    <div class="camp-form-row">
+                        <label for="cfgLineSelect">Línea de campaña</label>
+                        <select id="cfgLineSelect" onchange="onLineSelected(this.value)"></select>
+                    </div>
+
                     <form id="configForm" class="camp-form" onsubmit="saveConfig(event)">
 
                         <div class="camp-form-row">
                             <label for="cfgVertical">Vertical</label>
                             <input type="text" id="cfgVertical" name="vertical" placeholder="inmobiliaria">
+                        </div>
+
+                        <div class="camp-form-row camp-form-row--half">
+                            <div>
+                                <label for="cfgSenderName">Nombre remitente</label>
+                                <input type="text" id="cfgSenderName" name="sender_name" placeholder="Vicente Araizeta">
+                            </div>
+                            <div>
+                                <label for="cfgOutreachAccount" title="Cuenta real de Thunderbird que envia esta línea (p.ej. automato, sls_assetsconsultores) — ver scripts/export_outreach_smtp_credentials.py">Cuenta de envío</label>
+                                <input type="text" id="cfgOutreachAccount" name="outreach_account" placeholder="automato">
+                            </div>
                         </div>
 
                         <div class="camp-form-row">
@@ -179,6 +204,28 @@
                 </div>
             </section>
 
+            <!-- ── Panel: catálogo de ayudas — nada descubierto se activa
+                 sin revisión humana, esta es la pantalla para hacerlo ── -->
+            <section class="campaign-panel campaign-grants-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Vía IA / OT</p>
+                        <h2>Catálogo de ayudas</h2>
+                    </div>
+                    <button class="camp-btn camp-btn--secondary" type="button" onclick="refreshGrantsCatalog()">
+                        Actualizar catálogo
+                    </button>
+                </div>
+                <div class="campaign-panel-body">
+                    <p class="camp-decompose-hint">
+                        Comprueba qué ayudas siguen vigentes y busca programas nuevos. Lo descubierto
+                        entra siempre como <em>pendiente de revisión</em> — nunca se activa solo.
+                    </p>
+                    <span id="grantsRefreshStatus" class="camp-trigger-status"></span>
+                    <div id="grantsList" class="camp-pending-list">Cargando…</div>
+                </div>
+            </section>
+
             <!-- ── Panel inferior: resultados de la última ejecución ─────── -->
             <section class="campaign-panel campaign-results-panel">
                 <div class="camp-header">
@@ -211,6 +258,6 @@
 
     <div id="toast" class="camp-toast" aria-live="polite"></div>
 
-    <script src="/static/js/nexus_campaign.js?v=20260929a"></script>
+    <script src="/static/js/nexus_campaign.js?v=20260930a"></script>
 </body>
 </html>

@@ -63,11 +63,41 @@ async def campaign_config(agent: CampaignAgent = Depends(get_campaign_agent)) ->
 
 @router.put("/config")
 async def update_campaign_config(request: Request, agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    """Actualiza UNA linea de campaña — "default" (el dict plano de
+    siempre) o una entrada de additional_campaigns por su "name". El
+    cuerpo lleva el propio campo "line" (opcional, default "default") mas
+    los campos a actualizar de esa linea — nunca se mezclan lineas
+    distintas en un solo PUT."""
     body = await request.json()
+    line = body.pop("line", "default") or "default"
+    updates = {k: v for k, v in body.items() if k not in ("notes", "line")}
+
     current = agent.load_config()
-    current.update({k: v for k, v in body.items() if k != "notes"})
+    if line == "default":
+        current.update(updates)
+    else:
+        extras = current.setdefault("additional_campaigns", [])
+        target = next((e for e in extras if e.get("name") == line), None)
+        if target is None:
+            return JSONResponse({"status": "not_found", "line": line}, status_code=404)
+        target.update(updates)
+
     agent.save_config(current)
     return {"status": "ok", "config": current}
+
+
+@router.put("/global-toggle")
+async def update_campaign_global_toggle(request: Request, agent: CampaignAgent = Depends(get_campaign_agent)) -> dict[str, Any]:
+    """Interruptor GLOBAL — para TODO el ciclo diario, follow-ups incluidos,
+    de todas las lineas. Deliberadamente separado de pausar una linea
+    concreta (PUT /config con default_enabled o enabled por linea) para
+    que un operador no pare sin querer los follow-ups de leads ya
+    contactados al pausar solo una via."""
+    body = await request.json()
+    current = agent.load_config()
+    current["enabled"] = bool(body.get("enabled", True))
+    agent.save_config(current)
+    return {"status": "ok", "enabled": current["enabled"]}
 
 
 @router.post("/trigger")
@@ -115,18 +145,27 @@ async def campaign_results(
     request: Request,
     prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
 ) -> dict[str, Any]:
-    """Atajo sobre prospecting.list_results con el run_id de la ultima ejecucion
-    de campaña — evita que la UI tenga que leer el report del scheduler para
-    sacar el run_id manualmente."""
+    """Atajo sobre prospecting.list_results con los run_id de la ultima
+    ejecucion de campaña — evita que la UI tenga que leer el report del
+    scheduler para sacarlos a mano. Junta los resultados de TODAS las
+    lineas que corrieron ese dia (report['campaigns']), no solo una —
+    antes usaba report['new_campaign'] (una sola linea, la de siempre),
+    que escondia en silencio los resultados de cualquier otra linea activa
+    el mismo dia."""
     scheduler = _get_scheduler(request)
     if scheduler is None:
         return JSONResponse({"status": "error", "error": "scheduler_not_initialized"}, status_code=503)
     report = (scheduler.describe() or {}).get("last_run_report") or {}
-    run_id = (report.get("new_campaign") or {}).get("run_id")
-    if not run_id:
-        return {"status": "ok", "run_id": None, "results": []}
-    payload = await prospecting.list_results(run_id=run_id)
-    return {"status": "ok", "run_id": run_id, **payload}
+    campaigns = report.get("campaigns") or {}
+    run_ids = sorted({v.get("run_id") for v in campaigns.values() if v.get("run_id")})
+    if not run_ids:
+        return {"status": "ok", "run_ids": [], "results": []}
+
+    merged: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        payload = await prospecting.list_results(run_id=run_id)
+        merged.extend(payload.get("results") or [])
+    return {"status": "ok", "run_ids": run_ids, "results": merged}
 
 
 @router.post("/decompose-verify")

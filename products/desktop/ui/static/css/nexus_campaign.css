@@ -9,7 +9,12 @@
 .workspace-campaign {
     height: calc(100dvh / var(--ui-zoom));
     overflow: hidden;
-    grid-template-rows: auto minmax(0, 1fr);
+    /* 3 hijos directos: shell-topbar, camp-status-strip, campaign-layout —
+       con solo 2 tracks definidos, el hijo de en medio (status-strip)
+       caia en una fila implicita de 0px (grid-auto-rows por defecto),
+       solapando su contenido con el panel de debajo. Bug real encontrado
+       en revision visual (2026-09-30), no solo teorico. */
+    grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 /* ── Layout: status+config arriba, resultados abajo a todo el ancho ───────── */

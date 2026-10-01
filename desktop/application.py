@@ -11,6 +11,7 @@ import threading
 from desktop.branding import resolve_windows_icon
 from desktop.config import DesktopSettings
 from desktop.local_agents.monitoring_agent import MonitoringAgent
+from desktop.local_agents.outlook_watcher_agent import OutlookWatcherAgent
 from desktop.runtime.assistant_runtime import DesktopAssistantRuntime
 from desktop.runtime.bootstrap import set_current_runtime
 from desktop.services.local_server import LocalServer
@@ -48,6 +49,7 @@ class DesktopApplication:
             local_url=self.settings.local_url,
             internal_token=self.settings.desktop_internal_token,
         )
+        self.tray = None
         self._window_icon_handles: list[int] = []
 
     def run(self) -> None:
@@ -67,6 +69,7 @@ class DesktopApplication:
         self._start_monitoring()
         window = self._create_window()
         self._start_tray(window)
+        self._start_outlook_watcher()
         self._start_webview()
 
         logger.info("Ventana cerrada. Nexus-UI Desktop terminando.")
@@ -98,18 +101,35 @@ class DesktopApplication:
         return window
 
     def _start_tray(self, window) -> None:
-        tray = SystemTray(
+        self.tray = SystemTray(
             window,
             local_url=self.settings.local_url,
             operator_url=self.settings.startup_url,
             internal_token=self.settings.desktop_internal_token,
         )
         tray_thread = threading.Thread(
-            target=tray.run,
+            target=self.tray.run,
             daemon=True,
             name="nexus-tray",
         )
         tray_thread.start()
+
+    def _start_outlook_watcher(self) -> None:
+        if not self.settings.outlook_watch_enabled:
+            return
+        watcher = OutlookWatcherAgent(
+            interval_seconds=self.settings.outlook_watch_interval_seconds,
+            local_url=self.settings.local_url,
+            internal_token=self.settings.desktop_internal_token,
+            importance_threshold=self.settings.outlook_watch_importance_threshold,
+            notify_fn=self.tray.notify if self.tray is not None else None,
+        )
+        watcher_thread = threading.Thread(
+            target=watcher.run_sync,
+            daemon=True,
+            name="nexus-outlook-watcher",
+        )
+        watcher_thread.start()
 
     def _start_webview(self) -> None:
         import webview

@@ -155,6 +155,31 @@ class PepoConversationStore:
             conn.commit()
             return cursor.rowcount > 0
 
+    def add_assistant_message(self, conversation_id: str, content: str) -> PepoMessage:
+        """Inserta UN mensaje suelto de PEPO, sin pareja de usuario — para
+        que PEPO pueda hablar primero (ej. aviso proactivo de correo
+        importante), a diferencia de append_turn() que siempre inserta
+        los dos lados de un turno juntos."""
+        now = _now_iso()
+        message = PepoMessage(
+            id=f"pmsg-{uuid.uuid4().hex[:12]}",
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            created_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, ?)",
+                (message.id, conversation_id, content, now),
+            )
+            conn.execute(
+                "UPDATE conversations SET updated_at = ? WHERE id = ?",
+                (now, conversation_id),
+            )
+            conn.commit()
+        return message
+
     def append_turn(self, conversation_id: str, *, user_message: str, assistant_message: str) -> None:
         """Inserta el turno (mensaje de usuario + respuesta) y refresca
         updated_at — una sola transacción."""

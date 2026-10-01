@@ -582,6 +582,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     initPepo();
     loadSkillSource();
     await loadConversationsList();
+    // ?conversation=<id> en la URL manda sobre lo persistido — para que un
+    // enlace directo (ej. desde una notificacion proactiva de PEPO) abra
+    // esa conversacion concreta, no la ultima que se estuviera viendo.
+    const requestedConversation = new URLSearchParams(window.location.search).get('conversation');
+    if (requestedConversation) {
+        _pepoContextId = requestedConversation;
+        localStorage.setItem(PEPO_ACTIVE_CONVERSATION_KEY, requestedConversation);
+    }
     // Restaura la conversacion activa (si la habia) para que volver a la
     // pestaña no borre el historial visible — se mantiene hasta "Nuevo chat".
     if (_pepoContextId) {

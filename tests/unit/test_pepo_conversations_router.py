@@ -53,3 +53,21 @@ def test_deleted_conversation_no_longer_appears_in_list(tmp_path):
 
     ids = [c["id"] for c in listing["conversations"]]
     assert ids == [keep.id]
+
+
+def test_proactive_conversation_has_pepo_message_without_user_turn(tmp_path):
+    """OutlookWatcherAgent (y cualquier otro agente de fondo) usa este
+    endpoint para que PEPO hable primero — pedido explicito del usuario:
+    los asistentes deben poder tomar la iniciativa."""
+    client, store = _client(tmp_path)
+
+    response = client.post(
+        "/api/desktop/pepo/conversations/proactive",
+        json={"first_message": "Te ha llegado un correo importante de Laura."},
+    )
+
+    assert response.status_code == 200
+    conversation_id = response.json()["conversation"]["id"]
+    messages = store.get_messages(conversation_id)
+    assert [m.role for m in messages] == ["assistant"]
+    assert messages[0].content == "Te ha llegado un correo importante de Laura."

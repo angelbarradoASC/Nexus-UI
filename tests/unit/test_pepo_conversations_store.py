@@ -120,6 +120,30 @@ def test_delete_conversation_does_not_affect_other_conversations(tmp_path):
     assert len(store.get_messages(keep.id)) == 2
 
 
+def test_add_assistant_message_inserts_single_role_assistant_row(tmp_path):
+    """PEPO hablando primero (aviso proactivo) — sin pareja de usuario, a
+    diferencia de append_turn()."""
+    store = _store(tmp_path)
+    conv = store.create_conversation("Te ha llegado un correo importante de Laura")
+
+    store.add_assistant_message(conv.id, "Te ha llegado un correo importante de Laura")
+
+    messages = store.get_messages(conv.id)
+    assert [m.role for m in messages] == ["assistant"]
+    assert messages[0].content == "Te ha llegado un correo importante de Laura"
+
+
+def test_add_assistant_message_updates_conversation_updated_at(tmp_path):
+    store = _store(tmp_path)
+    conv = store.create_conversation("aviso")
+    original_updated_at = conv.updated_at
+
+    store.add_assistant_message(conv.id, "aviso")
+
+    refreshed = store.get_conversation(conv.id)
+    assert refreshed.updated_at >= original_updated_at
+
+
 def test_store_survives_reopening_same_db_path(tmp_path):
     """Persistencia real entre 'reinicios' — construir un segundo store
     sobre el mismo fichero debe ver los datos del primero."""

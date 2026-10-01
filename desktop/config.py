@@ -16,6 +16,9 @@ class DesktopSettings:
     host: str = "127.0.0.1"
     startup_timeout_seconds: int = 15
     monitoring_interval_seconds: int = 30
+    outlook_watch_enabled: bool = True
+    outlook_watch_interval_seconds: int = 300
+    outlook_watch_importance_threshold: str = "high"
     desktop_internal_token: str = ""
     startup_route: str = "/nexus-pepo"
     open_operator_on_start: bool = True
@@ -105,6 +108,9 @@ class DesktopSettings:
             host=os.environ.get("DESKTOP_HOST", "127.0.0.1"),
             startup_timeout_seconds=int(os.environ.get("DESKTOP_STARTUP_TIMEOUT", "15")),
             monitoring_interval_seconds=int(os.environ.get("DESKTOP_MONITOR_INTERVAL", "30")),
+            outlook_watch_enabled=os.environ.get("DESKTOP_OUTLOOK_WATCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"},
+            outlook_watch_interval_seconds=int(os.environ.get("DESKTOP_OUTLOOK_WATCH_INTERVAL", "300")),
+            outlook_watch_importance_threshold=os.environ.get("DESKTOP_OUTLOOK_WATCH_IMPORTANCE", "high"),
             desktop_internal_token=os.environ.get("DESKTOP_INTERNAL_TOKEN", ""),
             startup_route=os.environ.get("DESKTOP_STARTUP_ROUTE", "/nexus-pepo"),
             open_operator_on_start=os.environ.get("DESKTOP_OPEN_OPERATOR_ON_START", "true").lower() in {"1", "true", "yes", "on"},

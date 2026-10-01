@@ -47,6 +47,19 @@ async def create_conversation(
     return {"available": True, "conversation": conversation.to_dict()}
 
 
+@router.post("/api/desktop/pepo/conversations/proactive")
+async def create_proactive_conversation(
+    body: _NewConversationBody,
+    store: PepoConversationStore = Depends(get_pepo_conversation_store),
+):
+    """PEPO habla primero — usado por agentes de fondo (ej.
+    OutlookWatcherAgent) para dejar una conversacion ya empezada por PEPO,
+    sin que el usuario haya escrito nada todavia."""
+    conversation = store.create_conversation(body.first_message)
+    store.add_assistant_message(conversation.id, body.first_message)
+    return {"available": True, "conversation": conversation.to_dict()}
+
+
 @router.get("/api/desktop/pepo/conversations/{conversation_id}/messages")
 async def get_conversation_messages(
     conversation_id: str,

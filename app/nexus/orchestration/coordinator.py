@@ -533,7 +533,11 @@ class NexusCoordinator:
     async def _handle_outlook_priority_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
         """Skill de solo lectura — lista la bandeja de entrada puntuada por
         prioridad, nunca propone nada que confirmar."""
-        result = await self._outlook.get_priority_messages(limit=5)
+        # Se piden mas de los 5 que se van a mostrar porque el filtro de
+        # importancia real (ver _render_outlook_priority_result) descarta
+        # los de baja prioridad — pedir solo 5 de entrada dejaba la lista
+        # vacia en cuanto alguno no era relevante.
+        result = await self._outlook.get_priority_messages(limit=20)
         response = self._render_outlook_priority_result(result)
         status = "accepted" if result.get("status") == "success" else "degraded"
 
@@ -561,12 +565,33 @@ class NexusCoordinator:
             return "No hay sesion de Outlook conectada todavia — conecta tu cuenta desde Configuración → Correo."
         messages = result.get("messages") or []
         if not messages:
-            return "No hay correos destacados en tu bandeja ahora mismo."
+            return "No hay correos en tu bandeja ahora mismo."
+
+        # Solo se muestran como "importantes" los que el LLM de verdad
+        # puntuo como high/medium — antes se enseñaban los primeros N sin
+        # filtrar nada, mezclando newsletters/spam con correos reales en
+        # cuanto la puntuacion fallaba o no habia suficientes destacados.
+        important = [m for m in messages if m.get("importance") in ("high", "medium")][:5]
+        if not important:
+            return (
+                "No veo nada que destaque como importante en tu bandeja ahora mismo "
+                "(ni correos marcados como prioritarios ni urgentes) — si quieres te "
+                "enseño los últimos correos tal cual, aunque no parezcan urgentes."
+            )
+
         lines = ["Esto es lo más importante en tu bandeja de entrada:"]
-        for m in messages:
+        for m in important:
             who = m.get("sender_name") or m.get("sender_email") or "remitente desconocido"
-            why = m.get("reason") or (m.get("preview") or "")[:100]
-            lines.append(f"- {who}: \"{m.get('subject', '(sin asunto)')}\" — {why}")
+            subject = m.get("subject") or "(sin asunto)"
+            reason = (m.get("reason") or "").strip()
+            # Nunca se vuelca el preview en bruto como fallback — un cuerpo
+            # de correo HTML mal convertido a texto (ej. newsletters,
+            # notificaciones de Instagram) sale ilegible en el chat. Sin una
+            # razon real del LLM, mejor solo remitente+asunto que basura.
+            line = f"- {who}: \"{subject}\""
+            if reason:
+                line += f" — {reason}"
+            lines.append(line)
         return "\n".join(lines)
 
     async def _handle_outlook_reply_chat(

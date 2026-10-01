@@ -217,13 +217,18 @@ class OutlookMailManager:
 
     async def _enrich_with_llm(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         system_prompt = resolve_prompt_sync("mail.qualification")
+        # preview recortado SOLO para este payload (no se toca el preview
+        # que se le muestra al usuario) — mandar el cuerpo completo de hasta
+        # 30 correos en una sola llamada fue la causa real de los HTTP 413/429
+        # vistos en vivo (payload demasiado grande). 160 caracteres bastan
+        # para que el LLM juzgue importancia, no hace falta el texto entero.
         payload = [
             {
                 "message_id": m["message_id"],
                 "sender_name": m["sender_name"],
                 "sender_email": m["sender_email"],
                 "subject": m["subject"],
-                "preview": m["preview"],
+                "preview": (m["preview"] or "")[:160],
                 "unread": m["unread"],
                 "importance": m.get("graph_importance", "normal"),
             }
@@ -256,6 +261,16 @@ class OutlookMailManager:
         return messages
 
     @staticmethod
+    def _clean_preview(raw_preview: str) -> str:
+        """bodyPreview de Graph trae a veces saltos de linea/espacios sueltos
+        de HTML mal convertido a texto — se colapsa a una sola linea legible,
+        igual que ya hace ThunderbirdMailManager con el correo de
+        Thunderbird (_extract_preview), y se recorta a un tamaño razonable
+        para mostrar en chat/UI."""
+        collapsed = " ".join((raw_preview or "").split())
+        return collapsed[:400]
+
+    @staticmethod
     def _parse_message(raw: dict[str, Any]) -> dict[str, Any] | None:
         message_id = raw.get("id")
         if not message_id:
@@ -267,7 +282,7 @@ class OutlookMailManager:
             "sender_name": from_field.get("name", ""),
             "sender_email": from_field.get("address", ""),
             "subject": subject,
-            "preview": (raw.get("bodyPreview") or "").strip(),
+            "preview": OutlookMailManager._clean_preview(raw.get("bodyPreview") or ""),
             "received_at": raw.get("receivedDateTime"),
             "unread": not raw.get("isRead", True),
             "graph_importance": raw.get("importance", "normal"),

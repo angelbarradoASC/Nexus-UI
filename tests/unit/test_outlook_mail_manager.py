@@ -80,6 +80,20 @@ def test_status_disabled_when_outlook_not_enabled():
     assert manager.status() == {"status": "disabled", "reason": "Outlook desactivado en esta instancia."}
 
 
+def test_clean_preview_collapses_broken_html_whitespace():
+    """Bug real visto en vivo: bodyPreview de Graph para correos HTML
+    (ej. notificaciones de Instagram) trae saltos de linea/espacios
+    sueltos que salian ilegibles en el chat de PEPO."""
+    raw = "Ver en navegador\r\n\r\n\r\n\r\nCumplir será obligatorio.\n\n   Aprovechar el cambio   será una decisión.\r\n"
+    cleaned = OutlookMailManager._clean_preview(raw)
+    assert cleaned == "Ver en navegador Cumplir será obligatorio. Aprovechar el cambio será una decisión."
+
+
+def test_clean_preview_truncates_long_text():
+    cleaned = OutlookMailManager._clean_preview("palabra " * 100)
+    assert len(cleaned) <= 400
+
+
 @pytest.mark.asyncio
 async def test_get_priority_messages_not_authenticated_without_token(monkeypatch):
     manager = _manager(token=None, monkeypatch=monkeypatch)

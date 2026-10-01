@@ -166,6 +166,70 @@ async def test_outreach_launch_campaign_rejects_unknown_account(outreach_cfg):
         )
 
 
+def _multi_account_manager(outreach_cfg, *, healthy: dict[str, bool]) -> OutreachManager:
+    """Manager con varias cuentas SMTP fake, cada una con su propia salud —
+    _manager() de arriba usa UN unico fake compartido por account_key (sirve
+    para una sola cuenta), aqui se necesita diferenciar por cuenta para
+    probar pick_account() con un pool real de varias."""
+    credentials = _FakeCredentialStore({
+        f"outreach_smtp:{key}": {
+            "user": f"{key}@example.com", "password": "x", "host": "h", "port": 465, "email": f"{key}@example.com",
+        }
+        for key in healthy
+    })
+    smtp_by_username = {f"{key}@example.com": _FakeSMTP(configured=is_healthy) for key, is_healthy in healthy.items()}
+
+    def factory(*, host, port, username, password):
+        return smtp_by_username[username]
+
+    return OutreachManager(
+        cfg=outreach_cfg,
+        llm_router=None,
+        credential_store=credentials,
+        imap_monitor=_FakeIMAP(),
+        transport_factory=factory,
+        imap_monitor_factory=lambda **_kwargs: _FakeReplyIMAP(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_pick_account_round_robins_between_healthy_candidates(outreach_cfg):
+    manager = _multi_account_manager(outreach_cfg, healthy={"automato": True, "sls_assetsconsultores": True})
+
+    picks = [await manager.pick_account(["automato", "sls_assetsconsultores"]) for _ in range(4)]
+
+    # sorted(["automato", "sls_assetsconsultores"]) — orden alfabetico, round-robin
+    assert picks == ["automato", "sls_assetsconsultores", "automato", "sls_assetsconsultores"]
+
+
+@pytest.mark.asyncio
+async def test_pick_account_skips_candidate_that_fails_healthcheck(outreach_cfg):
+    manager = _multi_account_manager(outreach_cfg, healthy={"automato": False, "sls_assetsconsultores": True})
+
+    picks = [await manager.pick_account(["automato", "sls_assetsconsultores"]) for _ in range(3)]
+
+    assert picks == ["sls_assetsconsultores"] * 3
+
+
+@pytest.mark.asyncio
+async def test_pick_account_raises_when_no_candidate_is_healthy(outreach_cfg):
+    manager = _multi_account_manager(outreach_cfg, healthy={"automato": False})
+
+    with pytest.raises(ValueError, match="sana"):
+        await manager.pick_account(["automato"])
+
+
+@pytest.mark.asyncio
+async def test_pick_account_single_candidate_behaves_like_before(outreach_cfg):
+    """Con un solo candidato (el caso de hoy, sin pool) se comporta igual
+    que el outreach_account unico de siempre: lo verifica y lo devuelve."""
+    manager = _manager(outreach_cfg)
+
+    picked = await manager.pick_account([ACCOUNT_KEY])
+
+    assert picked == ACCOUNT_KEY
+
+
 @pytest.mark.asyncio
 async def test_outreach_launch_campaign_parses_csv_and_previews_messages(outreach_cfg):
     llm_router = MagicMock()

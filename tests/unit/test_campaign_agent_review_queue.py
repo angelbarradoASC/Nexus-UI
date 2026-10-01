@@ -66,6 +66,11 @@ class _FakeOutreachManager:
         self.check_replies_calls.append(account_key)
         return self._replies_by_account.get(account_key, [])
 
+    async def pick_account(self, candidates: list[str]) -> str:
+        if not candidates:
+            raise ValueError("No hay ninguna cuenta de envío configurada para esta línea.")
+        return candidates[0]
+
     async def launch_campaign(self, payload: dict) -> dict:
         self.launch_calls.append(payload)
         if self._fail_without_sender_name and not payload.get("sender_name"):
@@ -116,6 +121,10 @@ def _agent(tmp_path, *, results=None, require_manual_approval: bool = True, outr
     cfg = agent.load_config()
     cfg["require_manual_approval"] = require_manual_approval
     cfg["daily_send_cap"] = 5
+    # Toda línea real necesita una cuenta de envío configurada (pick_account
+    # falla rapido si el pool esta vacío) — tests que prueban el enrutado por
+    # vertical sobrescriben esto explícitamente.
+    cfg.setdefault("outreach_account", "test-account")
     agent.save_config(cfg)
     return agent, prospecting, outreach, crm
 

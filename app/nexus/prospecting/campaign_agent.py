@@ -145,9 +145,9 @@ class CampaignAgent:
         #      por alguna linea (default + additional_campaigns), sin
         #      duplicar si varias lineas comparten cuenta.
         accounts = {
-            line_cfg.get("outreach_account")
+            account
             for _, line_cfg in self._iter_campaign_lines(cfg)
-            if line_cfg.get("outreach_account")
+            for account in self._account_pool(line_cfg)
         }
         for account_key in sorted(accounts):
             try:
@@ -214,6 +214,19 @@ class CampaignAgent:
         for index, extra in enumerate(cfg.get("additional_campaigns") or []):
             name = extra.get("name") or f"linea_{index + 1}"
             yield name, extra
+
+    @staticmethod
+    def _account_pool(line_cfg: dict[str, Any]) -> list[str]:
+        """Candidatas de cuenta de envío para una línea — outreach_accounts
+        (lista, para repartir el envío entre varias) si está presente y no
+        vacía, si no cae a la outreach_account única de siempre (retrocompatible
+        con toda línea que no se haya migrado a lista). OutreachManager.
+        pick_account() se encarga de filtrar por salud y repartir."""
+        pool = line_cfg.get("outreach_accounts") or []
+        if pool:
+            return list(pool)
+        single = line_cfg.get("outreach_account", "")
+        return [single] if single else []
 
     def _line_config_for_vertical(self, vertical: str) -> dict[str, Any]:
         """Devuelve la config de la línea de campaña cuyo "vertical" coincide
@@ -374,10 +387,11 @@ class CampaignAgent:
         # 2. Lanzar campaña outreach
         campaign_name = f"{vertical.capitalize()} {date.today().isoformat()}"
         try:
+            outreach_account = await self._outreach.pick_account(self._account_pool(cfg))
             campaign_result = await self._outreach.launch_campaign({
                 "campaign_name":         campaign_name,
                 "sender_name":           cfg.get("sender_name", ""),
-                "outreach_account":      cfg.get("outreach_account", ""),
+                "outreach_account":      outreach_account,
                 "proposition":           proposition,
                 "cta":                   cta,
                 "audience_hint":         audience,
@@ -511,10 +525,11 @@ class CampaignAgent:
         cfg = self._line_config_for_vertical(prospect.get("vertical", ""))
         campaign_name = f"{prospect.get('name', 'lead')} {date.today().isoformat()}"
         try:
+            outreach_account = await self._outreach.pick_account(self._account_pool(cfg))
             campaign_result = await self._outreach.launch_campaign({
                 "campaign_name":        campaign_name,
                 "sender_name":          cfg.get("sender_name", ""),
-                "outreach_account":     cfg.get("outreach_account", ""),
+                "outreach_account":     outreach_account,
                 "proposition":          cfg.get("proposition", ""),
                 "cta":                  cfg.get("cta", ""),
                 "audience_hint":        cfg.get("audience_hint", ""),

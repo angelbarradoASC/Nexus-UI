@@ -11,6 +11,8 @@ from email.message import EmailMessage
 from io import StringIO
 from typing import Any
 
+from loguru import logger
+
 from agents.llm_router import LLMRouter
 from agents.tools.credential_store import CredentialStore
 from nexus.prompts import resolve_prompt_sync
@@ -54,6 +56,13 @@ class OutreachManager:
             username=cfg.outreach_imap_user,
             password=cfg.outreach_imap_password,
         )
+        # Cursor de rotacion round-robin, uno por cada pool de cuentas distinto
+        # (una linea de campaña con varias outreach_accounts) — vive en memoria,
+        # igual que _transports/_imap_monitors: se reinicia con el proceso, lo
+        # cual es inofensivo (solo reinicia el reparto, nunca envia de mas ni
+        # de menos). Clave = tupla ordenada de account_key, para que dos lineas
+        # con el mismo pool compartan contador y lineas distintas no se pisen.
+        self._rotation_cursor: dict[tuple[str, ...], int] = {}
 
     def _account_creds(self, account_key: str) -> dict[str, Any] | None:
         return self._credentials.get(f"{_ACCOUNT_KEY_PREFIX}{account_key}")
@@ -92,6 +101,62 @@ class OutreachManager:
             {"account_key": key, "email": self._account_email(key)}
             for key in self._known_account_keys()
         ]
+
+    async def pick_account(self, candidates: list[str]) -> str:
+        """Elige UNA cuenta real entre varias candidatas de una misma línea
+        (outreach_accounts) — antes cada línea tenía una única cuenta fija
+        (outreach_account), así que todo el volumen de esa línea salía
+        siempre de la misma bandeja. Con varias cuentas candidatas:
+        1. descarta las que no tengan credenciales guardadas
+        2. descarta las que fallen el healthcheck SMTP real (misma
+           comprobación que ya usa status() para el panel de Agentes/Mail)
+        3. reparte en round-robin entre las que queden sanas — nunca elige
+           siempre la primera, para no acabar enviando todo por una cuenta
+           solo porque es la primera de la lista
+
+        Con un único candidato (el caso normal hoy, listas de 1 elemento)
+        se comporta igual que antes: lo verifica y lo usa si esta sano.
+        """
+        pool = [key for key in candidates if key]
+        if not pool:
+            raise ValueError(
+                "No hay ninguna cuenta de envío configurada para esta línea "
+                "(outreach_account / outreach_accounts vacíos)."
+            )
+        configured = [key for key in pool if self._account_creds(key)]
+        if not configured:
+            raise ValueError(
+                f"Ninguna de las cuentas configuradas ({', '.join(pool)}) tiene "
+                "credenciales guardadas. Ejecuta scripts/export_outreach_smtp_credentials.py."
+            )
+        healthy: list[str] = []
+        unhealthy: list[str] = []
+        for key in configured:
+            try:
+                transport = self._transport_for(key)
+                result = await asyncio.to_thread(self._safe_healthcheck, transport.healthcheck)
+            except Exception:
+                unhealthy.append(key)
+                continue
+            # "up" es el unico estado realmente sano — "not_configured"
+            # (sin credenciales, no deberia llegar aqui tras el filtro de
+            # arriba pero por si acaso) y "down" (_safe_healthcheck atrapando
+            # una excepcion real de conexion) cuentan igual como no usable.
+            if result.get("status") != "up":
+                unhealthy.append(key)
+            else:
+                healthy.append(key)
+        if unhealthy:
+            logger.warning("Cuentas de envío descartadas por healthcheck fallido: {}", unhealthy)
+        if not healthy:
+            raise ValueError(
+                f"Ninguna cuenta sana entre las candidatas ({', '.join(configured)}) — "
+                "todas fallaron el healthcheck SMTP."
+            )
+        pool_key = tuple(sorted(healthy))
+        index = self._rotation_cursor.get(pool_key, 0) % len(healthy)
+        self._rotation_cursor[pool_key] = index + 1
+        return healthy[index]
 
     def _imap_creds(self, account_key: str) -> dict[str, Any] | None:
         return self._credentials.get(f"{_IMAP_ACCOUNT_KEY_PREFIX}{account_key}")

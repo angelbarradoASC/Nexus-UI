@@ -166,10 +166,11 @@ async def test_get_priority_messages_enriches_with_llm_scores(monkeypatch):
         return httpx.Response(200, json=graph_payload)
 
     class _FakeLLMRouter:
-        async def call(self, messages):
+        async def call(self, messages, **kwargs):
+            sent_id = json.loads(messages[1]["content"])[0]["message_id"]
             return SimpleNamespace(
                 error=None,
-                content=json.dumps([{"message_id": "msg-1", "score": 90, "importance": "high", "reason": "cliente importante", "suggested_action": "responder"}]),
+                content=json.dumps([{"message_id": sent_id, "score": 90, "importance": "high", "reason": "cliente importante", "suggested_action": "responder"}]),
             )
 
     manager = _manager(transport_handler=handler, llm_router=_FakeLLMRouter(), monkeypatch=monkeypatch)
@@ -240,20 +241,30 @@ def _graph_msg(msg_id: str, *, inference: str = "focused", importance: str = "no
 class _CountingLLM:
     """Fake de LLM router que registra a que correos se le pregunta."""
 
-    def __init__(self, importance_by_id: dict[str, str] | None = None, fail_times: int = 0):
-        self.calls: list[list[str]] = []
+    def __init__(self, importance_by_id: dict[str, str] | None = None, fail_times: int = 0, raw_reply: str | None = None):
+        self.calls: list[list[str]] = []      # por correo ("a", "b"...), vía su asunto
+        self.sent_payloads: list[list[dict]] = []
+        self.sent_kwargs: list[dict] = []
+        self.sent_system: list[str] = []
         self._importance = importance_by_id or {}
         self._fail = fail_times
+        self._raw_reply = raw_reply
 
-    async def call(self, messages):
+    async def call(self, messages, **kwargs):
         payload = json.loads(messages[1]["content"])
-        self.calls.append([p["message_id"] for p in payload])
+        self.sent_payloads.append(payload)
+        self.sent_kwargs.append(kwargs)
+        self.sent_system.append(messages[0]["content"])
+        keys = [p["subject"].removeprefix("Asunto ") for p in payload]
+        self.calls.append(keys)
         if self._fail > 0:
             self._fail -= 1
             return SimpleNamespace(error="http_429 | nivel=L3-Groq", content="")
+        if self._raw_reply is not None:
+            return SimpleNamespace(error=None, content=self._raw_reply)
         out = []
-        for p in payload:
-            imp = self._importance.get(p["message_id"], "low")
+        for p, key in zip(payload, keys):
+            imp = self._importance.get(key, "low")
             out.append({"message_id": p["message_id"], "score": 80 if imp == "high" else 5,
                         "importance": imp, "reason": "motivo", "suggested_action": "leer"})
         return SimpleNamespace(error=None, content=json.dumps(out))
@@ -355,3 +366,37 @@ async def test_llm_calls_are_chunked(monkeypatch):
     await manager.get_priority_messages()
 
     assert [len(c) for c in llm.calls] == [10, 10, 5]
+
+
+@pytest.mark.asyncio
+async def test_llm_gets_short_ids_explicit_max_tokens_and_spanish_style(monkeypatch):
+    """Causa raiz real (2026-10-16): los message_id de Graph son ~150 chars de
+    base64 que el modelo debia repetir; con max_tokens por defecto (1200) la
+    respuesta se truncaba a mitad de JSON y esos correos nunca se puntuaban."""
+    inbox = {"messages": [_graph_msg("a"), _graph_msg("b")]}
+    llm = _CountingLLM()
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch)
+
+    await manager.get_priority_messages()
+
+    sent_ids = [p["message_id"] for p in llm.sent_payloads[0]]
+    assert sent_ids == ["m1", "m2"]                      # nunca el id largo de Graph
+    assert llm.sent_kwargs[0]["max_tokens"] >= 1500      # explicito, no el 1200 del router
+    assert "español" in llm.sent_system[0]               # razones en castellano y cortas
+
+
+@pytest.mark.asyncio
+async def test_unparseable_llm_reply_is_a_failure_with_cooldown_not_silence(monkeypatch):
+    """Antes un JSON truncado se tragaba con `return messages` — sin log, sin
+    cooldown, reintentado en cada ciclo para siempre."""
+    clock = {"t": datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)}
+    inbox = {"messages": [_graph_msg("a")]}
+    llm = _CountingLLM(raw_reply='[{"message_id": "m1", "score": 9')   # truncado a media respuesta
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch,
+                       now_fn=lambda: clock["t"])
+
+    first = await manager.get_priority_messages()
+    await manager.get_priority_messages()
+
+    assert first["scoring"]["degraded"] is True
+    assert len(llm.calls) == 1   # el segundo ciclo cae en cooldown, no martillea

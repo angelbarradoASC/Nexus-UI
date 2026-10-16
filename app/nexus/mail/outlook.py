@@ -45,6 +45,15 @@ _MESSAGE_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,importanc
 _LLM_CHUNK_SIZE = 10
 _LLM_COOLDOWN = timedelta(minutes=10)
 _MAX_CACHED_SCORES = 1000
+_SCORING_MAX_TOKENS = 1500
+# Anadido al prompt compartido mail.qualification (que no dice idioma ni
+# longitud): sin esto las razones salian en ingles y de 200+ caracteres —
+# visto en vivo — para un usuario hispanohablante, y agotaban max_tokens.
+_SCORING_STYLE_SUFFIX = (
+    "\n\nESTILO DE SALIDA: escribe `reason` y `suggested_action` SIEMPRE en español, "
+    "en una sola frase corta (maximo 110 caracteres cada una). Devuelve un objeto por cada "
+    "message_id recibido, copiando el message_id tal cual."
+)
 
 
 def _config_dir() -> Path:
@@ -325,15 +334,19 @@ class OutlookMailManager:
     # ── Puntuacion de prioridad (LLM) ────────────────────────────────────────
 
     async def _enrich_with_llm(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        system_prompt = resolve_prompt_sync("mail.qualification")
+        system_prompt = resolve_prompt_sync("mail.qualification") + _SCORING_STYLE_SUFFIX
+        # IDs cortos hacia el LLM ("m1".."m10"), no el id de Graph: son ~150
+        # caracteres de base64 que el modelo tiene que repetir en SU salida —
+        # con 6 correos la respuesta se truncaba a mitad de JSON en max_tokens
+        # (visto en vivo, 2026-10-16: LEN 1896, JSONDecodeError) y esos
+        # correos quedaban sin puntuar para siempre, reintentados cada ciclo.
+        short_to_message = {f"m{i + 1}": m for i, m in enumerate(messages)}
         # preview recortado SOLO para este payload (no se toca el preview
-        # que se le muestra al usuario) — mandar el cuerpo completo de hasta
-        # 30 correos en una sola llamada fue la causa real de los HTTP 413/429
-        # vistos en vivo (payload demasiado grande). 160 caracteres bastan
-        # para que el LLM juzgue importancia, no hace falta el texto entero.
+        # que se le muestra al usuario): 160 caracteres bastan para juzgar
+        # importancia (el payload completo causo los HTTP 413 vistos en vivo).
         payload = [
             {
-                "message_id": m["message_id"],
+                "message_id": short_id,
                 "sender_name": m["sender_name"],
                 "sender_email": m["sender_email"],
                 "subject": m["subject"],
@@ -341,26 +354,30 @@ class OutlookMailManager:
                 "unread": m["unread"],
                 "importance": m.get("graph_importance", "normal"),
             }
-            for m in messages
+            for short_id, m in short_to_message.items()
         ]
         response = await self._llm_router.call(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ]
+            ],
+            max_tokens=_SCORING_MAX_TOKENS,
+            temperature=0.1,
         )
         if response.error:
             raise RuntimeError(response.error)
 
-        content = strip_llm_fences(response.content)
         try:
-            qualified = json.loads(content)
-        except json.JSONDecodeError:
-            return messages
+            qualified = json.loads(strip_llm_fences(response.content))
+        except json.JSONDecodeError as exc:
+            # Antes: `return messages` en silencio. Un JSON ilegible (truncado,
+            # texto suelto) es un fallo del LLM como otro cualquiera: se
+            # registra y activa el enfriamiento en vez de reintentarse ciegamente.
+            raise RuntimeError(f"respuesta de puntuacion no parseable ({len(response.content or '')} caracteres): {exc}") from exc
 
         by_id = {item.get("message_id"): item for item in qualified if isinstance(item, dict)}
-        for m in messages:
-            update = by_id.get(m.get("message_id"))
+        for short_id, m in short_to_message.items():
+            update = by_id.get(short_id)
             if not update:
                 continue
             m["priority_score"] = int(update.get("score", 0))

@@ -572,7 +572,24 @@ class NexusCoordinator:
         # filtrar nada, mezclando newsletters/spam con correos reales en
         # cuanto la puntuacion fallaba o no habia suficientes destacados.
         important = [m for m in messages if m.get("importance") in ("high", "medium")][:5]
+        scoring = result.get("scoring") or {}
+        unscored = int(scoring.get("unscored") or 0)
+        # Sin puntuar != "no importante": si el LLM esta caido/en cooldown, un
+        # "low" por defecto NO es un veredicto. Decir "no hay nada importante"
+        # en ese caso seria mentir (visto en vivo: cuota de Groq agotada).
+        n_correos = f"{unscored} correo{'s' if unscored != 1 else ''}"
+        degraded_note = (
+            f"\n\n(Ojo: {n_correos} todavía sin puntuar — el modelo de IA no está "
+            "disponible ahora mismo; lo reintento en unos minutos.)"
+            if unscored else ""
+        )
         if not important:
+            if unscored:
+                return (
+                    f"Ahora mismo no puedo decirte cuáles son importantes: {n_correos} "
+                    f"{'siguen' if unscored != 1 else 'sigue'} sin puntuar porque el modelo de IA no responde (límite de uso). "
+                    "Lo reintento en unos minutos."
+                )
             return (
                 "No veo nada que destaque como importante en tu bandeja ahora mismo "
                 "(ni correos marcados como prioritarios ni urgentes) — si quieres te "
@@ -592,7 +609,7 @@ class NexusCoordinator:
             if reason:
                 line += f" — {reason}"
             lines.append(line)
-        return "\n".join(lines)
+        return "\n".join(lines) + degraded_note
 
     async def _handle_outlook_reply_chat(
         self,

@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,13 +36,29 @@ from nexus.utils.llm_json import strip_llm_fences
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _SCOPES = ["Mail.Read", "Mail.Send"]
-_MESSAGE_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance,webLink"
+_MESSAGE_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance,inferenceClassification,webLink"
+
+# Correos por llamada al LLM, y cuanto se deja descansar al LLM tras un fallo
+# (429/cuota). Visto en vivo el 2026-10-01: 98 consultas en un dia, >=29 con
+# todos los niveles en HTTP 429 (retry_after hasta ~37 min) porque se
+# re-puntuaban los mismos 30 correos cada 5 minutos — cero avisos en todo el dia.
+_LLM_CHUNK_SIZE = 10
+_LLM_COOLDOWN = timedelta(minutes=10)
+_MAX_CACHED_SCORES = 1000
+
+
+def _config_dir() -> Path:
+    local_root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Open-Nexus" / "config"
+    local_root.mkdir(parents=True, exist_ok=True)
+    return local_root
 
 
 def _default_cache_path() -> Path:
-    local_root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Open-Nexus" / "config"
-    local_root.mkdir(parents=True, exist_ok=True)
-    return local_root / "outlook_token_cache.bin"
+    return _config_dir() / "outlook_token_cache.bin"
+
+
+def _default_scores_path() -> Path:
+    return _config_dir() / "outlook_scores.json"
 
 
 class OutlookAuthError(RuntimeError):
@@ -63,7 +80,7 @@ class OutlookTokenStore:
 class OutlookMailManager:
     """Reads and replies to Outlook mail via Graph API, on behalf of the signed-in user."""
 
-    def __init__(self, cfg, llm_router=None, now_fn=None, token_store=None, http_transport=None) -> None:
+    def __init__(self, cfg, llm_router=None, now_fn=None, token_store=None, http_transport=None, scores_path=None) -> None:
         self._cfg = cfg
         self._llm_router = llm_router
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
@@ -72,6 +89,11 @@ class OutlookMailManager:
         # el cache de tokens (DPAPI/pywin32) se deja sin mockear a proposito,
         # tiene que funcionar de verdad, no solo en teoria.
         self._http_transport = http_transport
+        # Puntuaciones ya hechas por message_id, persistidas: cada correo se
+        # puntua UNA vez, no en cada consulta (ver _LLM_COOLDOWN arriba).
+        self._scores_path = scores_path or _default_scores_path()
+        self._scores: dict[str, dict[str, Any]] = self._load_scores()
+        self._llm_cooldown_until: datetime | None = None
 
     # ── Autenticacion ────────────────────────────────────────────────────────
 
@@ -157,19 +179,106 @@ class OutlookMailManager:
         messages = [self._parse_message(m) for m in raw_messages]
         messages = [m for m in messages if m]
 
-        if self._llm_router is not None and messages:
-            try:
-                messages = await self._enrich_with_llm(messages)
-            except Exception:
-                logger.exception("OutlookMailManager | fallo puntuando prioridad con LLM")
+        self._apply_cached_scores(messages)
+        self._apply_free_prefilter(messages)
+        await self._score_pending_with_llm(messages)
 
+        scored = sum(1 for m in messages if m["scored"])
         messages.sort(key=lambda m: (m.get("priority_score", 0), m.get("received_at", "")), reverse=True)
         total_limit = int(limit) if limit is not None else int(self._cfg.outlook_priority_total_limit)
         return {
             "status": "success",
             "messages": messages[:total_limit],
             "checked_at": self._now_fn().isoformat(),
+            # degraded=True => hay correos sin puntuar (LLM caido/en cooldown):
+            # quien muestre el resultado NO debe presentar "low" como si fuera
+            # un veredicto — significa "no lo se todavia".
+            "scoring": {"scored": scored, "unscored": len(messages) - scored, "degraded": scored < len(messages)},
         }
+
+    # ── Puntuacion: cache + prefiltro gratis + LLM solo para lo nuevo ────────
+
+    def _apply_cached_scores(self, messages: list[dict[str, Any]]) -> None:
+        for m in messages:
+            cached = self._scores.get(m["message_id"])
+            if cached:
+                m.update(cached)
+                m["scored"] = True
+
+    def _apply_free_prefilter(self, messages: list[dict[str, Any]]) -> None:
+        """La bandeja "Otros" de Outlook (inferenceClassification, el filtro de
+        Microsoft para promociones/newsletters) no merece una llamada al LLM
+        ni una interrupcion — salvo que el remitente la marcara como alta
+        importancia. Gratis y sin cuota; es justo lo que el usuario pedia
+        (Instagram/newsletters mezclados con correos reales)."""
+        changed = False
+        for m in messages:
+            if m["scored"] or m.get("inference") != "other" or m.get("graph_importance") == "high":
+                continue
+            m.update(
+                priority_score=0,
+                importance="low",
+                reason="Bandeja 'Otros' de Outlook (promoción/newsletter).",
+                suggested_action="ignorar",
+                scored=True,
+            )
+            self._remember_score(m)
+            changed = True
+        if changed:
+            self._save_scores()
+
+    async def _score_pending_with_llm(self, messages: list[dict[str, Any]]) -> None:
+        pending = [m for m in messages if not m["scored"]]
+        if not pending or self._llm_router is None:
+            return
+        now = self._now_fn()
+        if self._llm_cooldown_until is not None and now < self._llm_cooldown_until:
+            return  # el LLM acaba de fallar — no martillearlo, se reintenta pasado el cooldown
+
+        for start in range(0, len(pending), _LLM_CHUNK_SIZE):
+            chunk = pending[start:start + _LLM_CHUNK_SIZE]
+            try:
+                await self._enrich_with_llm(chunk)
+            except Exception as exc:
+                self._llm_cooldown_until = now + _LLM_COOLDOWN
+                logger.warning(
+                    "OutlookMailManager | puntuacion LLM fallida ({}) — {} correos sin puntuar, "
+                    "reintento tras {} min",
+                    str(exc)[:120], len(pending) - start, int(_LLM_COOLDOWN.total_seconds() // 60),
+                )
+                break
+            for m in chunk:
+                if m["scored"]:
+                    self._remember_score(m)
+        self._save_scores()
+
+    def _remember_score(self, m: dict[str, Any]) -> None:
+        self._scores[m["message_id"]] = {
+            "priority_score": m["priority_score"],
+            "importance": m["importance"],
+            "reason": m["reason"],
+            "suggested_action": m["suggested_action"],
+        }
+        while len(self._scores) > _MAX_CACHED_SCORES:
+            self._scores.pop(next(iter(self._scores)))
+
+    def _load_scores(self) -> dict[str, dict[str, Any]]:
+        try:
+            if self._scores_path.exists():
+                data = json.loads(self._scores_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            logger.warning("OutlookMailManager | cache de puntuaciones ilegible — se empieza vacia")
+        return {}
+
+    def _save_scores(self) -> None:
+        try:
+            tmp_path = self._scores_path.with_suffix(f".tmp-{uuid.uuid4().hex[:8]}")
+            tmp_path.write_text(json.dumps(self._scores, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(self._scores_path)
+        except Exception:
+            logger.warning("OutlookMailManager | no se pudo guardar la cache de puntuaciones")
 
     async def send_reply(self, message_id: str, body: str) -> dict[str, Any]:
         """Responde DENTRO del hilo real de un correo existente — nunca crea
@@ -258,6 +367,7 @@ class OutlookMailManager:
             m["importance"] = update.get("importance", "low")
             m["reason"] = update.get("reason", "")
             m["suggested_action"] = update.get("suggested_action", "leer")
+            m["scored"] = True
         return messages
 
     @staticmethod
@@ -286,9 +396,12 @@ class OutlookMailManager:
             "received_at": raw.get("receivedDateTime"),
             "unread": not raw.get("isRead", True),
             "graph_importance": raw.get("importance", "normal"),
+            "inference": raw.get("inferenceClassification", "focused"),
             "web_link": raw.get("webLink", ""),
             "priority_score": 0,
             "importance": "low",
             "reason": "",
             "suggested_action": "leer",
+            # False = todavia sin veredicto (no confundir con "puntuado como low")
+            "scored": False,
         }

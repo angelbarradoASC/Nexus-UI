@@ -127,3 +127,46 @@ async def test_not_authenticated_gives_clear_instruction():
     )
 
     assert "Configuración" in response.response
+
+
+@pytest.mark.asyncio
+async def test_unscored_messages_are_not_reported_as_nothing_important():
+    """Bug real (cuota de Groq agotada el 2026-10-01): todos los correos
+    quedaban en importance='low' por defecto y PEPO decia 'no hay nada
+    importante' — una mentira, en realidad no habia podido puntuar nada."""
+    outlook = _FakeOutlook({
+        "status": "success",
+        "messages": [_msg(message_id="m1", importance="low"), _msg(message_id="m2", importance="low")],
+        "scoring": {"scored": 0, "unscored": 2, "degraded": True},
+    })
+    coordinator = _coordinator(outlook=outlook)
+
+    response = await coordinator.handle_chat(
+        ChatRequest(message="tengo algun correo de hoy?"),
+        resolution_override={"skill_id": "mail.outlook_priority", "entities": {}},
+    )
+
+    assert "no puedo decirte" in response.response.lower()
+    assert "2 correos" in response.response
+    assert "no veo nada" not in response.response.lower()
+
+
+@pytest.mark.asyncio
+async def test_partial_scoring_shows_important_ones_and_warns_about_the_rest():
+    outlook = _FakeOutlook({
+        "status": "success",
+        "messages": [
+            _msg(message_id="m1", sender_name="Laura", subject="Propuesta", importance="high", reason="cliente"),
+            _msg(message_id="m2", importance="low"),
+        ],
+        "scoring": {"scored": 1, "unscored": 1, "degraded": True},
+    })
+    coordinator = _coordinator(outlook=outlook)
+
+    response = await coordinator.handle_chat(
+        ChatRequest(message="tengo algun correo de hoy?"),
+        resolution_override={"skill_id": "mail.outlook_priority", "entities": {}},
+    )
+
+    assert "Laura" in response.response
+    assert "1 correo todavía sin puntuar" in response.response

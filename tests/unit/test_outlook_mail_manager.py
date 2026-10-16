@@ -64,11 +64,21 @@ def _cfg(**overrides):
     return SimpleNamespace(**base)
 
 
-def _manager(*, cfg=None, token: str | None = "fake-access-token", transport_handler=None, llm_router=None, monkeypatch=None) -> OutlookMailManager:
+@pytest.fixture(autouse=True)
+def _isolated_scores_cache(tmp_path: Path, monkeypatch):
+    """Ningun test toca la cache real de puntuaciones del usuario
+    (%LOCALAPPDATA%\\Open-Nexus\\config\\outlook_scores.json)."""
+    from nexus.mail import outlook as outlook_module
+
+    monkeypatch.setattr(outlook_module, "_default_scores_path", lambda: tmp_path / "outlook_scores.json")
+
+
+def _manager(*, cfg=None, token: str | None = "fake-access-token", transport_handler=None, llm_router=None, monkeypatch=None, now_fn=None) -> OutlookMailManager:
     manager = OutlookMailManager(
         cfg=cfg or _cfg(),
         llm_router=llm_router,
         http_transport=httpx.MockTransport(transport_handler) if transport_handler else None,
+        now_fn=now_fn,
     )
     if monkeypatch is not None:
         monkeypatch.setattr(manager, "_acquire_token_silent", lambda: token)
@@ -208,3 +218,140 @@ async def test_send_new_posts_to_sendmail_endpoint(monkeypatch):
     result = await manager.send_new(to="destino@example.com", subject="Asunto", body="Cuerpo")
 
     assert result == {"status": "success", "to": "destino@example.com"}
+
+
+# ── Puntuacion: cada correo UNA vez (fallo real visto en vivo, 2026-10-01) ──
+# El watcher consultaba cada 5 min y re-puntuaba los mismos 30 correos con el
+# LLM: 98 consultas, >=29 con todos los niveles en HTTP 429 de Groq, cero
+# avisos en todo el dia. Estos tests fijan el comportamiento corregido.
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def _graph_msg(msg_id: str, *, inference: str = "focused", importance: str = "normal") -> dict:
+    return {
+        "id": msg_id, "subject": f"Asunto {msg_id}",
+        "from": {"emailAddress": {"name": "Remitente", "address": "x@example.com"}},
+        "receivedDateTime": "2026-10-16T10:00:00Z", "bodyPreview": "texto", "isRead": False,
+        "importance": importance, "inferenceClassification": inference,
+    }
+
+
+class _CountingLLM:
+    """Fake de LLM router que registra a que correos se le pregunta."""
+
+    def __init__(self, importance_by_id: dict[str, str] | None = None, fail_times: int = 0):
+        self.calls: list[list[str]] = []
+        self._importance = importance_by_id or {}
+        self._fail = fail_times
+
+    async def call(self, messages):
+        payload = json.loads(messages[1]["content"])
+        self.calls.append([p["message_id"] for p in payload])
+        if self._fail > 0:
+            self._fail -= 1
+            return SimpleNamespace(error="http_429 | nivel=L3-Groq", content="")
+        out = []
+        for p in payload:
+            imp = self._importance.get(p["message_id"], "low")
+            out.append({"message_id": p["message_id"], "score": 80 if imp == "high" else 5,
+                        "importance": imp, "reason": "motivo", "suggested_action": "leer"})
+        return SimpleNamespace(error=None, content=json.dumps(out))
+
+
+def _inbox(holder: dict):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"value": holder["messages"]})
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_already_scored_messages_never_hit_the_llm_again(monkeypatch):
+    inbox = {"messages": [_graph_msg("a"), _graph_msg("b")]}
+    llm = _CountingLLM({"a": "high"})
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch)
+
+    first = await manager.get_priority_messages()
+    second = await manager.get_priority_messages()
+
+    assert len(llm.calls) == 1  # la segunda consulta salio de la cache
+    assert first["scoring"]["degraded"] is False
+    assert {m["message_id"]: m["importance"] for m in second["messages"]} == {"a": "high", "b": "low"}
+
+
+@pytest.mark.asyncio
+async def test_only_new_messages_are_sent_to_the_llm(monkeypatch):
+    inbox = {"messages": [_graph_msg("a")]}
+    llm = _CountingLLM()
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch)
+    await manager.get_priority_messages()
+
+    inbox["messages"] = [_graph_msg("b"), _graph_msg("a")]
+    await manager.get_priority_messages()
+
+    assert llm.calls == [["a"], ["b"]]
+
+
+@pytest.mark.asyncio
+async def test_other_inbox_is_prefiltered_for_free_unless_sender_marked_high(monkeypatch):
+    """Bandeja 'Otros' de Outlook (promos/newsletters) no gasta LLM — salvo
+    que el remitente la marcase de alta importancia."""
+    inbox = {"messages": [
+        _graph_msg("promo", inference="other"),
+        _graph_msg("real", inference="focused"),
+        _graph_msg("urgente_en_otros", inference="other", importance="high"),
+    ]}
+    llm = _CountingLLM()
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch)
+
+    result = await manager.get_priority_messages()
+
+    assert llm.calls == [["real", "urgente_en_otros"]]
+    promo = next(m for m in result["messages"] if m["message_id"] == "promo")
+    assert promo["importance"] == "low" and promo["scored"] is True and "Otros" in promo["reason"]
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_marks_degraded_and_cools_down_instead_of_hammering(monkeypatch):
+    clock = {"t": datetime(2026, 10, 16, 9, 0, tzinfo=timezone.utc)}
+    inbox = {"messages": [_graph_msg("a"), _graph_msg("b")]}
+    llm = _CountingLLM(fail_times=1)
+    manager = _manager(transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch,
+                       now_fn=lambda: clock["t"])
+
+    first = await manager.get_priority_messages()
+    assert first["scoring"] == {"scored": 0, "unscored": 2, "degraded": True}
+    assert all(m["scored"] is False for m in first["messages"])
+
+    clock["t"] += timedelta(minutes=5)  # aun en cooldown: NO se vuelve a llamar
+    await manager.get_priority_messages()
+    assert len(llm.calls) == 1
+
+    clock["t"] += timedelta(minutes=6)  # cooldown cumplido: reintenta y esta vez funciona
+    third = await manager.get_priority_messages()
+    assert len(llm.calls) == 2
+    assert third["scoring"]["degraded"] is False
+
+
+@pytest.mark.asyncio
+async def test_scores_persist_across_manager_instances(monkeypatch):
+    inbox = {"messages": [_graph_msg("a")]}
+    llm1 = _CountingLLM({"a": "high"})
+    await _manager(transport_handler=_inbox(inbox), llm_router=llm1, monkeypatch=monkeypatch).get_priority_messages()
+
+    llm2 = _CountingLLM()
+    result = await _manager(transport_handler=_inbox(inbox), llm_router=llm2, monkeypatch=monkeypatch).get_priority_messages()
+
+    assert llm2.calls == []  # 'reinicio' de la app: sigue sabiendo lo ya puntuado
+    assert result["messages"][0]["importance"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_llm_calls_are_chunked(monkeypatch):
+    inbox = {"messages": [_graph_msg(f"m{i:02d}") for i in range(25)]}
+    llm = _CountingLLM()
+    manager = _manager(cfg=_cfg(outlook_message_limit=30), transport_handler=_inbox(inbox), llm_router=llm, monkeypatch=monkeypatch)
+
+    await manager.get_priority_messages()
+
+    assert [len(c) for c in llm.calls] == [10, 10, 5]

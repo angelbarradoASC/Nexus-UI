@@ -846,14 +846,18 @@ async function loadOutlookPriority() {
             return;
         }
         const messages = result.messages || [];
-        list.innerHTML = messages.length
+        const unscored = (result.scoring && result.scoring.unscored) || 0;
+        const note = unscored
+            ? `<p class="assets-form-note">${unscored} correos sin puntuar todavía (el modelo de IA no responde ahora mismo) — se reintenta solo.</p>`
+            : "";
+        list.innerHTML = note + (messages.length
             ? messages.map((m) => `
                 <div class="info-list-row">
                     <strong>${esc(m.sender_name || m.sender_email || "?")}</strong> — ${esc(m.subject || "(sin asunto)")}
-                    ${m.reason ? `<div class="assets-form-note">${esc(m.reason)}</div>` : ""}
+                    ${m.scored === false ? `<div class="assets-form-note">sin puntuar</div>` : (m.reason ? `<div class="assets-form-note">${esc(m.reason)}</div>` : "")}
                 </div>
             `).join("")
-            : "<p>No hay correos destacados ahora mismo.</p>";
+            : "<p>No hay correos destacados ahora mismo.</p>");
     } catch (error) {
         list.innerHTML = `<p>${esc(error.message || "Error al cargar la bandeja.")}</p>`;
     }

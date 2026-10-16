@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadResults();
     loadPending();
     loadGrants();
+    loadOfferings();
 });
 
 // ── Descomposición y verificación de ida y vuelta ────────────────────────
@@ -696,6 +697,100 @@ async function rejectGrant(slug) {
         toast('Error al rechazar', true);
     } finally {
         loadGrants();
+    }
+}
+
+// ── Catálogo de lo que ofrece Assets — base del análisis de encaje ────────
+
+const OFFERING_TIPO_LABEL = { servicio: 'servicio', producto: 'producto', perfil: 'perfil' };
+
+async function loadOfferings() {
+    try {
+        const res = await fetch(`${API}/offerings`);
+        const data = await res.json();
+        renderOfferings(data.offerings || []);
+    } catch (err) {
+        renderOfferings([]);
+    }
+}
+
+function renderOfferings(offerings) {
+    const list = document.getElementById('offeringsList');
+    if (!list) return;
+    const active = offerings.filter(o => o.activo).length;
+    setEl('offeringsCount', offerings.length ? `${active}/${offerings.length} activas` : '—');
+
+    if (!offerings.length) {
+        list.innerHTML = '<div class="camp-report camp-report--empty">Sin ofertas en el catálogo</div>';
+        return;
+    }
+
+    list.innerHTML = offerings.map(o => {
+        const slug = escapeHtml(o.slug);
+        const senales = (o.senales || []).join('\n');
+        return `<div class="camp-pending-card" data-slug="${slug}">
+            <div class="camp-pending-card-head">
+                <div>
+                    <div class="camp-company-name">${escapeHtml(o.nombre)}</div>
+                    <div class="camp-company-meta">${escapeHtml(OFFERING_TIPO_LABEL[o.tipo] || o.tipo)}${o.normativas && o.normativas.length ? ' · ' + escapeHtml(o.normativas.join(', ')) : ''}</div>
+                </div>
+                <span class="camp-badge camp-badge--${o.activo ? 'running' : 'stopped'}">${o.activo ? 'activa' : 'desactivada'}</span>
+            </div>
+            <div class="camp-pending-findings">${escapeHtml(o.descripcion)}</div>
+            <details>
+                <summary>Señales de encaje y cautelas</summary>
+                <div class="camp-form-row">
+                    <label for="off-senales-${slug}">Encaja cuando (una señal por línea)</label>
+                    <textarea id="off-senales-${slug}" rows="5">${escapeHtml(senales)}</textarea>
+                </div>
+                <div class="camp-form-row">
+                    <label for="off-cautelas-${slug}">No afirmar (cautelas)</label>
+                    <textarea id="off-cautelas-${slug}" rows="3">${escapeHtml(o.cautelas || '')}</textarea>
+                </div>
+                <div class="camp-pending-actions">
+                    <button class="camp-btn camp-btn--secondary" type="button" onclick="toggleOffering('${slug}', ${!o.activo})">${o.activo ? 'Desactivar' : 'Activar'}</button>
+                    <button class="camp-btn camp-btn--primary" type="button" onclick="saveOffering('${slug}')">Guardar</button>
+                </div>
+            </details>
+            ${o.url ? `<div class="camp-company-meta"><a href="${escapeHtml(o.url)}" target="_blank" rel="noopener">Origen en la web</a></div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+async function saveOffering(slug) {
+    try {
+        const current = await (await fetch(`${API}/offerings`)).json();
+        const offering = (current.offerings || []).find(o => o.slug === slug);
+        if (!offering) throw new Error('not_found');
+        const senales = document.getElementById(`off-senales-${slug}`).value
+            .split('\n').map(x => x.trim()).filter(Boolean);
+        const cautelas = document.getElementById(`off-cautelas-${slug}`).value.trim();
+        const res = await fetch(`${API}/offerings/${encodeURIComponent(slug)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...offering, senales, cautelas }),
+        });
+        if (!res.ok) throw new Error('save_failed');
+        toast('Oferta guardada');
+    } catch {
+        toast('Error al guardar la oferta', true);
+    } finally {
+        loadOfferings();
+    }
+}
+
+async function toggleOffering(slug, activo) {
+    try {
+        await fetch(`${API}/offerings/${encodeURIComponent(slug)}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ activo }),
+        });
+        toast(activo ? 'Oferta activada' : 'Oferta desactivada');
+    } catch {
+        toast('Error al cambiar el estado', true);
+    } finally {
+        loadOfferings();
     }
 }
 

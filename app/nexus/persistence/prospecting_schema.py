@@ -91,3 +91,21 @@ def ensure_prospecting_schema(store: SQLiteStore) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS company_offerings(
+              slug TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              tipo TEXT NOT NULL DEFAULT 'servicio',
+              descripcion TEXT NOT NULL DEFAULT '',
+              senales_json TEXT NOT NULL DEFAULT '[]',
+              normativas_json TEXT NOT NULL DEFAULT '[]',
+              sectores_json TEXT NOT NULL DEFAULT '[]',
+              cautelas TEXT NOT NULL DEFAULT '',
+              url TEXT NOT NULL DEFAULT '',
+              activo INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )

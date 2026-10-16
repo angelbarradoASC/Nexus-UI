@@ -23,6 +23,7 @@ from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
 from nexus.prospecting.grants import Grant, GrantsRepository
+from nexus.prospecting.offerings import OfferingsRepository
 from nexus.prospecting.regulations import RegulationsRepository
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
@@ -60,6 +61,7 @@ class ProspectingAgentService:
         opportunity_scorer: OpportunityScorer | None = None,
         grants_repository: GrantsRepository | None = None,
         regulations_repository: RegulationsRepository | None = None,
+        offerings_repository: OfferingsRepository | None = None,
     ) -> None:
         self._cfg = cfg
         self._repository = repository or ProspectingRepository(cfg.prospecting_data_dir)
@@ -137,6 +139,7 @@ class ProspectingAgentService:
         self._verticals = SalesVerticalsRepository(cfg.prospecting_data_dir)
         self._grants = grants_repository or GrantsRepository(cfg.prospecting_data_dir)
         self._regulations = regulations_repository or RegulationsRepository(cfg.prospecting_data_dir)
+        self._offerings = offerings_repository or OfferingsRepository(cfg.prospecting_data_dir)
         self._geocode_cache = GeocodeCache()
 
     @property
@@ -160,6 +163,13 @@ class ProspectingAgentService:
         un criterio indirecto ("empresas afectadas por NIS2") se traduzca a
         una busqueda real en vez del nombre literal de la ley."""
         return self._regulations
+
+    @property
+    def offerings(self) -> OfferingsRepository:
+        """Catalogo de lo que ofrece Assets Consultores y que señales indican
+        encaje — lo que el analisis de una empresa consulta para citar
+        encajes reales en vez de proponer solo mejoras de web."""
+        return self._offerings
 
     @property
     def local_llm(self) -> LocalLLMClient:

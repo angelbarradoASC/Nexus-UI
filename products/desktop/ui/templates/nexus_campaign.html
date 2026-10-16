@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20260930b">
+    <link rel="stylesheet" href="/static/css/nexus_campaign.css?v=20261016a">
 </head>
 <body>
     <main class="workspace workspace-campaign">
@@ -226,6 +226,26 @@
                 </div>
             </section>
 
+            <!-- ── Panel: catálogo de lo que ofrece Assets — el análisis de una
+                 empresa busca encaje SOLO contra esto, nunca inventa servicios ── -->
+            <section class="campaign-panel campaign-offerings-panel">
+                <div class="camp-header">
+                    <div>
+                        <p class="eyebrow eyebrow-tight">Encaje con nosotros</p>
+                        <h2>Qué ofrece Assets Consultores</h2>
+                    </div>
+                    <span id="offeringsCount" class="camp-badge camp-badge--unknown">—</span>
+                </div>
+                <div class="campaign-panel-body">
+                    <p class="camp-decompose-hint">
+                        Extraído de assetsconsultores.es. Cada oferta lleva sus <em>señales de encaje</em>
+                        y sus <em>cautelas</em> (cifras que la web declara pero no respalda con clientes):
+                        el análisis cita solo lo que está aquí y nunca presenta una cautela como un hecho.
+                    </p>
+                    <div id="offeringsList" class="camp-pending-list">Cargando…</div>
+                </div>
+            </section>
+
             <!-- ── Panel inferior: resultados de la última ejecución ─────── -->
             <section class="campaign-panel campaign-results-panel">
                 <div class="camp-header">
@@ -258,6 +278,6 @@
 
     <div id="toast" class="camp-toast" aria-live="polite"></div>
 
-    <script src="/static/js/nexus_campaign.js?v=20260930a"></script>
+    <script src="/static/js/nexus_campaign.js?v=20261016b"></script>
 </body>
 </html>

@@ -19,6 +19,8 @@ POST /campaign/decompose-verify — descompone una peticion en lenguaje
                                   natural y la verifica de ida y vuelta
                                   contra el LLM local (ver
                                   nexus.prospecting.campaign_decompose)
+GET/PUT/DELETE /campaign/offerings[/{slug}] y POST .../toggle — catalogo de
+                                  lo que ofrece Assets (encaje del analisis)
 """
 
 from __future__ import annotations
@@ -241,4 +243,62 @@ async def reject_grant(
             status_code=400,
         )
     prospecting.grants.delete(slug)
+    return {"status": "ok", "slug": slug}
+
+
+# ── Catalogo de lo que ofrece Assets Consultores ─────────────────────────────
+# Lo que el analisis de una empresa consulta para buscar ENCAJE real — ver
+# nexus.prospecting.offerings. Curado a mano, editable aqui y en Configuracion.
+
+class _OfferingBody(BaseModel):
+    nombre: str
+    tipo: str = "servicio"
+    descripcion: str = ""
+    senales: list[str] = []
+    normativas: list[str] = []
+    sectores: list[str] = []
+    cautelas: str = ""
+    url: str = ""
+    activo: bool = True
+
+
+@router.get("/offerings")
+async def list_offerings(
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    offerings = prospecting.offerings.list_all()
+    return {"status": "ok", "total": len(offerings), "offerings": [o.to_dict() for o in offerings]}
+
+
+@router.put("/offerings/{slug}")
+async def upsert_offering(
+    slug: str,
+    body: _OfferingBody,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    offering = prospecting.offerings.upsert(slug=slug.strip(), **body.model_dump())
+    return {"status": "ok", "offering": offering.to_dict()}
+
+
+@router.post("/offerings/{slug}/toggle")
+async def toggle_offering(
+    slug: str,
+    request: Request,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    body = await request.json()
+    offering = prospecting.offerings.set_activo(slug, bool(body.get("activo", True)))
+    if offering is None:
+        return JSONResponse({"status": "not_found", "slug": slug}, status_code=404)
+    return {"status": "ok", "offering": offering.to_dict()}
+
+
+@router.delete("/offerings/{slug}")
+async def delete_offering(
+    slug: str,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    if prospecting.offerings.get(slug) is None:
+        return JSONResponse({"status": "not_found", "slug": slug}, status_code=404)
+    prospecting.offerings.delete(slug)
     return {"status": "ok", "slug": slug}

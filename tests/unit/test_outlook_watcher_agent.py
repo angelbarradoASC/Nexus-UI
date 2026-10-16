@@ -155,3 +155,42 @@ def test_notified_ids_persist_to_real_json_file(tmp_path, monkeypatch):
     assert notified_path.exists()
     saved = json.loads(notified_path.read_text(encoding="utf-8"))
     assert set(saved) == {"msg-1", "msg-2"}
+
+
+def test_tick_groups_messages_of_the_same_conversation_into_one_alert(tmp_path, monkeypatch):
+    """Bug real visto en vivo: 5 'Re: FinOps Engineer position' del mismo
+    hilo abrian 5 conversaciones de PEPO y 5 notificaciones a la vez."""
+    messages = []
+    for i in range(5):
+        m = _message(f"msg-{i}", sender="Nagesh", subject="Re: FinOps Engineer position")
+        m["conversation_id"] = "conv-finops"
+        m["received_at"] = f"2026-10-16T10:0{i}:00Z"
+        messages.append(m)
+    post_log: list = []
+    notify_log: list = []
+    agent = _agent(tmp_path, get_responses=[_FakeResponse(_priority_payload(messages))],
+                   post_log=post_log, notify_log=notify_log, monkeypatch=monkeypatch)
+
+    agent._tick()
+
+    assert len(notify_log) == 1
+    assert len(post_log) == 1
+    assert "5 correos" in post_log[0][1]["first_message"]
+    assert "FinOps" in post_log[0][1]["first_message"]
+    assert all(f"msg-{i}" in agent._notified_ids for i in range(5))
+
+
+def test_tick_alerts_once_per_distinct_conversation(tmp_path, monkeypatch):
+    a = _message("a1", sender="Laura", subject="Propuesta")
+    a["conversation_id"] = "conv-a"
+    b = _message("b1", sender="Pedro", subject="Factura")
+    b["conversation_id"] = "conv-b"
+    post_log: list = []
+    notify_log: list = []
+    agent = _agent(tmp_path, get_responses=[_FakeResponse(_priority_payload([a, b]))],
+                   post_log=post_log, notify_log=notify_log, monkeypatch=monkeypatch)
+
+    agent._tick()
+
+    assert len(notify_log) == 2
+    assert len(post_log) == 2

@@ -103,34 +103,56 @@ class OutlookWatcherAgent:
         if payload.get("status") != "success":
             return
 
+        # Un aviso por conversacion, no por correo: un hilo con varias
+        # respuestas nuevas (visto en vivo: 5 "Re: FinOps Engineer position"
+        # a la vez) abria 5 conversaciones de PEPO y 5 notificaciones.
+        groups: dict[str, list[dict]] = {}
         for message in payload.get("messages", []):
-            self._maybe_notify(message)
+            message_id = message.get("message_id")
+            if not message_id or message_id in self._notified_ids:
+                continue
+            if not self._is_important_enough(message):
+                continue
+            key = message.get("conversation_id") or message_id
+            groups.setdefault(key, []).append(message)
 
-    def _maybe_notify(self, message: dict) -> None:
-        message_id = message.get("message_id")
-        if not message_id or message_id in self._notified_ids:
-            return
-        if not self._is_important_enough(message):
-            return
+        for group in groups.values():
+            self._notify_group(group)
 
-        sender = message.get("sender_name") or message.get("sender_email") or "alguien"
-        subject = message.get("subject") or "(sin asunto)"
-        reason = message.get("reason") or ""
+    def _notify_group(self, group: list[dict]) -> None:
+        # Representante: el mas reciente del hilo; el motivo, el del de mayor puntuacion.
+        latest = max(group, key=lambda m: m.get("received_at") or "")
+        best = max(group, key=lambda m: m.get("priority_score") or 0)
 
-        pepo_message = (
-            f"Te ha llegado un correo de {sender} sobre \"{subject}\" que parece importante"
-            + (f": {reason}" if reason else ".")
-            + " ¿Quieres que le eche un vistazo o te ayude a responder?"
-        )
+        sender = latest.get("sender_name") or latest.get("sender_email") or "alguien"
+        subject = latest.get("subject") or "(sin asunto)"
+        reason = best.get("reason") or ""
+
+        if len(group) == 1:
+            pepo_message = (
+                f"Te ha llegado un correo de {sender} sobre \"{subject}\" que parece importante"
+                + (f": {reason}" if reason else ".")
+                + " ¿Quieres que le eche un vistazo o te ayude a responder?"
+            )
+            toast = f"{sender}: {subject}"
+        else:
+            pepo_message = (
+                f"Tienes {len(group)} correos nuevos en la conversación \"{subject}\" "
+                f"(el último de {sender}) que parecen importantes"
+                + (f": {reason}" if reason else ".")
+                + " ¿Quieres que los revise y te resuma en qué punto está?"
+            )
+            toast = f"{len(group)} correos nuevos — {subject}"
 
         self._create_proactive_conversation(pepo_message)
         if self._notify_fn is not None:
             try:
-                self._notify_fn(f"{sender}: {subject}", "PEPO")
+                self._notify_fn(toast, "PEPO")
             except Exception as e:
                 logger.error(f"OutlookWatcherAgent: fallo mostrando notificacion: {e}")
 
-        self._mark_notified(message_id)
+        for message in group:
+            self._mark_notified(message["message_id"])
 
     def _is_important_enough(self, message: dict) -> bool:
         order = {"low": 0, "medium": 1, "high": 2}

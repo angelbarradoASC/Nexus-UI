@@ -36,7 +36,7 @@ from nexus.utils.llm_json import strip_llm_fences
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _SCOPES = ["Mail.Read", "Mail.Send"]
-_MESSAGE_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance,inferenceClassification,webLink"
+_MESSAGE_FIELDS = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance,inferenceClassification,conversationId,webLink"
 
 # Correos por llamada al LLM, y cuanto se deja descansar al LLM tras un fallo
 # (429/cuota). Visto en vivo el 2026-10-01: 98 consultas en un dia, >=29 con
@@ -414,6 +414,7 @@ class OutlookMailManager:
             "unread": not raw.get("isRead", True),
             "graph_importance": raw.get("importance", "normal"),
             "inference": raw.get("inferenceClassification", "focused"),
+            "conversation_id": raw.get("conversationId") or "",
             "web_link": raw.get("webLink", ""),
             "priority_score": 0,
             "importance": "low",

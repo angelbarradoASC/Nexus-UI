@@ -1,6 +1,6 @@
 # Plan — PEPO "modo código" (agente local tipo Cursor)
 
-Estado: **propuesta, pendiente de aprobación** · Fecha: 2026-10-19 · Rama de trabajo: `feature/pepo-code-mode` (desde `master`)
+Estado: **Fases 0 y 1 hechas (2026-10-19); bloqueado por la cuota del proveedor de IA** (ver sección 8) · Rama de trabajo: `feature/pepo-code-mode` (desde `master`)
 
 ## 1. Objetivo
 
@@ -105,3 +105,22 @@ Cada fase termina verificada **en la app de escritorio real** (no en navegador) 
 2. **Comandos:** ¿aprobación en cada `run_command` (recomendado al principio) o desde ya con lista de permitidos (p. ej. `pytest`, `git diff`)?
 3. **Dónde vive:** interruptor dentro del chat de PEPO (recomendado) o página aparte.
 4. **Primer workspace:** `C:\DEV\Nexus-UI` (pruebas sobre sí mismo, empezando en solo lectura) o un repositorio de pruebas.
+
+## 8. Registro de avance (2026-10-19)
+
+**Hecho y verificado**
+- **Fase 0** (`77b3ca1`): `ConfirmableAgent` con lecturas en lote, reanudar tras ejecutar, `reject()` y parámetros de LLM configurables, apagados por defecto. 804 tests en verde, los de RemoteOps/SelfConfig/MCP sin tocar.
+- **Fase 1** (`1603f93`, `8b86dbd`): sandbox (`workspace.py`; probado con una junction real de Windows), herramientas de solo lectura, `CodeAgent`, carpetas autorizadas (`code_settings.json`, API `/api/desktop/code/*`, panel en Configuración), interruptor en el chat de PEPO, cableado `mode="code"` sin clasificador. 953 tests en verde.
+- Verificado en la app real por API: carpeta no autorizada rechazada sin gastar LLM; pregunta "lista las carpetas de primer nivel y para qué sirve cada una" respondida correctamente con citas de ruta (124 s).
+
+**Lo que NO está verificado:** el aspecto del interruptor y del panel en la ventana nativa. Se pidió control de pantalla y el permiso del proceso `Python 3.11` (dueño de la ventana al arrancar desde fuente) figura denegado; solo se comprobó por HTTP que el servidor sirve la interfaz nueva.
+
+**Hallazgo bloqueante: la cuota del proveedor.** La cuenta de Groq medida tiene **8.000 tokens/minuto** (cabecera `x-ratelimit-limit-tokens`). Un agente reenvía todo el contexto en cada paso: 1,5 k tokens fijos (prompt + herramientas) más los resultados de lectura. En vivo:
+- Sin control, el bucle recibía HTTP 429 en el segundo paso.
+- Con el limitador (`pacer.py`) cada paso espera ~1 minuto: una pregunta de 3 pasos tarda ~2 min, y una de 5+ pasos agota el límite de 4 min y se rinde con un mensaje claro (visto con "¿dónde se decide si el historial pasa al clasificador?", 183 s sin respuesta).
+- `qwen3:8b` en 192.168.68.150 hace bien el tool calling pero tarda ~72 s por paso (sin GPU útil): tampoco sirve para un bucle interactivo.
+
+**Consecuencia:** el diseño es correcto, pero con 8.000 tokens/min el agente no es interactivo. Antes de seguir con edición/ejecución (fases 2 y 3, que añaden más pasos por tarea) hay que resolver la cuota. Opciones: (a) plan de pago de Groq con más tokens/min (después, subir el valor en Configuración › Modo código; el contexto y el ritmo se ajustan solos); (b) otro proveedor para el nivel del agente; (c) un modelo local con GPU real. Sin esto, las fases 2–3 funcionarían pero a ~1 paso por minuto.
+
+**Mejoras pendientes sin depender de la cuota:** al agotar el tiempo, devolver lo averiguado hasta ese momento en vez de solo el aviso; progreso visible en la UI (fase 4).
+

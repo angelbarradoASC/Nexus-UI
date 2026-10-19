@@ -21,6 +21,7 @@ POST /campaign/decompose-verify — descompone una peticion en lenguaje
                                   nexus.prospecting.campaign_decompose)
 GET/PUT/DELETE /campaign/offerings[/{slug}] y POST .../toggle — catalogo de
                                   lo que ofrece Assets (encaje del analisis)
+POST /campaign/analyze-fit     — analiza UNA empresa y busca su encaje con Assets
 """
 
 from __future__ import annotations
@@ -302,3 +303,28 @@ async def delete_offering(
         return JSONResponse({"status": "not_found", "slug": slug}, status_code=404)
     prospecting.offerings.delete(slug)
     return {"status": "ok", "slug": slug}
+
+
+# ── Analisis de encaje de UNA empresa ────────────────────────────────────────
+
+class _AnalyzeFitBody(BaseModel):
+    website: str
+    name: str = ""
+    extra_context: str = ""
+
+
+@router.post("/analyze-fit")
+async def analyze_company_fit(
+    body: _AnalyzeFitBody,
+    prospecting: ProspectingAgentService = Depends(get_prospecting_manager),
+) -> dict[str, Any]:
+    """Analiza una empresa concreta (web, auditoria, perfil) y busca su
+    encaje con lo que ofrece Assets — ver ProspectingAgentService.
+    analyze_company_fit. extra_context es informacion ya verificada por una
+    persona (registro, noticias...) que se suma a lo que sale de la web."""
+    result = await prospecting.analyze_company_fit(
+        website=body.website, name=body.name, extra_context=body.extra_context,
+    )
+    if result.get("status") == "error":
+        return JSONResponse(result, status_code=400)
+    return result

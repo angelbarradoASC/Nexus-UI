@@ -23,8 +23,8 @@ from nexus.prospecting.llm import LocalLLMClient, LocalLLMSettings
 from nexus.api.schemas.prospecting import ProspectingRunRequest
 from nexus.prospecting.models import ProspectingBrief
 from nexus.prospecting.grants import Grant, GrantsRepository
-from nexus.prospecting.offerings import OfferingsRepository
-from nexus.prospecting.regulations import RegulationsRepository
+from nexus.prospecting.offerings import OfferingsRepository, build_offerings_block
+from nexus.prospecting.regulations import RegulationsRepository, build_regulations_block
 from nexus.prospecting.sales_verticals import SalesVertical, SalesVerticalsRepository
 from nexus.prospecting.orchestrator import ProspectingPromptOrchestrator
 from nexus.prospecting.api_budget import BraveApiBudget, BudgetExceededError, PlacesApiBudget
@@ -312,6 +312,57 @@ class ProspectingAgentService:
         if run is None:
             return {"status": "not_found", "run_id": run_id}
         return run
+
+    async def web_search(
+        self,
+        query: str,
+        *,
+        count: int = 8,
+        freshness: str | None = None,
+        country: str = "es",
+        language: str = "es",
+    ) -> dict[str, Any]:
+        """Busqueda web puntual para el chat de PEPO (no es una corrida de
+        prospeccion). Brave si esta configurado y queda presupuesto — el
+        MISMO contador mensual que usa la prospeccion, para no gastar cuota
+        a escondidas —; si no, DuckDuckGo como respaldo gratuito.
+
+        Devuelve {"provider", "results": [{title,url,description,age}], "note"}.
+        `note` explica un respaldo (Brave sin presupuesto o caido) para que
+        el chat sea honesto sobre de donde salen los datos."""
+        note = ""
+        if self._brave.enabled:
+            try:
+                self._brave_budget.check_or_raise()
+                payload = await self._brave.search(
+                    run_id="chat-search",
+                    query=query,
+                    country=country,
+                    language=language,
+                    count=count,
+                    **({"freshness": freshness} if freshness else {}),
+                )
+                await self._brave_budget.increment(1)
+                return {"provider": "brave", "results": payload.get("results", []), "note": ""}
+            except BudgetExceededError as exc:
+                note = f"{exc} Uso DuckDuckGo como respaldo."
+            except Exception as exc:  # red caida, 4xx/5xx de Brave...
+                _logger.warning(f"web_search: Brave fallo ({exc}); se usa DuckDuckGo")
+                note = "Brave no respondió; uso DuckDuckGo como respaldo."
+        else:
+            note = "Brave no está configurado; uso DuckDuckGo."
+
+        payload = await self._ddg.search(run_id="", query=query, max_results=count)
+        results = [
+            {
+                "title": str(item.get("title") or "").strip(),
+                "url": str(item.get("url") or item.get("href") or "").strip(),
+                "description": str(item.get("description") or item.get("body") or "").strip(),
+                "age": item.get("age") or item.get("date"),
+            }
+            for item in payload.get("results", [])
+        ]
+        return {"provider": "ddg", "results": results, "note": note}
 
     async def quick_probe(self, *, city: str, vertical: str) -> dict:
         """3-result DDG probe to check if a city/vertical combination has real results."""
@@ -1040,6 +1091,15 @@ class ProspectingAgentService:
                 extracted["grant_matches"] = grant_matches
                 self._log(run, f"Ayudas encajadas: {cname} | {', '.join(m['nombre'] for m in grant_matches)}")
 
+            vertical = self._verticals.get(brief.vertical) or self._verticals.get_fallback()
+            if vertical.discovery_config.get("offerings_fit"):
+                assets_fit = await self._assess_assets_fit(
+                    extracted=extracted, business_profile=business_profile, technical_audit=technical_audit,
+                )
+                extracted["assets_fit"] = assets_fit
+                if assets_fit["matches"]:
+                    self._log(run, f"Encaje con Assets: {cname} | {', '.join(m['nombre'] for m in assets_fit['matches'])}")
+
     async def _classify_grant_fit(
         self,
         *,
@@ -1097,6 +1157,119 @@ class ProspectingAgentService:
                 "importe_estimado": str(m.get("importe_estimado") or "").strip(),
             })
         return matches
+
+    async def _assess_assets_fit(
+        self,
+        *,
+        extracted: dict[str, Any],
+        business_profile: dict[str, Any],
+        technical_audit: dict[str, Any] | None,
+        extra_context: str = "",
+    ) -> dict[str, Any]:
+        """Busca el ENCAJE entre la empresa analizada y lo que de verdad
+        ofrece Assets Consultores (OfferingsRepository). Pedido explicito del
+        usuario: la campaña tiene que analizar una empresa y buscar el encaje
+        con nosotros, no solo proponer mejoras de web.
+
+        Guardarrailes (mismo espiritu que _classify_grant_fit y _draft_proposal):
+        - el LLM solo puede elegir slugs reales y activos del catalogo
+        - cada encaje debe traer una evidencia que cite algo que de verdad
+          esta en los datos proporcionados — si no, se descarta
+        - el bloque del catalogo incluye las cautelas de cada oferta (cifras
+          que la web declara sin cliente nombrado) para que no se citen
+        """
+        empty: dict[str, Any] = {"matches": [], "sin_encaje": True, "resumen": ""}
+        if not self._llm.enabled:
+            return empty
+        offerings = [o for o in self._offerings.list_active() if o.tipo != "perfil"]
+        if not offerings:
+            return empty
+
+        findings = (technical_audit or {}).get("findings") or []
+        company_block = (
+            f"Nombre: {extracted.get('name', '')}\n"
+            f"Web: {extracted.get('website', '')}\n"
+            f"A que se dedica: {business_profile.get('what_they_do', '')}\n"
+            f"Publico objetivo: {business_profile.get('target_audience', '')}\n"
+            f"Madurez digital: {business_profile.get('digital_maturity', '')}\n"
+            f"Fricciones: {business_profile.get('friction_points', [])}\n"
+            f"Oportunidades de mejora: {business_profile.get('improvement_opportunities', [])}\n"
+            f"Hallazgos tecnicos: {findings}\n"
+            f"Empleados: {self._extract_employee_hint(extracted)}\n"
+            f"Texto de su web: {' '.join(str(n) for n in extracted.get('notes', []))[:1500]}\n"
+            + (f"Informacion adicional aportada (verificada por una persona):\n{extra_context}\n" if extra_context.strip() else "")
+        )
+        try:
+            result = await self._llm.extract_json(
+                system_prompt=resolve_prompt_sync("prospecting.assets_fit"),
+                user_prompt=(
+                    f"Catalogo de lo que ofrece la consultora:\n{build_offerings_block(offerings)}\n\n"
+                    f"Normativas reales:\n{build_regulations_block(self._regulations.list_active())}\n\n"
+                    f"Empresa:\n{company_block}"
+                ),
+                schema_hint={"matches": [{"slug": "", "evidencia": "", "confianza": "media"}], "sin_encaje": False, "resumen": ""},
+            )
+        except Exception:
+            return empty
+        if not result:
+            return empty
+
+        valid = {o.slug: o for o in offerings}
+        evidence_blob = _normalize_text(company_block)
+        matches: list[dict[str, Any]] = []
+        for raw in (result.get("matches") or [])[:4]:
+            if not isinstance(raw, dict):
+                continue
+            offering = valid.get(str(raw.get("slug") or ""))
+            evidencia = str(raw.get("evidencia") or "").strip()
+            if offering is None or not evidencia:
+                continue
+            tokens = [tok for tok in _normalize_text(evidencia).split() if len(tok) > 4]
+            if not any(tok in evidence_blob for tok in tokens):
+                continue
+            confianza = str(raw.get("confianza") or "").strip().lower()
+            matches.append({
+                "slug": offering.slug,
+                "nombre": offering.nombre,
+                "evidencia": evidencia,
+                "confianza": confianza if confianza in {"alta", "media", "baja"} else "baja",
+            })
+        return {
+            "matches": matches,
+            "sin_encaje": not matches,
+            "resumen": str(result.get("resumen") or "").strip(),
+        }
+
+    async def analyze_company_fit(self, *, website: str, name: str = "", extra_context: str = "") -> dict[str, Any]:
+        """Analiza UNA empresa concreta (sin lanzar un run de descubrimiento):
+        extrae su web, audita, perfila y busca el encaje con Assets. Sirve para
+        probar el analisis sobre una empresa ya conocida y comparte la misma
+        logica que usa la campaña para cada candidato."""
+        site = self._normalize_url(website)
+        if not site:
+            return {"status": "error", "error": "Falta la web de la empresa."}
+        extracted_raw = await self._extractor.extract(url=site, link_hints=None, quality_signal_tokens=None)
+        extracted = {
+            "name": name.strip() or extracted_raw.get("name") or self._extract_domain(site),
+            "website": extracted_raw.get("website") or site,
+            "domain": extracted_raw.get("domain") or self._extract_domain(site),
+            "notes": extracted_raw.get("notes", []),
+            "quality_signals": extracted_raw.get("quality_signals", []),
+        }
+        brief = ProspectingBrief(vertical="custom")
+        technical_audit = await self._run_technical_audit(extracted)
+        business_profile = await self._build_business_profile(extracted, technical_audit, brief)
+        assets_fit = await self._assess_assets_fit(
+            extracted=extracted, business_profile=business_profile,
+            technical_audit=technical_audit, extra_context=extra_context,
+        )
+        return {
+            "status": "ok",
+            "company": {"name": extracted["name"], "website": extracted["website"], "domain": extracted["domain"]},
+            "business_profile": business_profile,
+            "technical_findings": (technical_audit or {}).get("findings") or [],
+            "assets_fit": assets_fit,
+        }
 
     @staticmethod
     def _extract_employee_hint(extracted: dict[str, Any]) -> str:

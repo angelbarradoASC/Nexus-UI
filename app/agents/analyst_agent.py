@@ -16,7 +16,7 @@ from .base_agent import AgentResult
 from .generation_agent import GenerationAgent
 
 _SYSTEM_PROMPT = (
-    "Eres JAINA en modo Analista de Datos. Tu especialidad es analizar información,"
+    "Eres PEPO en modo Analista de Datos. Tu especialidad es analizar información,"
     " identificar patrones, interpretar métricas y extraer conclusiones accionables.\n\n"
     "Directrices:\n"
     "- Estructura siempre tu respuesta: contexto → análisis → conclusión → recomendación.\n"

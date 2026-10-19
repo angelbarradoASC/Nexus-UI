@@ -304,7 +304,22 @@ class DesktopSkillRouter:
             )
         ):
             return "sales.prospecting", 0.9, "La peticion busca localizar empresas/negocios — encaja con prospeccion comercial (Sales)."
-        if any(term in lowered for term in ("busca", "precio", "noticias", "documentacion", "version reciente", "ultima version", "hoy")):
+        # web.busqueda ahora hace una busqueda real (Brave de pago, con presupuesto
+        # mensual): un "hoy" suelto ("que tal estas hoy", "correo de hoy") NO basta.
+        # "hoy" solo cuenta junto a algo que de verdad se consulta fuera.
+        if any(
+            term in lowered
+            for term in (
+                "busca", "precio", "noticias", "documentacion", "version reciente", "ultima version",
+                "trending", "tendencias", "cotizacion", "cotización",
+            )
+        ) or (
+            "hoy" in lowered
+            and any(
+                term in lowered
+                for term in ("que pasa", "qué pasa", "que ha pasado", "qué ha pasado", "quien gano", "quién ganó", "clima", "el tiempo en")
+            )
+        ):
             return "web.busqueda", 0.84, "La peticion requiere informacion externa o potencialmente reciente."
         return None, 0.0, ""
 

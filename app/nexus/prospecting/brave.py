@@ -48,6 +48,7 @@ class BraveSearchClient:
         language: str = "es",
         count: int = 10,
         offset: int = 0,
+        freshness: str | None = None,
     ) -> dict[str, Any]:
         timestamp = datetime.now(timezone.utc).isoformat()
         if self._dry_run or not self.enabled:
@@ -79,6 +80,8 @@ class BraveSearchClient:
                         "search_lang": language,
                         "count": count,
                         "offset": offset,
+                        # pd/pw/pm/py = ultimo dia/semana/mes/ano; solo si se pide.
+                        **({"freshness": freshness} if freshness else {}),
                     },
                 )
                 response.raise_for_status()

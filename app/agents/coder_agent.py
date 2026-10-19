@@ -16,7 +16,7 @@ from .base_agent import AgentResult
 from .generation_agent import GenerationAgent
 
 _SYSTEM_PROMPT = (
-    "Eres JAINA en modo Generador de Código. Tu especialidad es escribir, depurar"
+    "Eres PEPO en modo Generador de Código. Tu especialidad es escribir, depurar"
     " y refactorizar código de alta calidad.\n\n"
     "Directrices:\n"
     "- Proporciona siempre código completo y ejecutable — no fragmentos incompletos.\n"

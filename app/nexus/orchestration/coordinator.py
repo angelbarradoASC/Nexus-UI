@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -262,6 +263,8 @@ class NexusCoordinator:
             return await self._handle_sales_prospecting_chat(payload, audit_id)
         if skill_id == "campaign.qualify" and self._campaign_decomposer is not None:
             return await self._handle_campaign_decompose_chat(payload, audit_id)
+        if skill_id == "web.busqueda" and self._prospecting is not None:
+            return await self._handle_web_search_chat(payload, audit_id)
         if skill_id == "mail.outlook_priority" and self._outlook is not None:
             return await self._handle_outlook_priority_chat(payload, audit_id)
         if skill_id == "mail.outlook_reply" and self._outlook is not None and self._outlook_reply_agent is not None:
@@ -529,6 +532,88 @@ class NexusCoordinator:
         return "\n".join(lines)
 
     # ── Outlook (Microsoft Graph) ────────────────────────────────────────────
+
+    _WEB_FRESH_TERMS = (
+        "hoy", "ahora", "noticias", "última hora", "ultima hora", "trending", "tendencia",
+        "reciente", "actual", "esta semana", "ayer",
+    )
+
+    async def _handle_web_search_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
+        """Pregunta que necesita internet: busca de verdad (Brave, con
+        DuckDuckGo de respaldo) y responde solo con lo encontrado. Antes
+        web.busqueda no tenia handler y el LLM contestaba "no tengo acceso a
+        informacion en tiempo real" sin haber buscado nada."""
+        query = payload.message.strip()
+        lowered = query.lower()
+        freshness = "pw" if any(term in lowered for term in self._WEB_FRESH_TERMS) else None
+
+        search: dict[str, Any] = {"provider": "", "results": [], "note": ""}
+        try:
+            search = await self._prospecting.web_search(query, count=8, freshness=freshness)
+        except Exception:
+            logger.exception("web.busqueda | fallo buscando en la web")
+
+        results = [r for r in search.get("results", []) if r.get("url")]
+        if not results:
+            response = (
+                "He intentado buscarlo en internet pero no me han llegado resultados "
+                "(el buscador no respondió o no encontró nada). Prueba a reformular la pregunta "
+                "o inténtalo de nuevo en un momento."
+            )
+            status = "degraded"
+        else:
+            answer = await self._synthesize_web_answer(query, results)
+            sources = "\n".join(f"- {r.get('title') or r['url']}: {r['url']}" for r in results[:4])
+            note = f"\n\n_{search['note']}_" if search.get("note") else ""
+            response = f"{answer}\n\n**Fuentes consultadas ({search.get('provider')}):**\n{sources}{note}"
+            status = "accepted"
+
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "web.busqueda",
+                "search_provider": search.get("provider"),
+                "results": len(results),
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status=status, response=response, agent="web-search", flow="chat", audit_id=audit_id)
+
+    async def _synthesize_web_answer(self, question: str, results: list[dict[str, Any]]) -> str:
+        fragments = "\n\n".join(
+            f"[{i + 1}] {r.get('title', '')}\nURL: {r.get('url', '')}"
+            + (f"\nAntigüedad: {r['age']}" if r.get("age") else "")
+            + f"\n{r.get('description', '')}"
+            for i, r in enumerate(results)
+        )
+        if self._llm_router is None:
+            return "Esto es lo que he encontrado:\n\n" + fragments
+
+        today = datetime.now().strftime("%d/%m/%Y")
+        try:
+            response = await self._llm_router.call(
+                [
+                    {"role": "system", "content": resolve_prompt_sync("pepo.web_answer")},
+                    {
+                        "role": "user",
+                        "content": f"Fecha de hoy: {today}\nPREGUNTA: {question}\n\nRESULTADOS:\n{fragments}",
+                    },
+                ],
+                max_tokens=900,
+                temperature=0.2,
+            )
+        except Exception:
+            logger.exception("web.busqueda | fallo sintetizando con LLM")
+            return "He encontrado resultados pero no he podido resumirlos ahora mismo. Estos son los principales:"
+        if response.error or not response.content.strip():
+            return "He encontrado resultados pero no he podido resumirlos ahora mismo. Estos son los principales:"
+        return response.content.strip()
 
     async def _handle_outlook_priority_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
         """Skill de solo lectura — lista la bandeja de entrada puntuada por

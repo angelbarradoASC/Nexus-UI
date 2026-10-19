@@ -20,7 +20,9 @@ from .base_agent import AgentResult, BaseAgent
 from .utils.llm_parser import clean_llm_response
 
 _SYSTEM_PROMPT = (
-    "Eres JAINA, un asistente de IA útil y conciso. "
+    "Eres PEPO, el agente personal de Nexus-UI (parte del ecosistema JAINA). "
+    "Si te preguntan quién eres, respondes que eres PEPO. "
+    "Eres un asistente útil y conciso. "
     "Responde siempre en el idioma del usuario. "
     "Si no conoces algo con certeza, dilo claramente."
 )

@@ -110,7 +110,7 @@ Cada fase termina verificada **en la app de escritorio real** (no en navegador) 
 
 **Hecho y verificado**
 - **Fase 0** (`77b3ca1`): `ConfirmableAgent` con lecturas en lote, reanudar tras ejecutar, `reject()` y parámetros de LLM configurables, apagados por defecto. 804 tests en verde, los de RemoteOps/SelfConfig/MCP sin tocar.
-- **Fase 1** (`1603f93`, `8b86dbd`): sandbox (`workspace.py`; probado con una junction real de Windows), herramientas de solo lectura, `CodeAgent`, carpetas autorizadas (`code_settings.json`, API `/api/desktop/code/*`, panel en Configuración), interruptor en el chat de PEPO, cableado `mode="code"` sin clasificador. 953 tests en verde.
+- **Fase 1** (`e35b720`, `8b86dbd`): sandbox (`workspace.py`; probado con una junction real de Windows), herramientas de solo lectura, `CodeAgent`, carpetas autorizadas (`code_settings.json`, API `/api/desktop/code/*`, panel en Configuración), interruptor en el chat de PEPO, cableado `mode="code"` sin clasificador. 953 tests en verde.
 - Verificado en la app real por API: carpeta no autorizada rechazada sin gastar LLM; pregunta "lista las carpetas de primer nivel y para qué sirve cada una" respondida correctamente con citas de ruta (124 s).
 
 **Lo que NO está verificado:** el aspecto del interruptor y del panel en la ventana nativa. Se pidió control de pantalla y el permiso del proceso `Python 3.11` (dueño de la ventana al arrancar desde fuente) figura denegado; solo se comprobó por HTTP que el servidor sirve la interfaz nueva.

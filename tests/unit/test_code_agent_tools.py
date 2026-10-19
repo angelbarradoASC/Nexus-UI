@@ -53,9 +53,10 @@ def test_read_file_truncates_long_files_and_says_how_to_continue(ws):
 
     out = tools.read_file(ws, "largo.txt")
 
-    assert "lineas 1-400" in out
-    assert "linea 400" in out and "linea 401" not in out
-    assert "start_line=401" in out
+    limit = tools.READ_MAX_LINES
+    assert f"lineas 1-{limit}" in out
+    assert f"linea {limit}" in out and f"linea {limit + 1}" not in out
+    assert f"start_line={limit + 1}" in out
 
 
 def test_read_file_past_the_end_is_explained(ws):

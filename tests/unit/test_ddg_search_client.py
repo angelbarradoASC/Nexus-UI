@@ -22,7 +22,7 @@ def test_sync_search_logs_warning_and_returns_empty_on_failure(monkeypatch, capl
         def __exit__(self, *exc):
             return False
 
-        def text(self, query, max_results):
+        def text(self, query, max_results, timelimit=None):
             raise RuntimeError("Ratelimit")
 
     monkeypatch.setattr("duckduckgo_search.DDGS", _BoomDDGS)

@@ -33,6 +33,31 @@ except ImportError:
     sys.modules["duckduckgo_search.DDGS"] = _ddgs_stub.DDGS
 
 
+class _OfflineDDGS:
+    """DDGS sin red: ningun test debe llamar al DuckDuckGo real. Antes los de
+    prospeccion lo hacian (el comentario de arriba decia que no) y, ademas de
+    ser flaky (RatelimitException segun el dia), cada ejecucion de la suite
+    gastaba cuota de scraping hasta que DuckDuckGo bloqueaba la IP del equipo."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def text(self, *args, **kwargs):
+        return []
+
+    def news(self, *args, **kwargs):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def _no_real_duckduckgo(monkeypatch):
+    # Un test que necesite otro comportamiento lo sobrescribe con su propio monkeypatch.
+    monkeypatch.setattr("duckduckgo_search.DDGS", _OfflineDDGS, raising=False)
+
+
 # ── Variables de entorno de test ──────────────────────────────────────────────
 # Se establecen ANTES de importar config para evitar errores de validación
 

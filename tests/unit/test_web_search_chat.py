@@ -1,11 +1,11 @@
 """tests/unit/test_web_search_chat.py
 
 PEPO respondiendo "cuales son los trending topics hoy?" (skill web.busqueda).
+Regla: el chat NUNCA hace busquedas con coste (solo DuckDuckGo, gratis).
 Bug real visto en vivo: web.busqueda no tenia handler en el coordinador, asi
 que el LLM contestaba "no tengo acceso a informacion en tiempo real" sin haber
-buscado nada — aunque Brave estaba configurado. Ahora busca de verdad (Brave
-con el MISMO presupuesto mensual que la prospeccion, DuckDuckGo de respaldo)
-y responde solo con lo encontrado.
+buscado nada. Ahora busca de verdad en DuckDuckGo y responde solo con lo
+encontrado.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from nexus.prospecting.repository import ProspectingRepository
 from nexus.prospecting.service import ProspectingAgentService
 
 
-# ── Servicio: Brave → presupuesto → DuckDuckGo ───────────────────────────────
+# ── Servicio: solo DuckDuckGo ───────────────────────────────
 
 class _FakeConnector:
     configured = True
@@ -61,8 +61,8 @@ class _FakeDdg:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def search(self, *, run_id, query, max_results=None):
-        self.calls.append(query)
+    async def search(self, *, run_id, query, max_results=None, timelimit=None):
+        self.calls.append((query, timelimit))
         return {"results": [{"title": "D", "url": "https://ddg.es", "description": "snippet"}]}
 
     def is_directory_domain(self, url):
@@ -91,53 +91,32 @@ def _service(tmp_path, brave, ddg, **cfg_kw) -> ProspectingAgentService:
 
 
 @pytest.mark.asyncio
-async def test_web_search_uses_brave_and_counts_against_the_shared_budget(tmp_path):
+async def test_web_search_never_uses_brave_even_if_configured_and_budget_available(tmp_path):
+    """Pedido explicito: el chat nunca hace busquedas con coste. Brave (de
+    pago) queda reservado a la prospeccion; el chat solo usa DuckDuckGo."""
     brave, ddg = _FakeBrave(), _FakeDdg()
     service = _service(tmp_path, brave, ddg)
 
-    result = await service.web_search("trending hoy", freshness="pw")
-
-    assert result["provider"] == "brave"
-    assert result["results"][0]["url"] == "https://x.es"
-    assert brave.calls[0]["freshness"] == "pw"
-    assert ddg.calls == []
-    assert service._brave_budget.status()["calls"] == 1
-
-
-@pytest.mark.asyncio
-async def test_web_search_falls_back_to_ddg_when_budget_is_exhausted(tmp_path):
-    brave, ddg = _FakeBrave(), _FakeDdg()
-    service = _service(tmp_path, brave, ddg, hard_limit=1)
-    await service.web_search("primera")  # consume el unico permitido
-
-    result = await service.web_search("segunda")
+    result = await service.web_search("trending hoy", timelimit="w")
 
     assert result["provider"] == "ddg"
-    assert "DuckDuckGo" in result["note"]
-    assert len(brave.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_web_search_falls_back_to_ddg_when_brave_fails(tmp_path):
-    brave, ddg = _FakeBrave(fail=True), _FakeDdg()
-    service = _service(tmp_path, brave, ddg)
-
-    result = await service.web_search("algo")
-
-    assert result["provider"] == "ddg"
+    assert result["results"][0]["url"] == "https://ddg.es"
     assert result["results"][0]["description"] == "snippet"
-    assert service._brave_budget.status()["calls"] == 0  # no se cobra una llamada fallida
+    assert brave.calls == []
+    assert service._brave_budget.status()["calls"] == 0
+    assert ddg.calls == [("trending hoy", "w")]
 
 
 @pytest.mark.asyncio
-async def test_web_search_uses_ddg_when_brave_is_not_configured(tmp_path):
-    brave, ddg = _FakeBrave(enabled=False), _FakeDdg()
+async def test_web_search_does_not_spend_brave_budget_across_many_searches(tmp_path):
+    brave, ddg = _FakeBrave(), _FakeDdg()
     service = _service(tmp_path, brave, ddg)
 
-    result = await service.web_search("algo")
+    for i in range(5):
+        await service.web_search(f"consulta {i}")
 
-    assert result["provider"] == "ddg"
     assert brave.calls == []
+    assert service._brave_budget.status()["calls"] == 0
 
 
 # ── Coordinador ──────────────────────────────────────────────────────────────
@@ -148,8 +127,8 @@ class _FakeProspecting:
         self._boom = boom
         self.queries: list[tuple] = []
 
-    async def web_search(self, query, *, count=8, freshness=None, **_):
-        self.queries.append((query, freshness))
+    async def web_search(self, query, *, count=8, timelimit=None, **_):
+        self.queries.append((query, timelimit))
         if self._boom:
             raise RuntimeError("sin red")
         return self._result
@@ -179,7 +158,7 @@ _OVERRIDE = {"skill_id": "web.busqueda", "entities": {}}
 @pytest.mark.asyncio
 async def test_chat_searches_the_web_and_answers_from_the_results():
     prospecting = _FakeProspecting({
-        "provider": "brave", "note": "",
+        "provider": "ddg", "note": "",
         "results": [{"title": "Tendencias en X", "url": "https://t.example/x", "description": "Lista", "age": "2 hours ago"}],
     })
     router = _FakeRouter("Hoy destacan estos temas.")
@@ -189,10 +168,10 @@ async def test_chat_searches_the_web_and_answers_from_the_results():
         ChatRequest(message="trending topics en twitter hoy en españa"), resolution_override=_OVERRIDE
     )
 
-    assert prospecting.queries == [("trending topics en twitter hoy en españa", "pw")]
+    assert prospecting.queries == [("trending topics en twitter hoy en españa", "w")]
     assert "Hoy destacan estos temas." in response.response
     assert "https://t.example/x" in response.response
-    assert "brave" in response.response
+    assert "ddg" in response.response
     assert response.agent == "web-search"
     # el LLM recibe los resultados reales y la fecha, no solo la pregunta
     user_msg = router.calls[0][1]["content"]
@@ -225,7 +204,7 @@ async def test_chat_survives_a_search_exception():
 @pytest.mark.asyncio
 async def test_chat_still_lists_results_when_the_llm_fails():
     prospecting = _FakeProspecting({
-        "provider": "ddg", "note": "Brave no está configurado; uso DuckDuckGo.",
+        "provider": "ddg", "note": "",
         "results": [{"title": "Fuente", "url": "https://f.example", "description": "x"}],
     })
     coordinator = _coordinator(prospecting, _FakeRouter(content="", error="429"))
@@ -236,7 +215,6 @@ async def test_chat_still_lists_results_when_the_llm_fails():
 
     assert "https://f.example" in response.response
     assert "no he podido resumirlos" in response.response
-    assert "DuckDuckGo" in response.response
 
 
 # ── Identidad ────────────────────────────────────────────────────────────────

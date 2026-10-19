@@ -539,17 +539,16 @@ class NexusCoordinator:
     )
 
     async def _handle_web_search_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
-        """Pregunta que necesita internet: busca de verdad (Brave, con
-        DuckDuckGo de respaldo) y responde solo con lo encontrado. Antes
+        """Pregunta que necesita internet: busca de verdad (DuckDuckGo, gratis) y responde solo con lo encontrado. Antes
         web.busqueda no tenia handler y el LLM contestaba "no tengo acceso a
         informacion en tiempo real" sin haber buscado nada."""
         query = payload.message.strip()
         lowered = query.lower()
-        freshness = "pw" if any(term in lowered for term in self._WEB_FRESH_TERMS) else None
+        timelimit = "w" if any(term in lowered for term in self._WEB_FRESH_TERMS) else None
 
         search: dict[str, Any] = {"provider": "", "results": [], "note": ""}
         try:
-            search = await self._prospecting.web_search(query, count=8, freshness=freshness)
+            search = await self._prospecting.web_search(query, count=8, timelimit=timelimit)
         except Exception:
             logger.exception("web.busqueda | fallo buscando en la web")
 

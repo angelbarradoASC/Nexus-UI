@@ -56,6 +56,7 @@ class DdgSearchClient:
         run_id: str,
         query: str,
         max_results: int | None = None,
+        timelimit: str | None = None,
     ) -> dict[str, Any]:
         count = min(max_results or self._settings.max_results_per_query, 20)
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -64,7 +65,7 @@ class DdgSearchClient:
             return {"provider": "ddg", "query": query, "results": [], "timestamp": timestamp}
 
         async with self._lock:
-            results = await asyncio.to_thread(self._sync_search, query, count)
+            results = await asyncio.to_thread(self._sync_search, query, count, timelimit)
             await asyncio.sleep(self._settings.rate_limit_seconds)
 
         payload = {"provider": "ddg", "query": query, "timestamp": timestamp, "results": results}
@@ -103,11 +104,11 @@ class DdgSearchClient:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _sync_search(self, query: str, count: int) -> list[dict[str, Any]]:
+    def _sync_search(self, query: str, count: int, timelimit: str | None = None) -> list[dict[str, Any]]:
         try:
             from duckduckgo_search import DDGS  # already in requirements
             with DDGS() as ddgs:
-                raw = ddgs.text(query, max_results=count) or []
+                raw = ddgs.text(query, max_results=count, timelimit=timelimit) or []
         except Exception as exc:
             # Antes esto devolvia [] en silencio para CUALQUIER fallo —
             # indistinguible de "no habia nada que encontrar" en los logs del

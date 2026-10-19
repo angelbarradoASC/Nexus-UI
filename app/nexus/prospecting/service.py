@@ -318,41 +318,16 @@ class ProspectingAgentService:
         query: str,
         *,
         count: int = 8,
-        freshness: str | None = None,
-        country: str = "es",
-        language: str = "es",
+        timelimit: str | None = None,
     ) -> dict[str, Any]:
         """Busqueda web puntual para el chat de PEPO (no es una corrida de
-        prospeccion). Brave si esta configurado y queda presupuesto — el
-        MISMO contador mensual que usa la prospeccion, para no gastar cuota
-        a escondidas —; si no, DuckDuckGo como respaldo gratuito.
+        prospeccion). SOLO DuckDuckGo, gratis: el chat nunca debe gastar
+        cuota de pago (Brave) por una pregunta suelta — Brave queda
+        reservado a la prospeccion, que tiene su presupuesto mensual.
 
-        Devuelve {"provider", "results": [{title,url,description,age}], "note"}.
-        `note` explica un respaldo (Brave sin presupuesto o caido) para que
-        el chat sea honesto sobre de donde salen los datos."""
-        note = ""
-        if self._brave.enabled:
-            try:
-                self._brave_budget.check_or_raise()
-                payload = await self._brave.search(
-                    run_id="chat-search",
-                    query=query,
-                    country=country,
-                    language=language,
-                    count=count,
-                    **({"freshness": freshness} if freshness else {}),
-                )
-                await self._brave_budget.increment(1)
-                return {"provider": "brave", "results": payload.get("results", []), "note": ""}
-            except BudgetExceededError as exc:
-                note = f"{exc} Uso DuckDuckGo como respaldo."
-            except Exception as exc:  # red caida, 4xx/5xx de Brave...
-                _logger.warning(f"web_search: Brave fallo ({exc}); se usa DuckDuckGo")
-                note = "Brave no respondió; uso DuckDuckGo como respaldo."
-        else:
-            note = "Brave no está configurado; uso DuckDuckGo."
-
-        payload = await self._ddg.search(run_id="", query=query, max_results=count)
+        `timelimit` ("d"/"w"/"m"/"y") acota por antiguedad.
+        Devuelve {"provider", "results": [{title,url,description,age}], "note"}."""
+        payload = await self._ddg.search(run_id="", query=query, max_results=count, timelimit=timelimit)
         results = [
             {
                 "title": str(item.get("title") or "").strip(),

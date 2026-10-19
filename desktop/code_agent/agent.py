@@ -27,6 +27,7 @@ from typing import Any
 
 from desktop.local_agents.confirmable_loop import ConfirmableAgent, PendingAction
 
+from .llm import CodeLLM
 from .pacer import CHARS_PER_TOKEN, DEADLINE_ERROR, PacedRouter, TokenPacer
 from .tools import READ_TOOL_SCHEMAS, run_read_tool
 from .workspace import Workspace, WorkspaceError, redact
@@ -72,9 +73,11 @@ class CodeAgent(ConfirmableAgent):
 
     def __init__(self, cfg, *, llm_router=None, store=None, settings=None) -> None:
         self._pacer = TokenPacer(self.tokens_per_minute)
-        paced = PacedRouter(llm_router, self._pacer, deadline_fn=_task_deadline.get) if llm_router is not None else None
+        # Siempre hay "LLM": el modelo propio (Ollama) si esta configurado en los ajustes, o el router.
+        self._has_router = llm_router is not None
+        paced = PacedRouter(CodeLLM(llm_router, settings), self._pacer, deadline_fn=_task_deadline.get)
         super().__init__(cfg, llm_router=paced, store=store)
-        self._settings = settings  # CodeSettingsStore (enabled / is_allowed)
+        self._settings = settings  # CodeSettingsStore (enabled / is_allowed / llm)
 
     # ── Workspace ────────────────────────────────────────────────────────────
 
@@ -132,14 +135,23 @@ class CodeAgent(ConfirmableAgent):
         configured = getattr(self._settings, "tokens_per_minute", None)
         return int(configured) if configured else self.tokens_per_minute
 
+    def _own_model(self) -> dict[str, Any] | None:
+        getter = getattr(self._settings, "llm", None)
+        return getter() if callable(getter) else None
+
     def _context_char_budget(self) -> int:
-        """Caracteres maximos de `messages` para que la peticion (mensajes + esquemas) quepa
-        en ~85 % de la cuota por minuto."""
+        """Caracteres maximos de `messages`. Con modelo propio manda su ventana de contexto
+        (`num_ctx`: si se supera, Ollama trunca en silencio); con el router, que la peticion
+        (mensajes + esquemas) quepa en ~85 % de la cuota por minuto."""
+        own = self._own_model()
+        if own:
+            return max(6_000, int((own["num_ctx"] - 1_800) * CHARS_PER_TOKEN) - _FIXED_CHARS)
         return max(_MIN_CONTEXT_CHARS, int(self._tokens_per_minute() * CHARS_PER_TOKEN * 0.85) - _FIXED_CHARS)
 
     def _begin_task(self) -> None:
-        """Aplica la cuota configurada y arranca el reloj de la tarea."""
-        self._pacer.tokens_per_minute = self._tokens_per_minute()
+        """Aplica la cuota configurada (un modelo propio no tiene cuota que respetar) y
+        arranca el reloj de la tarea."""
+        self._pacer.tokens_per_minute = 10**9 if self._own_model() else self._tokens_per_minute()
         _task_deadline.set(self._pacer.clock() + self.max_task_seconds)
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
@@ -179,6 +191,14 @@ class CodeAgent(ConfirmableAgent):
                     "pregunta mas concreta, o sube el limite en Configuracion > Modo codigo si tu plan tiene mas cuota."
                 ),
             }
+        elif outcome.get("kind") == "finish" and ("ollama_error" in summary or "ollama_http" in summary):
+            outcome = {
+                "kind": "finish",
+                "summary": (
+                    "No he podido hablar con el modelo local del agente. Comprueba que Ollama esta en marcha y que el "
+                    f"modelo esta descargado (Configuracion > Modo codigo, boton Probar). Detalle: {summary[-160:]}"
+                ),
+            }
         elif outcome.get("kind") == "finish" and "429" in summary:
             outcome = {
                 "kind": "finish",
@@ -216,7 +236,7 @@ class CodeAgent(ConfirmableAgent):
         history: list[dict[str, str]] | None = None,
         workspace: str | None = None,
     ) -> dict[str, Any]:
-        if self._llm_router is None:
+        if not self._has_router and not self._own_model():
             return {"kind": "finish", "task": task, "summary": "El razonamiento por LLM no esta disponible ahora mismo."}
         try:
             ws = self._open_workspace(workspace)

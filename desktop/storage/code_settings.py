@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ from desktop.storage.atomic_io import atomic_write_text
 DEFAULT_TOKENS_PER_MINUTE = 6500   # margen bajo los 8.000/min de la cuenta Groq medida el 2026-10-19
 MIN_TOKENS_PER_MINUTE = 1_000
 MAX_TOKENS_PER_MINUTE = 1_000_000
+DEFAULT_NUM_CTX = 8192
+MIN_NUM_CTX = 2048
+MAX_NUM_CTX = 131_072
 
 
 def _key(path: Path) -> str:
@@ -46,7 +50,17 @@ class CodeSettingsStore:
         except (TypeError, ValueError):
             tpm = DEFAULT_TOKENS_PER_MINUTE
         tpm = min(max(tpm, MIN_TOKENS_PER_MINUTE), MAX_TOKENS_PER_MINUTE)
-        return {"enabled": bool(data.get("enabled", True)), "workspaces": workspaces, "tokens_per_minute": tpm}
+        raw_llm = data.get("llm") if isinstance(data.get("llm"), dict) else {}
+        try:
+            num_ctx = int(raw_llm.get("num_ctx", DEFAULT_NUM_CTX))
+        except (TypeError, ValueError):
+            num_ctx = DEFAULT_NUM_CTX
+        llm = {
+            "base_url": str(raw_llm.get("base_url", "") or "").strip().rstrip("/"),
+            "model": str(raw_llm.get("model", "") or "").strip(),
+            "num_ctx": min(max(num_ctx, MIN_NUM_CTX), MAX_NUM_CTX),
+        }
+        return {"enabled": bool(data.get("enabled", True)), "workspaces": workspaces, "tokens_per_minute": tpm, "llm": llm}
 
     @property
     def enabled(self) -> bool:
@@ -56,6 +70,11 @@ class CodeSettingsStore:
     def tokens_per_minute(self) -> int:
         """Presupuesto de tokens/minuto que el agente puede gastar (cuota de tu proveedor de IA)."""
         return self.load()["tokens_per_minute"]
+
+    def llm(self) -> dict[str, Any] | None:
+        """Modelo propio del agente (Ollama) o None si se usa el router de siempre."""
+        data = self.load()["llm"]
+        return data if data["base_url"] and data["model"] else None
 
     def workspaces(self) -> list[str]:
         return self.load()["workspaces"]
@@ -88,6 +107,22 @@ class CodeSettingsStore:
     def set_tokens_per_minute(self, value: int) -> dict[str, Any]:
         data = self.load()
         data["tokens_per_minute"] = min(max(int(value), MIN_TOKENS_PER_MINUTE), MAX_TOKENS_PER_MINUTE)
+        self._save(data)
+        return data
+
+    def set_llm(self, base_url: str, model: str, num_ctx: int = DEFAULT_NUM_CTX) -> dict[str, Any]:
+        """Fija el modelo propio. Con `base_url` y `model` vacios lo quita (vuelve al router).
+        Lanza ValueError si la URL no es http(s) o falta el modelo."""
+        base_url, model = (base_url or "").strip().rstrip("/"), (model or "").strip()
+        data = self.load()
+        if not base_url and not model:
+            data["llm"] = {"base_url": "", "model": "", "num_ctx": DEFAULT_NUM_CTX}
+        else:
+            if not re.match(r"^https?://[^\s/]+", base_url):
+                raise ValueError("La URL del modelo debe empezar por http:// o https://")
+            if not model:
+                raise ValueError("Falta el nombre del modelo (por ejemplo qwen2.5-coder:3b).")
+            data["llm"] = {"base_url": base_url, "model": model, "num_ctx": min(max(int(num_ctx), MIN_NUM_CTX), MAX_NUM_CTX)}
         self._save(data)
         return data
 

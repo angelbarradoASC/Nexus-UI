@@ -930,6 +930,29 @@
                         </div>
                         <div class="module-section">
                             <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Modelo</p>
+                                <h3>Modelo propio del agente (Ollama)</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Por defecto el agente usa los modelos en la nube de Modelos. Con un Ollama
+                                propio no hay límite de cuota (un agente reenvía todo el contexto en cada
+                                paso y los planes gratuitos se agotan enseguida). Deja ambos campos vacíos
+                                para volver al router. Los modelos pequeños escriben a veces la llamada a
+                                la herramienta como texto: PEPO lo recupera.
+                            </p>
+                            <div class="form-actions">
+                                <input id="codeLlmUrl" type="text" placeholder="http://192.168.68.150:11434" style="min-width:260px">
+                                <input id="codeLlmModel" type="text" placeholder="qwen2.5-coder:3b" style="min-width:180px">
+                                <input id="codeLlmCtx" type="number" min="2048" max="131072" step="1024" title="Ventana de contexto (num_ctx)" style="width:110px">
+                            </div>
+                            <div class="form-actions">
+                                <button id="codeLlmSaveBtn" type="button">Guardar modelo</button>
+                                <button id="codeLlmTestBtn" type="button" class="camp-btn camp-btn--secondary">Probar</button>
+                                <span id="codeLlmNote" class="assets-form-note"></span>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
                                 <p class="eyebrow eyebrow-tight">Cuota</p>
                                 <h3>Tokens por minuto de tu proveedor de IA</h3>
                             </div>
@@ -971,6 +994,6 @@
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20261019b"></script>
+    <script src="/static/js/nexus_settings.js?v=20261019c"></script>
 </body>
 </html>

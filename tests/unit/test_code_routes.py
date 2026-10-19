@@ -27,7 +27,9 @@ def _client(tmp_path) -> tuple[TestClient, CodeSettingsStore]:
 def test_settings_start_enabled_and_empty(tmp_path):
     client, _ = _client(tmp_path)
 
-    assert client.get("/api/desktop/code/settings").json() == {"enabled": True, "tokens_per_minute": 6500, "workspaces": []}
+    assert client.get("/api/desktop/code/settings").json() == {
+        "enabled": True, "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192}, "workspaces": [],
+    }
 
 
 def test_add_and_remove_a_workspace(tmp_path):

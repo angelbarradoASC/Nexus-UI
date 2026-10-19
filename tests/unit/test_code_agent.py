@@ -314,7 +314,7 @@ def test_the_context_budget_scales_with_the_configured_quota(tmp_path):
 def test_settings_default_is_enabled_with_no_workspaces(tmp_path):
     store = CodeSettingsStore(tmp_path / "s.json")
 
-    assert store.load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500}
+    assert store.load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192}}
 
 
 def test_tokens_per_minute_is_stored_and_clamped(tmp_path):
@@ -376,4 +376,4 @@ def test_settings_survive_a_corrupted_file(tmp_path):
     path = tmp_path / "s.json"
     path.write_text("{no es json", encoding="utf-8")
 
-    assert CodeSettingsStore(path).load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500}
+    assert CodeSettingsStore(path).load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192}}

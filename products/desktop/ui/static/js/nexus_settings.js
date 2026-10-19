@@ -877,6 +877,11 @@ function renderCodeSettings(data) {
     const list = document.getElementById("codeWorkspaceList");
     const toggle = document.getElementById("codeEnabledToggle");
     toggle.checked = Boolean(data.enabled);
+    const llm = data.llm || {};
+    for (const [id, value] of [["codeLlmUrl", llm.base_url || ""], ["codeLlmModel", llm.model || ""], ["codeLlmCtx", llm.num_ctx || 8192]]) {
+        const field = document.getElementById(id);
+        if (field && document.activeElement !== field) { field.value = value; }
+    }
     const tpmInput = document.getElementById("codeTpmInput");
     if (tpmInput && document.activeElement !== tpmInput) { tpmInput.value = data.tokens_per_minute; }
     badge.textContent = data.enabled
@@ -912,6 +917,32 @@ async function addCodeWorkspace() {
 
 async function removeCodeWorkspace(path) {
     renderCodeSettings(await api.post("/api/desktop/code/workspaces/remove", { path }));
+}
+
+async function saveCodeLlm() {
+    const note = document.getElementById("codeLlmNote");
+    note.textContent = "";
+    try {
+        renderCodeSettings(await api.put("/api/desktop/code/model", {
+            base_url: document.getElementById("codeLlmUrl").value.trim(),
+            model: document.getElementById("codeLlmModel").value.trim(),
+            num_ctx: Number(document.getElementById("codeLlmCtx").value) || 8192,
+        }));
+        note.textContent = "Guardado.";
+    } catch (error) {
+        note.textContent = error.message;
+    }
+}
+
+async function testCodeLlm() {
+    const note = document.getElementById("codeLlmNote");
+    note.textContent = "Probando…";
+    try {
+        const result = await api.post("/api/desktop/code/model/test", {});
+        note.textContent = (result.ok ? "✔ " : "✖ ") + result.detail;
+    } catch (error) {
+        note.textContent = error.message;
+    }
 }
 
 async function saveCodeTpm() {
@@ -983,6 +1014,12 @@ function wireEvents() {
     });
     document.getElementById("outlookRefreshBtn").addEventListener("click", () => {
         loadOutlookPriority();
+    });
+    document.getElementById("codeLlmSaveBtn").addEventListener("click", () => {
+        saveCodeLlm();
+    });
+    document.getElementById("codeLlmTestBtn").addEventListener("click", () => {
+        testCodeLlm();
     });
     document.getElementById("codeTpmSaveBtn").addEventListener("click", () => {
         saveCodeTpm();

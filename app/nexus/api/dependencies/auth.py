@@ -86,6 +86,7 @@ def build_runtime(cfg) -> NexusRuntime:
     remote_ops_agent = None
     self_config_agent = None
     mcp_agent = None
+    code_agent = None
     mcp_server_store = None
     skill_router = DesktopSkillRouter()
     agent_settings: "AgentSettingsStore | None" = None
@@ -94,6 +95,7 @@ def build_runtime(cfg) -> NexusRuntime:
         monitoring_store = DesktopMonitoringIntegrationStore(
             desktop_settings.monitoring_config_db_path
         )
+        from desktop.code_agent.agent import CodeAgent
         from desktop.local_agents.mcp_agent import MCPAgent
         from desktop.local_agents.mouse_agent import MouseAgent
         from desktop.local_agents.remote_ops_agent import RemoteOpsAgent
@@ -101,6 +103,7 @@ def build_runtime(cfg) -> NexusRuntime:
         from desktop.local_agents.skill_library import SkillLibrary
         from desktop.local_agents.system_task_agent import SystemTaskAgent
         from desktop.runtime.agent_settings import AgentSettingsStore
+        from desktop.storage.code_settings import CodeSettingsStore
         from desktop.storage.local_state import DesktopLocalState
         from desktop.storage.mcp_servers import DesktopMCPServerStore
         from desktop.storage.pending_actions import DesktopPendingActionStore
@@ -120,7 +123,12 @@ def build_runtime(cfg) -> NexusRuntime:
         self_config_agent = SelfConfigAgent(cfg, llm_router=llm_router, cmdb=cmdb, vault=vault, local_state=desktop_local_state, store=pending_store)
         mcp_server_store = DesktopMCPServerStore(desktop_settings.mcp_servers_db_path)
         mcp_agent = MCPAgent(cfg, llm_router=llm_router, manager=MCPManager(), server_store=mcp_server_store, store=pending_store)
-        for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent):
+        # Modo codigo: solo trabaja en carpetas autorizadas (code_settings.json).
+        code_agent = CodeAgent(
+            cfg, llm_router=llm_router, store=pending_store,
+            settings=CodeSettingsStore(desktop_settings.code_settings_path),
+        )
+        for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent, code_agent):
             _agent.load_pending_from_store()
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
         # Un unico DesktopSkillRouter (con el override de permisos ya cargado)
@@ -212,6 +220,7 @@ def build_runtime(cfg) -> NexusRuntime:
         docker_diagnostics=DockerPreDiagnosticService(),
         outlook=outlook,
         outlook_reply_agent=outlook_reply_agent,
+        code_agent=code_agent,
     )
     assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router, skill_router=skill_router)
     agent_runtime = AgentRuntimeService()

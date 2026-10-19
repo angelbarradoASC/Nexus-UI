@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/nexus_v1.css?v=20260806a">
     <link rel="stylesheet" href="/static/css/desktop_nav.css?v=20260615b">
-    <link rel="stylesheet" href="/static/css/nexus_pepo.css?v=20260831a">
+    <link rel="stylesheet" href="/static/css/nexus_pepo.css?v=20261019a">
 </head>
 <body>
     <main class="workspace workspace-pepo">
@@ -46,7 +46,7 @@
                         <h2>Chat con PEPO</h2>
                     </div>
                     <div class="inline-badges">
-                        <span class="badge">polivalente</span>
+                        <span class="badge" id="pepoModeBadge">polivalente</span>
                         <span class="badge badge-muted" id="pepoChatStatus">listo</span>
                     </div>
                 </div>
@@ -57,6 +57,15 @@
                         <p class="pepo-msg-role">PEPO</p>
                         <div class="pepo-bubble">Hola. Soy PEPO, tu agente personal. Puedo ayudarte con operaciones, prospección comercial, incidentes y más. También puedes lanzar skills desde el panel de la derecha. ¿En qué empezamos?</div>
                     </div>
+                </div>
+
+                <!-- Modo codigo: PEPO explora un proyecto del equipo (solo lectura en esta version) -->
+                <div id="pepoModeBar" class="pepo-modebar">
+                    <label class="pepo-mode-toggle" title="PEPO explora un proyecto de tu equipo con herramientas de lectura">
+                        <input id="pepoCodeToggle" type="checkbox"> Modo código
+                    </label>
+                    <select id="pepoCodeWorkspace" class="pepo-mode-select" aria-label="Carpeta de trabajo" hidden></select>
+                    <span id="pepoCodeHint" class="pepo-mode-hint" hidden></span>
                 </div>
 
                 <!-- Compositor -->
@@ -77,6 +86,6 @@
 
     </main>
 
-    <script src="/static/js/nexus_pepo.js?v=20260831a"></script>
+    <script src="/static/js/nexus_pepo.js?v=20261019a"></script>
 </body>
 </html>

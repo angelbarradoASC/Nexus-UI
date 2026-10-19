@@ -21,6 +21,7 @@ class AssistantExecutionRequest:
     context_id: str | None = None
     source_surface: str = "web"
     resolution: dict[str, Any] | None = None
+    workspace: str | None = None
 
 
 @dataclass(slots=True)
@@ -94,6 +95,13 @@ class AssistantRuntimeCore:
 
         if request.resolution:
             resolution = request.resolution
+        elif request.mode == "code":
+            # Modo codigo explicito: sin clasificador (ahorra una llamada al LLM y
+            # evita que decida mal el agente).
+            resolution = {
+                "skill_id": "code.agent", "confidence": 1.0, "entities": {},
+                "rationale": "Modo codigo elegido por el usuario.",
+            }
         elif self._llm_router is not None:
             resolution = (
                 await self._skill_router.resolve_llm(request.message, self._llm_router, history=history)
@@ -105,6 +113,7 @@ class AssistantRuntimeCore:
             user_id=request.user_id,
             mode=request.mode,
             context_id=request.context_id,
+            workspace=request.workspace,
         )
         try:
             response = await self._coordinator.handle_chat(

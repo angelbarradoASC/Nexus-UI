@@ -35,6 +35,7 @@
                     <button type="button" class="settings-nav-btn" data-section="campana">Campaña</button>
                     <button type="button" class="settings-nav-btn" data-section="itsm">ITSM</button>
                     <button type="button" class="settings-nav-btn" data-section="correo">Correo</button>
+                    <button type="button" class="settings-nav-btn" data-section="codigo">Modo código</button>
                 </div>
                 <div class="settings-sidebar-note">
                     <p>Todo lo de Nexus Desktop se gobierna desde aqui: modelos, prompts por modulo, integraciones de Operator, y config de Sales y Campana.</p>
@@ -902,10 +903,57 @@
                     </div>
                 </section>
 
+                <section class="card settings-panel" data-panel="codigo">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">PEPO</p>
+                            <h2>Modo código</h2>
+                        </div>
+                        <span id="codeStatusBadge" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Interruptor</p>
+                                <h3>Agente de código local</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Con el modo código PEPO explora un proyecto de tu equipo (busca, lee
+                                ficheros y responde citando ruta y línea). Se activa desde el chat de
+                                PEPO con el interruptor "Modo código". En esta versión solo lee: no
+                                modifica ficheros ni ejecuta comandos.
+                            </p>
+                            <label class="assets-form-note">
+                                <input id="codeEnabledToggle" type="checkbox"> Permitir el modo código
+                            </label>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Seguridad</p>
+                                <h3>Carpetas autorizadas</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                PEPO solo puede trabajar dentro de estas carpetas. <strong>El contenido
+                                de los ficheros que lea se envía al modelo de lenguaje que tengas
+                                configurado</strong> (en la nube, salvo que uses un modelo local).
+                                Los ficheros .env, claves y credenciales están bloqueados siempre.
+                            </p>
+                            <div id="codeWorkspaceList" class="info-list">Cargando…</div>
+                            <div class="form-actions">
+                                <input id="codeWorkspaceInput" type="text" placeholder="C:\DEV\mi-proyecto" style="min-width:320px">
+                                <button id="codeWorkspaceAddBtn" type="button">Añadir carpeta</button>
+                                <span id="codeWorkspaceNote" class="assets-form-note"></span>
+                            </div>
+                        </div>
+                        </div><!-- /module-form-body -->
+                    </div>
+                </section>
+
             </section>
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20261016a"></script>
+    <script src="/static/js/nexus_settings.js?v=20261019a"></script>
 </body>
 </html>

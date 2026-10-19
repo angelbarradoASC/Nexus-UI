@@ -870,6 +870,52 @@ async function loadOutlookConfig() {
     }
 }
 
+// ── Modo código (carpetas autorizadas) ──────────────────────────────────────
+
+function renderCodeSettings(data) {
+    const badge = document.getElementById("codeStatusBadge");
+    const list = document.getElementById("codeWorkspaceList");
+    const toggle = document.getElementById("codeEnabledToggle");
+    toggle.checked = Boolean(data.enabled);
+    badge.textContent = data.enabled
+        ? `${data.workspaces.length} carpeta${data.workspaces.length === 1 ? "" : "s"}`
+        : "desactivado";
+    badge.className = `info-badge ${data.enabled ? "" : "info-badge-muted"}`;
+    if (!data.workspaces.length) {
+        list.innerHTML = "<p>Aún no hay ninguna carpeta autorizada. Añade la carpeta de tu proyecto.</p>";
+        return;
+    }
+    list.innerHTML = data.workspaces.map((item) => `
+        <div class="info-list-row">
+            <span><strong>${esc(item.name)}</strong> — ${esc(item.path)}${item.exists ? "" : " (no existe)"}</span>
+            <button type="button" class="camp-btn camp-btn--secondary" data-code-remove="${esc(item.path)}">Quitar</button>
+        </div>`).join("");
+}
+
+async function loadCodeSettings() {
+    renderCodeSettings(await api.get("/api/desktop/code/settings"));
+}
+
+async function addCodeWorkspace() {
+    const input = document.getElementById("codeWorkspaceInput");
+    const note = document.getElementById("codeWorkspaceNote");
+    note.textContent = "";
+    try {
+        renderCodeSettings(await api.post("/api/desktop/code/workspaces", { path: input.value.trim() }));
+        input.value = "";
+    } catch (error) {
+        note.textContent = error.message;
+    }
+}
+
+async function removeCodeWorkspace(path) {
+    renderCodeSettings(await api.post("/api/desktop/code/workspaces/remove", { path }));
+}
+
+async function toggleCodeEnabled(enabled) {
+    renderCodeSettings(await api.put("/api/desktop/code/enabled", { enabled }));
+}
+
 function wireEvents() {
     document.getElementById("saveRouterBtn").addEventListener("click", () => {
         saveRouterConfig().catch((error) => {
@@ -924,6 +970,25 @@ function wireEvents() {
     document.getElementById("outlookRefreshBtn").addEventListener("click", () => {
         loadOutlookPriority();
     });
+    document.getElementById("codeWorkspaceAddBtn").addEventListener("click", () => {
+        addCodeWorkspace();
+    });
+    document.getElementById("codeWorkspaceInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); addCodeWorkspace(); }
+    });
+    document.getElementById("codeEnabledToggle").addEventListener("change", (event) => {
+        toggleCodeEnabled(event.target.checked).catch((error) => {
+            document.getElementById("codeWorkspaceNote").textContent = error.message;
+        });
+    });
+    document.getElementById("codeWorkspaceList").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-code-remove]");
+        if (button) {
+            removeCodeWorkspace(button.getAttribute("data-code-remove")).catch((error) => {
+                document.getElementById("codeWorkspaceNote").textContent = error.message;
+            });
+        }
+    });
 }
 
 async function bootstrap() {
@@ -954,6 +1019,10 @@ async function bootstrap() {
         }),
         loadOutlookConfig().catch(() => {
             const el = document.getElementById("outlookStatusBadge");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadCodeSettings().catch(() => {
+            const el = document.getElementById("codeStatusBadge");
             if (el) { el.textContent = "no disponible"; }
         }),
     ]);

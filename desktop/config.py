@@ -88,6 +88,10 @@ class DesktopSettings:
         return self.config_dir / "llm_router.json"
 
     @property
+    def code_settings_path(self) -> Path:
+        return self.config_dir / "code_settings.json"
+
+    @property
     def sales_config_path(self) -> Path:
         return self.config_dir / "sales_config.json"
 

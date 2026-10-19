@@ -532,3 +532,38 @@ html { zoom: 0.75; }
 .pepo-run-console-line.level-error { color: #e88686; }
 
 .send-to-pepo:hover { color: var(--forest); }
+
+
+/* ── Modo codigo ─────────────────────────────────────────────────────────── */
+.pepo-modebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 8px 2px 0;
+    font-size: 0.8125rem;
+    color: var(--text);
+}
+
+.pepo-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.pepo-mode-select {
+    max-width: 260px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    background: var(--bg-soft);
+    color: var(--text);
+}
+
+.pepo-mode-hint {
+    opacity: 0.7;
+}

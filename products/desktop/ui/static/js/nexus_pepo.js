@@ -130,7 +130,9 @@ async function sendToChat(message) {
             body: JSON.stringify({
                 message,
                 user_id: 'pepo_user',
-                mode: 'general',
+                mode: _pepoCodeMode ? 'code' : 'general',
+                // Solo en modo codigo; el servidor la valida contra las carpetas autorizadas.
+                workspace: _pepoCodeMode ? (document.getElementById('pepoCodeWorkspace')?.value || undefined) : undefined,
                 context_id: _pepoContextId || undefined,
             }),
         });
@@ -545,6 +547,77 @@ async function runSkillProspectResults() {
     }
 }
 
+// ── Modo codigo ───────────────────────────────────────────────────────────────
+// PEPO explora un proyecto del equipo (solo lectura en esta version). Lo elige el
+// usuario aqui y la carpeta sale de la lista autorizada en Configuracion > Modo codigo.
+
+const CODE_MODE_KEY = 'pepoCodeMode';
+const CODE_WORKSPACE_KEY = 'pepoCodeWorkspace';
+let _pepoCodeMode = false;
+
+function _storeGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function _storeSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* sin almacenamiento */ } }
+
+function applyCodeMode(settings) {
+    const toggle = document.getElementById('pepoCodeToggle');
+    const select = document.getElementById('pepoCodeWorkspace');
+    const hint = document.getElementById('pepoCodeHint');
+    const badge = document.getElementById('pepoModeBadge');
+    const input = document.getElementById('pepoInput');
+    if (!toggle || !select || !hint) return;
+
+    const workspaces = settings.workspaces || [];
+    let note = '';
+    if (!settings.enabled) {
+        note = 'Desactivado en Configuración › Modo código.';
+    } else if (!workspaces.length) {
+        note = 'Añade una carpeta en Configuración › Modo código.';
+    }
+    toggle.disabled = Boolean(note);
+    if (note) toggle.checked = false;
+
+    _pepoCodeMode = toggle.checked && !note;
+    select.hidden = !_pepoCodeMode;
+    hint.hidden = !note;
+    hint.textContent = note;
+    if (badge) badge.textContent = _pepoCodeMode ? 'código · solo lectura' : 'polivalente';
+    if (input) {
+        input.placeholder = _pepoCodeMode
+            ? 'Pregunta sobre el código del proyecto… (Enter para enviar)'
+            : 'Escribe un mensaje… (Enter para enviar, Shift+Enter para nueva línea)';
+    }
+    _storeSet(CODE_MODE_KEY, _pepoCodeMode ? '1' : '0');
+}
+
+async function initCodeMode() {
+    const toggle = document.getElementById('pepoCodeToggle');
+    const select = document.getElementById('pepoCodeWorkspace');
+    if (!toggle || !select) return;
+
+    let settings = { enabled: false, workspaces: [] };
+    try {
+        settings = await apiJson('/api/desktop/code/settings');
+    } catch (err) {
+        console.warn('Ajustes del modo codigo no disponibles', err);
+    }
+
+    select.innerHTML = '';
+    for (const item of settings.workspaces || []) {
+        const option = document.createElement('option');
+        option.value = item.path;
+        option.textContent = item.name + (item.exists ? '' : ' (no existe)');
+        option.title = item.path;
+        select.appendChild(option);
+    }
+    const saved = _storeGet(CODE_WORKSPACE_KEY);
+    if (saved && [...select.options].some((o) => o.value === saved)) select.value = saved;
+
+    toggle.checked = _storeGet(CODE_MODE_KEY) === '1';
+    toggle.addEventListener('change', () => applyCodeMode(settings));
+    select.addEventListener('change', () => _storeSet(CODE_WORKSPACE_KEY, select.value));
+    applyCodeMode(settings);
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 function initPepo() {
@@ -576,6 +649,8 @@ function initPepo() {
 
     const newChatBtn = document.getElementById('pepoNewChatBtn');
     if (newChatBtn) newChatBtn.addEventListener('click', startNewChat);
+
+    initCodeMode();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

@@ -12,6 +12,9 @@ class ChatRequest(BaseModel):
     user_id: str = Field(default="anonymous")
     mode: str = Field(default="general")
     context_id: str | None = None
+    # Solo para mode="code": carpeta de trabajo elegida en la UI. El CodeAgent la
+    # valida contra la lista de carpetas autorizadas; nunca se confia en ella.
+    workspace: str | None = None
 
 
 class ChatResponse(BaseModel):

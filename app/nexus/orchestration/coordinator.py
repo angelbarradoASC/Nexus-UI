@@ -120,6 +120,7 @@ class NexusCoordinator:
         ticket_agent: Any | None = None,
         outlook: Any | None = None,
         outlook_reply_agent: Any | None = None,
+        code_agent: Any | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
@@ -136,6 +137,7 @@ class NexusCoordinator:
         self._ticket_agent = ticket_agent or (TicketAgent(operations) if operations is not None else None)
         self._outlook = outlook
         self._outlook_reply_agent = outlook_reply_agent
+        self._code_agent = code_agent
         self._mcp_server_store = mcp_server_store
         self._campaign_decomposer = campaign_decomposer
         self._incident_repository = incident_repository
@@ -168,13 +170,13 @@ class NexusCoordinator:
 
     async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -204,6 +206,8 @@ class NexusCoordinator:
             result = await self._ticket_agent.confirm(context_id, user_reply)
         elif agent is self._outlook_reply_agent:
             result = await self._outlook_reply_agent.confirm(context_id, user_reply)
+        elif agent is self._code_agent:
+            result = await self._code_agent.confirm(context_id, user_reply)
         else:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
@@ -241,6 +245,10 @@ class NexusCoordinator:
     ) -> ChatResponse:
         audit_id = f"audit-{uuid.uuid4().hex[:12]}"
         context_key = payload.context_id or payload.user_id
+        # Modo codigo (explicito, lo elige el usuario en la UI): nunca pasa por el
+        # clasificador de intencion ni por las demas confirmaciones pendientes.
+        if payload.mode == "code":
+            return await self._handle_code_chat(payload, audit_id, context_key, history)
         # Propuestas de si/no puro (ratón, ticket): si el usuario contesta con otra
         # cosa, cambio de tema — se descarta la propuesta (la direccion segura: no
         # se ejecuta nada) y el mensaje se procesa normal. Antes cualquier mensaje
@@ -639,6 +647,75 @@ class NexusCoordinator:
         if response.error or not response.content.strip():
             return "He encontrado resultados pero no he podido resumirlos ahora mismo. Estos son los principales:"
         return response.content.strip()
+
+    async def _handle_code_chat(
+        self,
+        payload: ChatRequest,
+        audit_id: str,
+        context_key: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> ChatResponse:
+        """Modo codigo: un solo bucle con herramientas sobre una carpeta de
+        trabajo AUTORIZADA (la valida el CodeAgent, no se confia en la UI)."""
+        if self._code_agent is None:
+            return await self._finish_code_turn(
+                payload, audit_id,
+                {"kind": "finish", "summary": "El modo codigo no esta disponible en esta version de Nexus-UI."},
+                status="degraded",
+            )
+        if self._code_agent.has_pending(context_key):
+            result = await self._code_agent.confirm(context_key, payload.message)
+            outcome = self._normalise_code_confirm(result)
+        else:
+            outcome = await self._code_agent.propose(
+                context_key, payload.message, history=history, workspace=payload.workspace
+            )
+        return await self._finish_code_turn(payload, audit_id, outcome)
+
+    @staticmethod
+    def _normalise_code_confirm(result: dict[str, Any] | None) -> dict[str, Any]:
+        """confirm() devuelve {is_done, content, next_kind, ...}; se reduce a la
+        misma forma que propose(): {kind, summary|question|payload}."""
+        if result is None:
+            return {"kind": "finish", "summary": "No habia nada pendiente."}
+        if result.get("is_done"):
+            return {"kind": "finish", "summary": result.get("content") or result.get("error") or "Hecho."}
+        kind = result.get("next_kind") or "finish"
+        return {"kind": kind, "question": result.get("next_question"), "payload": result.get("next_payload", {})}
+
+    async def _finish_code_turn(
+        self, payload: ChatRequest, audit_id: str, outcome: dict[str, Any], *, status: str = "accepted"
+    ) -> ChatResponse:
+        kind = outcome.get("kind")
+        if kind in {"ask_user", "ask_user_secret"}:
+            response = outcome.get("question") or "¿Puedes darme mas detalles?"
+        elif kind == "finish":
+            response = outcome.get("summary") or "Hecho."
+        else:
+            response = outcome.get("summary") or "Esta accion aun no esta soportada en el modo codigo."
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "code.agent",
+                "workspace": payload.workspace,
+                "outcome_kind": kind,
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(
+            status=status,
+            response=response,
+            agent="code-agent",
+            flow="chat",
+            audit_id=audit_id,
+            redact_next_reply=kind == "ask_user_secret",
+        )
 
     async def _handle_outlook_priority_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
         """Skill de solo lectura — lista la bandeja de entrada puntuada por

@@ -27,6 +27,7 @@ async def chat_v1(
             user_id=payload.user_id,
             mode=payload.mode,
             context_id=payload.context_id,
+            workspace=payload.workspace,
             source_surface="web",
         )
     )

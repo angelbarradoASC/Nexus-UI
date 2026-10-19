@@ -1,6 +1,6 @@
 """
 Búsqueda web gratuita via DuckDuckGo.
-Sin API key, sin coste. Usa la librería duckduckgo-search.
+Sin API key, sin coste. Usa la librería ddgs (sucesora de duckduckgo-search, que DuckDuckGo bloquea).
 
 Devuelve una lista de resultados con título, URL y snippet.
 """
@@ -8,7 +8,7 @@ Devuelve una lista de resultados con título, URL y snippet.
 import logging
 from typing import List, Dict
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 

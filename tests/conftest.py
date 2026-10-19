@@ -18,19 +18,19 @@ import pytest_asyncio
 # Añade /app al path para que los tests puedan importar los módulos de la app
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
-# ── Stub de duckduckgo_search ─────────────────────────────────────────────────
-# WebAgent usa duckduckgo_search. Si la librería no está instalada (entorno CI
+# ── Stub de ddgs ──────────────────────────────────────────────────────────────
+# WebAgent usa ddgs (antes duckduckgo_search). Si la librería no está instalada (entorno CI
 # sin dependencias completas), los tests que importan cualquier módulo de agents/
 # fallan en la cadena agents/__init__.py → OrchestrationAgent → WebAgent → web_search.
 # El stub previene ese error de colección/ejecución: ningún test real llama a
 # DuckDuckGo (WebAgent siempre se mockea), así que el stub no afecta los resultados.
 try:
-    import duckduckgo_search  # noqa: F401 — ya instalado, nada que hacer
+    import ddgs  # noqa: F401 — ya instalado, nada que hacer
 except ImportError:
     _ddgs_stub = MagicMock()
     _ddgs_stub.DDGS = MagicMock()
-    sys.modules["duckduckgo_search"] = _ddgs_stub
-    sys.modules["duckduckgo_search.DDGS"] = _ddgs_stub.DDGS
+    sys.modules["ddgs"] = _ddgs_stub
+    sys.modules["ddgs.DDGS"] = _ddgs_stub.DDGS
 
 
 class _OfflineDDGS:
@@ -55,7 +55,7 @@ class _OfflineDDGS:
 @pytest.fixture(autouse=True)
 def _no_real_duckduckgo(monkeypatch):
     # Un test que necesite otro comportamiento lo sobrescribe con su propio monkeypatch.
-    monkeypatch.setattr("duckduckgo_search.DDGS", _OfflineDDGS, raising=False)
+    monkeypatch.setattr("ddgs.DDGS", _OfflineDDGS, raising=False)
 
 
 # ── Variables de entorno de test ──────────────────────────────────────────────

@@ -25,7 +25,7 @@ def test_sync_search_logs_warning_and_returns_empty_on_failure(monkeypatch, capl
         def text(self, query, max_results, timelimit=None):
             raise RuntimeError("Ratelimit")
 
-    monkeypatch.setattr("duckduckgo_search.DDGS", _BoomDDGS)
+    monkeypatch.setattr("ddgs.DDGS", _BoomDDGS)
 
     import logging
     caplog.set_level(logging.WARNING)

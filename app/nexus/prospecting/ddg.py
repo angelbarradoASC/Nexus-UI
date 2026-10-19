@@ -34,7 +34,7 @@ class DdgSearchSettings:
 
 
 class DdgSearchClient:
-    """DuckDuckGo text search — uses duckduckgo-search already in requirements."""
+    """DuckDuckGo text search — uses ddgs (successor of duckduckgo-search)."""
 
     def __init__(
         self,
@@ -106,7 +106,7 @@ class DdgSearchClient:
 
     def _sync_search(self, query: str, count: int, timelimit: str | None = None) -> list[dict[str, Any]]:
         try:
-            from duckduckgo_search import DDGS  # already in requirements
+            from ddgs import DDGS  # already in requirements
             with DDGS() as ddgs:
                 raw = ddgs.text(query, max_results=count, timelimit=timelimit) or []
         except Exception as exc:

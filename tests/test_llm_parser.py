@@ -9,8 +9,8 @@ formatos mixtos, edge cases y contrato del singleton get_parser().
 NOTA DE IMPORTACIÓN:
     app/agents/utils/llm_parser.py solo depende de stdlib (re, logging).
     Importarlo vía `agents.utils.llm_parser` ejecuta `agents/__init__.py`,
-    que a su vez importa OrchestrationAgent → WebAgent → duckduckgo_search.
-    Si duckduckgo_search no está instalado, todos los tests del fixture
+    que a su vez importa OrchestrationAgent → WebAgent → ddgs.
+    Si ddgs no está instalado, todos los tests del fixture
     `parser` fallan por error de setup.
 
     Solución: añadir `app/agents/utils` directamente al sys.path e importar
@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 # Importar el módulo directamente (sin agents/__init__.py) para no arrastrar
-# la dependencia transitiva agents → web_agent → duckduckgo_search.
+# la dependencia transitiva agents → web_agent → ddgs.
 _UTILS_PATH = str(Path(__file__).parent.parent / "app" / "agents" / "utils")
 if _UTILS_PATH not in sys.path:
     sys.path.insert(0, _UTILS_PATH)

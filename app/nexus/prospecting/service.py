@@ -81,6 +81,22 @@ class ProspectingAgentService:
             ),
             api_key=getattr(cfg, "local_llm_api_key", "") or cfg.l0_key,
         )
+        # Analisis largos de campaña (encaje con Assets): nadie espera en
+        # pantalla y el prompt lleva catalogo + normativas + empresa, el mas
+        # pesado del enriquecimiento — con los 30s del chat de Sales daba
+        # ReadTimeout (verificado en vivo con qwen3:8b). Si llega un cliente
+        # inyectado (tests) se reutiliza tal cual.
+        self._analysis_llm = llm_client or LocalLLMClient(
+            settings=LocalLLMSettings(
+                base_url=getattr(cfg, "local_llm_base_url", None) or cfg.l0_url,
+                model=getattr(cfg, "local_llm_model", "") or cfg.l0_model,
+                provider=getattr(cfg, "local_llm_provider", "openai_compatible"),
+                timeout=float(getattr(cfg, "local_llm_campaign_timeout", 300)),
+                retries=1,
+                enabled=bool(getattr(cfg, "local_llm_enabled", False) or cfg.l0_url),
+            ),
+            api_key=getattr(cfg, "local_llm_api_key", "") or cfg.l0_key,
+        )
         self._brave = brave_client or BraveSearchClient(
             settings=BraveSearchSettings(
                 api_key=getattr(cfg, "brave_search_api_key", None),
@@ -1074,6 +1090,8 @@ class ProspectingAgentService:
                 extracted["assets_fit"] = assets_fit
                 if assets_fit["matches"]:
                     self._log(run, f"Encaje con Assets: {cname} | {', '.join(m['nombre'] for m in assets_fit['matches'])}")
+                elif assets_fit["estado"] == "no_analizado":
+                    self._log(run, f"Encaje con Assets NO analizado: {cname} | {assets_fit['motivo']}", level="warning")
 
     async def _classify_grant_fit(
         self,
@@ -1153,12 +1171,19 @@ class ProspectingAgentService:
         - el bloque del catalogo incluye las cautelas de cada oferta (cifras
           que la web declara sin cliente nombrado) para que no se citen
         """
-        empty: dict[str, Any] = {"matches": [], "sin_encaje": True, "resumen": ""}
-        if not self._llm.enabled:
-            return empty
+        # Tres estados, nunca dos: "analizado" con encajes, "analizado" sin
+        # encaje (sin_encaje=True, una conclusion real) y "no_analizado"
+        # (sin_encaje=None) cuando el analisis no pudo ejecutarse — un
+        # timeout del LLM NO puede presentarse como "no encaja" (verificado
+        # en vivo: las 3 empresas salieron "sin encaje" por ReadTimeout).
+        def not_analyzed(motivo: str) -> dict[str, Any]:
+            return {"estado": "no_analizado", "motivo": motivo, "matches": [], "sin_encaje": None, "resumen": ""}
+
+        if not self._analysis_llm.enabled:
+            return not_analyzed("LLM local desactivado")
         offerings = [o for o in self._offerings.list_active() if o.tipo != "perfil"]
         if not offerings:
-            return empty
+            return not_analyzed("catalogo de ofertas vacio o sin ofertas activas")
 
         findings = (technical_audit or {}).get("findings") or []
         company_block = (
@@ -1175,41 +1200,62 @@ class ProspectingAgentService:
             + (f"Informacion adicional aportada (verificada por una persona):\n{extra_context}\n" if extra_context.strip() else "")
         )
         try:
-            result = await self._llm.extract_json(
+            result = await self._analysis_llm.extract_json(
                 system_prompt=resolve_prompt_sync("prospecting.assets_fit"),
                 user_prompt=(
                     f"Catalogo de lo que ofrece la consultora:\n{build_offerings_block(offerings)}\n\n"
                     f"Normativas reales:\n{build_regulations_block(self._regulations.list_active())}\n\n"
                     f"Empresa:\n{company_block}"
                 ),
-                schema_hint={"matches": [{"slug": "", "evidencia": "", "confianza": "media"}], "sin_encaje": False, "resumen": ""},
+                schema_hint={"matches": [{"slug": "", "dato": "", "conexion": "", "confianza": "media"}], "sin_encaje": False, "resumen": ""},
             )
-        except Exception:
-            return empty
+        except Exception as exc:
+            return not_analyzed(f"error del LLM: {type(exc).__name__}")
         if not result:
-            return empty
+            return not_analyzed("el LLM no devolvio una respuesta utilizable (timeout o JSON invalido)")
 
         valid = {o.slug: o for o in offerings}
-        evidence_blob = _normalize_text(company_block)
+        # Grounding por CITA LITERAL, no por solapamiento de palabras: con un
+        # modelo de 8B, "alguna palabra de la evidencia aparece en los datos"
+        # dejaba pasar frases que mezclaban un dato real con texto copiado del
+        # catalogo (verificado en vivo: "opera con telemetria a gran escala"
+        # para una empresa que nunca lo dijo). El `dato` tiene que ser un
+        # fragmento que esta tal cual en lo que sabemos de la empresa; la
+        # `conexion` es razonamiento del modelo y se etiqueta como tal. Solo el
+        # `dato` es un hecho utilizable (p. ej. en un correo).
+        def quote_key(text: str) -> str:
+            return " ".join(re.findall(r"[a-z0-9]+", _normalize_text(text)))
+
+        blob_key = quote_key(company_block)
+        proposed = [raw for raw in (result.get("matches") or [])[:4] if isinstance(raw, dict)]
         matches: list[dict[str, Any]] = []
-        for raw in (result.get("matches") or [])[:4]:
-            if not isinstance(raw, dict):
-                continue
+        for raw in proposed:
             offering = valid.get(str(raw.get("slug") or ""))
-            evidencia = str(raw.get("evidencia") or "").strip()
-            if offering is None or not evidencia:
-                continue
-            tokens = [tok for tok in _normalize_text(evidencia).split() if len(tok) > 4]
-            if not any(tok in evidence_blob for tok in tokens):
+            dato = str(raw.get("dato") or "").strip()
+            dato_key = quote_key(dato)
+            if offering is None or len(dato_key.split()) < 3 or dato_key not in blob_key:
                 continue
             confianza = str(raw.get("confianza") or "").strip().lower()
             matches.append({
                 "slug": offering.slug,
                 "nombre": offering.nombre,
-                "evidencia": evidencia,
+                "dato": dato,
+                "conexion": str(raw.get("conexion") or "").strip(),
                 "confianza": confianza if confianza in {"alta", "media", "baja"} else "baja",
             })
+        if proposed and not matches:
+            # El modelo SI propuso encajes pero ninguno trae un dato citable:
+            # no es "no encaja", es que no se puede sostener ninguno.
+            return {
+                "estado": "inconcluso",
+                "motivo": f"el modelo propuso {len(proposed)} encaje(s) pero ninguno cita un dato literal de la empresa",
+                "matches": [],
+                "sin_encaje": None,
+                "resumen": str(result.get("resumen") or "").strip(),
+            }
         return {
+            "estado": "analizado",
+            "motivo": "",
             "matches": matches,
             "sin_encaje": not matches,
             "resumen": str(result.get("resumen") or "").strip(),
@@ -1276,10 +1322,10 @@ class ProspectingAgentService:
             "what_they_do": "", "target_audience": "", "value_prop": "",
             "friction_points": [], "digital_maturity": "", "improvement_opportunities": [],
         }
-        if not self._llm.enabled:
+        if not self._analysis_llm.enabled:
             return empty
         try:
-            response = await self._llm.extract_json(
+            response = await self._analysis_llm.extract_json(
                 system_prompt=resolve_prompt_sync("sales.prospecting.business_profile"),
                 user_prompt=(
                     f"Empresa: {extracted.get('name', '')}\n"

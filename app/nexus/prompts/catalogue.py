@@ -457,13 +457,16 @@ Decide a que oferta(s) del catalogo encaja de verdad esta empresa — puede ser
 ninguna, una o varias.
 
 Devuelve SOLO JSON con:
-- matches: lista de objetos {slug, evidencia, confianza}
+- matches: lista de objetos {slug, dato, conexion, confianza}
   - slug: DEBE ser exactamente uno de los slugs del catalogo, nunca inventes uno
-  - evidencia: una frase que cite un dato CONCRETO de la empresa tomado de los
-    datos proporcionados (que hace, tamaño, sector, tecnologia que usa, un
-    hueco observado) y lo conecte con la señal de encaje — nunca una frase
-    generica que valdria para cualquier empresa
-  - confianza: "alta" (la señal esta explicita en los datos), "media" (se
+  - dato: una COPIA LITERAL, palabra por palabra, de un fragmento de los datos
+    de la empresa (al menos 3 palabras seguidas) que sostiene el encaje. Debe
+    aparecer tal cual en la seccion "Empresa". NO parafrasees, NO resumas y NO
+    copies texto del catalogo: si no hay un fragmento literal de la empresa que
+    lo sostenga, no incluyas ese match
+  - conexion: una frase que explique por que ese dato encaja con la señal de la
+    oferta. Es tu razonamiento (una hipotesis), no un hecho de la empresa
+  - confianza: "alta" (la señal esta explicita en el dato), "media" (se
     deduce razonablemente) o "baja" (hipotesis)
 - sin_encaje: true si no encaja en nada del catalogo
 - resumen: una frase honesta sobre el encaje global, diciendo que es hipotesis
@@ -479,6 +482,15 @@ Reglas:
   de resultados, ni clientes de referencia
 - no presentes como hecho algo que solo sea una señal publica indirecta
   (ej. la configuracion de su correo): di que se observa, no que es un fallo
+- cuando cites una normativa, nombra el sector TAL COMO figura en su lista de
+  sectores (ej. "operadores de energia electrica", "redes de telecomunicaciones")
+  y nunca lo reetiquetes en otro sector: generar electricidad es energia, no
+  infraestructura digital
+- la conexion de cada match debe justificar SOLO esa oferta: no metas en la
+  de una oferta el argumento de otra (ej. la normativa NIS2 va en la conexion
+  de seguridad_nis2, no en la de energia_ot_it)
+- si el encaje es una conjetura (por ejemplo "podria necesitar..."), la
+  confianza es "baja", no "media"
 - devuelve SOLO JSON""",
     ),
     "prospecting.grant_freshness": PromptDefinition(

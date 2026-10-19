@@ -62,6 +62,10 @@ _FOLLOWUP_QUESTION_PATTERN = re.compile(
 
 _ASK_KINDS = {"ask_user", "ask_user_secret"}
 
+# Marcador del mensaje `tool` de una call que espera al usuario (ver
+# ConfirmableAgent._process_tool_batch / _resolve_tool_message).
+_PENDING_PLACEHOLDER = "__pendiente_de_respuesta_del_usuario__"
+
 _BASE_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -129,6 +133,25 @@ class ConfirmableAgent:
     agent_id: str = "confirmable"
     max_loop_steps: int = 6
 
+    # Parametros del LLM en cada vuelta del bucle (por defecto, los valores de
+    # siempre: ningun agente existente cambia).
+    preferred_level: int = 2
+    max_tokens: int = 1400
+    loop_timeout: float = 30.0
+
+    # ── Modo "agente de codigo" (CodeAgent) — apagado por defecto ───────────
+    # batch_readonly_calls: procesa TODAS las tool calls del turno en orden
+    #   hasta la primera que pida respuesta/confirmacion (antes solo la
+    #   primera, el resto se ignoraba). Los argumentos JSON invalidos o una
+    #   excepcion en dispatch_tool vuelven al modelo como resultado de la tool
+    #   en vez de matar el bucle.
+    # resume_after_execute: tras confirmar una propuesta, el resultado de
+    #   execute() vuelve al LLM como resultado de la tool y el bucle CONTINUA
+    #   (editar -> probar -> leer el fallo -> corregir). Sin esto, execute()
+    #   termina la tarea. Con esto activo tambien existe reject().
+    batch_readonly_calls: bool = False
+    resume_after_execute: bool = False
+
     # Identidad FIJA para persistencia — a diferencia de `agent_id` (que
     # MCPAgent muta en tiempo real segun el servidor activo), esta nunca
     # cambia, para poder encontrar el pendiente guardado sin importar el
@@ -192,6 +215,11 @@ class ConfirmableAgent:
         """Resumen para list_pending() — override si pending.task no basta."""
         return pending.task
 
+    def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
+        """Gancho previo a cada llamada al LLM: las subclases pueden recortar
+        `messages` EN SITIO (p. ej. CodeAgent elide salidas antiguas de
+        herramientas para no desbordar el contexto). Por defecto no hace nada."""
+
     # ── Bucle generico ───────────────────────────────────────────────────────
 
     async def _run_loop(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -204,14 +232,15 @@ class ConfirmableAgent:
 
         for _ in range(self.max_loop_steps):
             try:
+                self._prepare_messages(messages)
                 response = await self._llm_router.call(
                     messages=messages,
                     tools=all_tools,
                     tool_choice="auto",
-                    preferred_level=2,
+                    preferred_level=self.preferred_level,
                     temperature=0.1,
-                    max_tokens=1400,
-                    timeout=30.0,
+                    max_tokens=self.max_tokens,
+                    timeout=self.loop_timeout,
                 )
             except Exception as exc:
                 logger.exception("Fallo en el bucle de %s", self.agent_id)
@@ -227,6 +256,12 @@ class ConfirmableAgent:
                     messages.append({"role": "assistant", "content": content})
                     return {"kind": "ask_user", "question": stripped, "messages": messages, "tool_call_id": None}
                 return {"kind": "finish", "summary": content or "Hecho."}
+
+            if self.batch_readonly_calls:
+                batch_outcome = await self._process_tool_batch(messages, response)
+                if batch_outcome is not None:
+                    return batch_outcome
+                continue
 
             call = response.tool_calls[0]
             fn = call.get("function", {})
@@ -261,6 +296,81 @@ class ConfirmableAgent:
             messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": str(result)})
 
         return {"kind": "finish", "summary": "No he podido resolverlo en los pasos disponibles."}
+
+    async def _process_tool_batch(self, messages: list[dict[str, Any]], response: Any) -> dict[str, Any] | None:
+        """Camino de batch_readonly_calls. Devuelve el outcome que corta el
+        bucle (pregunta, propuesta, finish) o None si todas las tool calls del
+        turno eran lecturas ya resueltas y el bucle debe seguir.
+
+        Protocolo OpenAI: cada tool_call del mensaje del asistente necesita su
+        mensaje `tool` antes del siguiente turno. Cuando el bucle se corta en
+        la call N (pregunta/propuesta), esa call deja un marcador que se
+        sustituye en su sitio al responder el usuario (confirm/reject), y las
+        calls posteriores se contestan como ignoradas."""
+        calls = response.tool_calls
+        messages.append({
+            "role": "assistant",
+            "content": response.content or None,
+            "tool_calls": calls,
+        })
+        for index, call in enumerate(calls):
+            call_id = call.get("id", "")
+            fn = call.get("function", {})
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                messages.append({
+                    "role": "tool", "tool_call_id": call_id,
+                    "content": f"Argumentos JSON invalidos para {name}: vuelve a llamar a la herramienta con JSON valido.",
+                })
+                continue
+
+            if name == "finish":
+                return {"kind": "finish", "summary": args.get("summary", "Hecho.")}
+
+            if name in _ASK_KINDS:
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": _PENDING_PLACEHOLDER})
+                self._ignore_remaining_calls(messages, calls[index + 1:])
+                return {"kind": name, "question": args.get("question", "?"), "messages": messages, "tool_call_id": call_id}
+
+            try:
+                result = await self.dispatch_tool(name, args)
+            except Exception as exc:
+                logger.exception("Fallo en la herramienta %s de %s", name, self.agent_id)
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": f"ERROR ejecutando {name}: {exc}"})
+                continue
+
+            if isinstance(result, ProposalOutcome):
+                messages.append({"role": "tool", "tool_call_id": call_id, "content": _PENDING_PLACEHOLDER})
+                self._ignore_remaining_calls(messages, calls[index + 1:])
+                return {"kind": result.kind, "payload": result.payload, "messages": messages, "tool_call_id": call_id}
+            if result is None:
+                return {"kind": "finish", "summary": f"Herramienta desconocida: {name}"}
+            messages.append({"role": "tool", "tool_call_id": call_id, "content": str(result)})
+        return None
+
+    @staticmethod
+    def _ignore_remaining_calls(messages: list[dict[str, Any]], remaining: list[dict[str, Any]]) -> None:
+        for call in remaining:
+            messages.append({
+                "role": "tool", "tool_call_id": call.get("id", ""),
+                "content": "Ignorada — hay otra accion esperando respuesta del usuario; vuelve a pedirla despues si sigue haciendo falta.",
+            })
+
+    @staticmethod
+    def _resolve_tool_message(messages: list[dict[str, Any]], tool_call_id: str, content: str) -> None:
+        """Sustituye en su sitio el marcador de una tool call pendiente; si no
+        hay marcador (camino clasico) añade el resultado al final."""
+        for message in messages:
+            if (
+                message.get("role") == "tool"
+                and message.get("tool_call_id") == tool_call_id
+                and message.get("content") == _PENDING_PLACEHOLDER
+            ):
+                message["content"] = content
+                return
+        messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
 
     def _store_outcome(self, context_id: str, task: str, outcome: dict[str, Any]) -> dict[str, Any]:
         kind = outcome["kind"]
@@ -342,9 +452,7 @@ class ConfirmableAgent:
 
         if pending.kind in _ASK_KINDS:
             if pending.tool_call_id:
-                pending.messages.append({
-                    "role": "tool", "tool_call_id": pending.tool_call_id, "content": user_reply or "",
-                })
+                self._resolve_tool_message(pending.messages, pending.tool_call_id, user_reply or "")
             else:
                 # Pregunta en texto libre (sin tool call real detras) — ver
                 # el branch "no tool_calls" de _run_loop. No hay tool_call_id
@@ -366,4 +474,51 @@ class ConfirmableAgent:
             }
 
         # kind propio de la subclase — pendiente de ejecutar de verdad.
-        return await self.execute(pending)
+        if not self.resume_after_execute:
+            return await self.execute(pending)
+
+        executed = await self.execute(pending)
+        error = executed.get("error")
+        feedback = "\n".join(
+            part for part in (executed.get("content"), f"ERROR: {error}" if error else None) if part
+        ) or "Hecho."
+        if pending.tool_call_id:
+            self._resolve_tool_message(pending.messages, pending.tool_call_id, feedback)
+        return await self._continue_after(context_id, pending, executed)
+
+    async def reject(self, context_id: str, reason: str | None = None) -> dict[str, Any] | None:
+        """El usuario rechaza la propuesta pendiente. En modo
+        resume_after_execute el modelo se entera (y puede proponer otra
+        alternativa); en el resto equivale a cancelar."""
+        pending = self._pending.pop(context_id, None)
+        if pending is None:
+            return None
+        self._forget(context_id)
+        if not self.resume_after_execute or not pending.tool_call_id:
+            return {"task": pending.task, "is_done": True, "content": "Cancelado.", "error": None}
+        text = (
+            "El usuario ha RECHAZADO esta accion" + (f": {reason}" if reason else ".")
+            + " No la apliques. Propon otra alternativa o termina."
+        )
+        self._resolve_tool_message(pending.messages, pending.tool_call_id, text)
+        return await self._continue_after(context_id, pending, None)
+
+    async def _continue_after(
+        self, context_id: str, pending: PendingAction, executed: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Reanuda el bucle tras resolver la tool call pendiente y devuelve el
+        resultado con la misma forma que la rama de preguntas de confirm()."""
+        outcome = await self._run_loop(pending.messages)
+        stored = self._store_outcome(context_id, pending.task, outcome)
+        extra = {"executed": executed} if executed is not None else {}
+        if stored["kind"] == "finish":
+            return {"task": pending.task, "is_done": True, "content": stored["summary"], "error": None, **extra}
+        if stored["kind"] in _ASK_KINDS:
+            return {
+                "task": pending.task, "is_done": False, "content": None, "error": None,
+                "next_kind": stored["kind"], "next_question": stored["question"], **extra,
+            }
+        return {
+            "task": pending.task, "is_done": False, "content": None, "error": None,
+            "next_kind": stored["kind"], "next_payload": stored.get("payload", {}), **extra,
+        }

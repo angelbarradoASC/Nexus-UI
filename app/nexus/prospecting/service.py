@@ -353,7 +353,7 @@ class ProspectingAgentService:
             }
             for item in payload.get("results", [])
         ]
-        return {"provider": "ddg", "results": results, "note": note}
+        return {"provider": "ddg", "results": results, "note": ""}
 
     async def quick_probe(self, *, city: str, vertical: str) -> dict:
         """3-result DDG probe to check if a city/vertical combination has real results."""

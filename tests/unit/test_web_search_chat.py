@@ -250,3 +250,38 @@ def test_router_does_not_search_the_web_just_because_of_hoy(message):
     from desktop.runtime.skill_router import DesktopSkillRouter
 
     assert DesktopSkillRouter().resolve(message).to_dict()["skill_id"] != "web.busqueda"
+
+
+# ── Limpieza de la consulta ──────────────────────────────────────────────────
+
+@pytest.mark.parametrize("message, expected", [
+    ("busca en internet que switches cisco catalyst soportan PTP", "switches cisco catalyst soportan PTP"),
+    ("buscame información sobre NIS2", "NIS2"),
+    ("por favor, puedes buscar en google qué es PTP?", "qué es PTP"),
+    ("busca sobre PTP y MPLS", "PTP y MPLS"),
+    ("cuales son los trending topics en twitter hoy en españa?", "cuales son los trending topics en twitter hoy en españa"),
+    ("busca", "busca"),
+])
+def test_clean_search_query_strips_the_conversational_command(message, expected):
+    from nexus.orchestration.coordinator import _clean_search_query
+
+    assert _clean_search_query(message) == expected
+
+
+@pytest.mark.asyncio
+async def test_chat_searches_the_cleaned_query_but_answers_the_original_question():
+    """Visto en vivo: la frase entera ('busca en internet que...') no encontraba
+    nada en ningun motor."""
+    prospecting = _FakeProspecting({
+        "provider": "ddg", "note": "",
+        "results": [{"title": "PTP en Catalyst", "url": "https://c.example", "description": "x"}],
+    })
+    router = _FakeRouter("ok")
+    coordinator = _coordinator(prospecting, router)
+
+    await coordinator.handle_chat(
+        ChatRequest(message="busca en internet que switches cisco soportan PTP"), resolution_override=_OVERRIDE
+    )
+
+    assert prospecting.queries == [("switches cisco soportan PTP", None)]
+    assert "busca en internet que switches cisco soportan PTP" in router.calls[0][1]["content"]

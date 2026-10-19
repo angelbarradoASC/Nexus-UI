@@ -60,6 +60,23 @@ _CONFIRM_NO_WORDS = {"no", "cancela", "cancelar", "olvidalo", "olvídalo", "déj
 _CONFIRM_MAX_WORDS = 5
 
 
+_SEARCH_COMMAND_PREFIX = re.compile(
+    r"^\s*(?:por favor[,\s]+)?(?:puedes\s+|podrias\s+|podrías\s+)?"
+    r"(?:busca(?:me|r)?|investiga|averigua|dime|encuentra(?:me)?)\s+"
+    r"(?:(?:en|por)\s+(?:internet|la\s+web|google|la\s+red)\s+)?"
+    r"(?:(?:(?:que|qué)\s+(?!es\b|son\b|significa|hace\b|era\b|fue\b)|sobre\s+|acerca\s+de\s+|informaci[oó]n\s+(?:sobre|de)\s+))?",
+    re.IGNORECASE,
+)
+
+
+def _clean_search_query(message: str) -> str:
+    """Quita la orden conversacional ("busca en internet que...") para buscar solo
+    el tema: visto en vivo, la frase entera como consulta no encontraba nada en
+    ningun motor. Si tras limpiar no queda nada, se usa el mensaje original."""
+    cleaned = _SEARCH_COMMAND_PREFIX.sub("", message.strip(), count=1).strip(" ?¿!¡")
+    return cleaned if len(cleaned) >= 3 else message.strip()
+
+
 def _match_confirmation(message: str) -> str | None:
     """Devuelve "yes", "no" o None — nunca por substring, solo palabra suelta
     dentro de un mensaje corto (una respuesta de confirmacion real)."""
@@ -557,7 +574,7 @@ class NexusCoordinator:
 
         search: dict[str, Any] = {"provider": "", "results": [], "note": ""}
         try:
-            search = await self._prospecting.web_search(query, count=8, timelimit=timelimit)
+            search = await self._prospecting.web_search(_clean_search_query(query), count=8, timelimit=timelimit)
         except Exception:
             logger.exception("web.busqueda | fallo buscando en la web")
 

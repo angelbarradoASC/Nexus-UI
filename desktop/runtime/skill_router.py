@@ -136,6 +136,31 @@ class DesktopSkillRouter:
 
         return self._build_resolution(skill_id, confidence, rationale, entities)
 
+    # Palabras/frases que delatan un seguimiento de lo anterior. Un pronombre
+    # suelto ("la", "lo") NO cuenta: "que routers la soportan?" es una pregunta
+    # con tema propio, no una orden sobre el turno previo.
+    _FOLLOWUP_WORDS = frozenset({
+        "hazlo", "hazla", "hazlos", "hazlas", "bajala", "bájala", "bajalo", "bájalo", "subela", "súbela",
+        "subelo", "súbelo", "ponla", "ponlo", "repite", "repítelo", "repitelo", "dale", "adelante",
+        "confirmo", "cancela",
+    })
+    _FOLLOWUP_PHRASES = (
+        "otra vez", "de nuevo", "lo mismo", "la misma", "esa misma", "ese mismo", "a la mitad",
+        "un poco mas", "un poco más", "un poco menos", "vuelve a hacer", "volver a hacer",
+    )
+
+    @classmethod
+    def is_followup(cls, text: str) -> bool:
+        """True si el mensaje es un seguimiento corto cuyo sentido depende del
+        turno anterior. Los mensajes largos o con tema propio se clasifican solos."""
+        lowered = text.lower().strip()
+        words = re.findall(r"\w+", lowered)
+        if not words or len(words) > 8:
+            return False
+        if any(word in cls._FOLLOWUP_WORDS for word in words):
+            return True
+        return any(phrase in f"{lowered} " for phrase in cls._FOLLOWUP_PHRASES)
+
     async def resolve_llm(
         self,
         user_input: str,
@@ -158,7 +183,11 @@ class DesktopSkillRouter:
             "__SKILLS_CATALOGUE__", self.catalogue.as_prompt_options()
         )
         messages = [{"role": "system", "content": system_prompt}]
-        if history:
+        # El historial solo sirve para resolver seguimientos cortos ("bajala
+        # a la mitad"). Pasarselo siempre contaminaba mensajes autocontenidos:
+        # visto en vivo, "que switches y routers cisco la soportan?" tras
+        # hablar del raton se clasifico como desktop.mouse_speed.
+        if history and self.is_followup(text):
             messages.extend(history[-6:])
         messages.append({"role": "user", "content": text})
         try:

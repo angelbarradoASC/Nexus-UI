@@ -20,12 +20,14 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from desktop.local_agents.confirmable_loop import ConfirmableAgent, PendingAction
 
+from .pacer import CHARS_PER_TOKEN, DEADLINE_ERROR, PacedRouter, TokenPacer
 from .tools import READ_TOOL_SCHEMAS, run_read_tool
 from .workspace import Workspace, WorkspaceError, redact
 
@@ -35,12 +37,18 @@ logger = logging.getLogger("nexus.code_agent")
 _RULES_FILES = ("PEPO.md", "CLAUDE.md", "AGENTS.md")
 _RULES_MAX_CHARS = 8_000
 
-# Presupuesto de contexto: por encima, se omiten las salidas de herramientas mas antiguas.
-_CONTEXT_CHAR_BUDGET = 100_000
-_KEEP_RECENT_TOOL_RESULTS = 8
+# Presupuesto de contexto: por encima, se omiten las salidas de herramientas (las mas
+# antiguas primero y, si hace falta, se recorta la ultima). Escala con los tokens/minuto
+# configurados: una peticion debe caber SIEMPRE en la cuota, o cada paso espera un minuto
+# entero (visto en vivo con 8.000 tokens/min: el contexto crecia sin tope y la tarea
+# seguia 10 minutos). `_FIXED_CHARS` cubre los esquemas de herramientas (~3,1k caracteres).
+_FIXED_CHARS = 4_500
+_MIN_CONTEXT_CHARS = 10_000
 _ELIDED_PREFIX = "[resultado antiguo omitido"
+_TRUNCATED_NOTE = "\n[... recortado para caber en la cuota de tokens; pide un trozo mas pequeño si lo necesitas]"
 
 _current_workspace: contextvars.ContextVar[Workspace | None] = contextvars.ContextVar("code_agent_workspace", default=None)
+_task_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar("code_agent_deadline", default=None)
 
 
 class CodeAgent(ConfirmableAgent):
@@ -53,11 +61,19 @@ class CodeAgent(ConfirmableAgent):
     resume_after_execute = True
     max_loop_steps = 25
     preferred_level = 2
-    max_tokens = 2500
+    max_tokens = 1200
     loop_timeout = 60.0
+    # Presupuesto propio de tokens/minuto (deja margen al resto de PEPO, que comparte cuenta).
+    # Si hay ajustes, manda `CodeSettingsStore.tokens_per_minute` (editable en Configuracion).
+    tokens_per_minute = 6500
+    # Limite de tiempo por tarea: con poca cuota cada paso espera ~1 min; mejor rendirse con
+    # un mensaje claro que dejar el bucle quemando cuota durante minutos.
+    max_task_seconds = 240.0
 
     def __init__(self, cfg, *, llm_router=None, store=None, settings=None) -> None:
-        super().__init__(cfg, llm_router=llm_router, store=store)
+        self._pacer = TokenPacer(self.tokens_per_minute)
+        paced = PacedRouter(llm_router, self._pacer, deadline_fn=_task_deadline.get) if llm_router is not None else None
+        super().__init__(cfg, llm_router=paced, store=store)
         self._settings = settings  # CodeSettingsStore (enabled / is_allowed)
 
     # ── Workspace ────────────────────────────────────────────────────────────
@@ -110,24 +126,69 @@ class CodeAgent(ConfirmableAgent):
                 return f"({name})\n" + redact(text)
         return ""
 
-    # ── Gancho de contexto ───────────────────────────────────────────────────
+    # ── Cuota y contexto ─────────────────────────────────────────────────────
+
+    def _tokens_per_minute(self) -> int:
+        configured = getattr(self._settings, "tokens_per_minute", None)
+        return int(configured) if configured else self.tokens_per_minute
+
+    def _context_char_budget(self) -> int:
+        """Caracteres maximos de `messages` para que la peticion (mensajes + esquemas) quepa
+        en ~85 % de la cuota por minuto."""
+        return max(_MIN_CONTEXT_CHARS, int(self._tokens_per_minute() * CHARS_PER_TOKEN * 0.85) - _FIXED_CHARS)
+
+    def _begin_task(self) -> None:
+        """Aplica la cuota configurada y arranca el reloj de la tarea."""
+        self._pacer.tokens_per_minute = self._tokens_per_minute()
+        _task_deadline.set(self._pacer.clock() + self.max_task_seconds)
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
-        """Si el contexto supera el presupuesto, omite en sitio las salidas de
-        herramientas mas antiguas (el modelo puede volver a leerlas). Las
-        ultimas salidas (_KEEP_RECENT_TOOL_RESULTS) y los marcadores de pendiente no se tocan."""
+        """Mantiene `messages` bajo el presupuesto: omite en sitio las salidas de
+        herramientas, de la mas antigua a la mas reciente (el modelo puede volver a
+        leerlas); si aun asi no cabe, recorta la ultima. Los marcadores de
+        pendiente y las salidas pequeñas no se tocan."""
+        budget = self._context_char_budget()
         total = sum(len(str(m.get("content") or "")) for m in messages)
-        if total <= _CONTEXT_CHAR_BUDGET:
+        if total <= budget:
             return
         tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-        for index in tool_indexes[:-_KEEP_RECENT_TOOL_RESULTS]:
+        for index in tool_indexes[:-1]:
             content = str(messages[index].get("content") or "")
             if content.startswith(_ELIDED_PREFIX) or content.startswith("__pendiente") or len(content) < 300:
                 continue
             messages[index]["content"] = f"{_ELIDED_PREFIX}: {len(content)} caracteres; vuelve a leerlo si lo necesitas]"
-            total -= len(content)
-            if total <= _CONTEXT_CHAR_BUDGET:
-                break
+            total -= len(content) - len(str(messages[index]["content"]))
+            if total <= budget:
+                return
+        if tool_indexes:
+            last = tool_indexes[-1]
+            content = str(messages[last].get("content") or "")
+            if not content.startswith("__pendiente"):
+                room = max(budget - (total - len(content)) - len(_TRUNCATED_NOTE), 1_500)
+                if len(content) > room:
+                    messages[last]["content"] = content[:room] + _TRUNCATED_NOTE
+
+    def _store_outcome(self, context_id: str, task: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        summary = str(outcome.get("summary", ""))
+        if outcome.get("kind") == "finish" and DEADLINE_ERROR in summary:
+            outcome = {
+                "kind": "finish",
+                "summary": (
+                    f"Me he quedado sin tiempo ({int(self.max_task_seconds // 60)} min): cada paso tiene que esperar a la cuota de "
+                    f"tokens de tu proveedor de IA ({self._tokens_per_minute()} por minuto) y la tarea no cabia. Prueba con una "
+                    "pregunta mas concreta, o sube el limite en Configuracion > Modo codigo si tu plan tiene mas cuota."
+                ),
+            }
+        elif outcome.get("kind") == "finish" and "429" in summary:
+            outcome = {
+                "kind": "finish",
+                "summary": (
+                    "El proveedor de IA ha limitado los tokens por minuto de tu cuenta y no he podido seguir. "
+                    "Espera un minuto y repite la pregunta. Un agente de codigo gasta mucha cuota (reenvia el "
+                    "contexto en cada paso): para tareas largas hace falta un plan con mas limite o un modelo local."
+                ),
+            }
+        return super()._store_outcome(context_id, task, outcome)
 
     # ── Herramientas ─────────────────────────────────────────────────────────
 
@@ -163,7 +224,9 @@ class CodeAgent(ConfirmableAgent):
             return {"kind": "finish", "task": task, "summary": str(exc)}
 
         token = _current_workspace.set(ws)
+        deadline_token = _task_deadline.set(None)
         try:
+            self._begin_task()
             seed = [
                 {"role": "system", "content": self._system_prompt(ws)},
                 *(history or []),
@@ -174,6 +237,7 @@ class CodeAgent(ConfirmableAgent):
             self._bind_workspace(context_id, ws)
             return stored
         finally:
+            _task_deadline.reset(deadline_token)
             _current_workspace.reset(token)
 
     def _workspace_of_pending(self, context_id: str) -> Workspace:
@@ -198,9 +262,12 @@ class CodeAgent(ConfirmableAgent):
             return {"task": task, "is_done": True, "content": str(exc), "error": None}
 
         token = _current_workspace.set(ws)
+        deadline_token = _task_deadline.set(None)
         try:
+            self._begin_task()
             result = await action()
             self._bind_workspace(context_id, ws)
             return result
         finally:
+            _task_deadline.reset(deadline_token)
             _current_workspace.reset(token)

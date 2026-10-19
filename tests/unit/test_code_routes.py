@@ -27,7 +27,7 @@ def _client(tmp_path) -> tuple[TestClient, CodeSettingsStore]:
 def test_settings_start_enabled_and_empty(tmp_path):
     client, _ = _client(tmp_path)
 
-    assert client.get("/api/desktop/code/settings").json() == {"enabled": True, "workspaces": []}
+    assert client.get("/api/desktop/code/settings").json() == {"enabled": True, "tokens_per_minute": 6500, "workspaces": []}
 
 
 def test_add_and_remove_a_workspace(tmp_path):
@@ -73,3 +73,15 @@ def test_a_workspace_deleted_from_disk_is_flagged_as_missing(tmp_path):
     project.rmdir()
 
     assert client.get("/api/desktop/code/settings").json()["workspaces"][0]["exists"] is False
+
+
+def test_the_token_quota_can_be_changed_within_limits(tmp_path):
+    client, store = _client(tmp_path)
+
+    ok = client.put("/api/desktop/code/limits", json={"tokens_per_minute": 60000})
+
+    assert ok.status_code == 200 and ok.json()["tokens_per_minute"] == 60000
+    assert store.tokens_per_minute == 60000
+    for bad in (10, 10**9, "mucho"):
+        assert client.put("/api/desktop/code/limits", json={"tokens_per_minute": bad}).status_code == 422
+    assert store.tokens_per_minute == 60000

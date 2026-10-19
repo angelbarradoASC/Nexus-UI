@@ -930,6 +930,23 @@
                         </div>
                         <div class="module-section">
                             <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Cuota</p>
+                                <h3>Tokens por minuto de tu proveedor de IA</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Un agente de código reenvía todo el contexto en cada paso y gasta mucha
+                                cuota. PEPO espera para no superar este límite en lugar de recibir errores
+                                429. Con 8.000 tokens/min (plan gratuito de Groq) cada paso tarda cerca de
+                                un minuto; con un plan de más cuota, sube este valor y irá mucho más rápido.
+                            </p>
+                            <div class="form-actions">
+                                <input id="codeTpmInput" type="number" min="1000" max="1000000" step="500" style="width:140px">
+                                <button id="codeTpmSaveBtn" type="button">Guardar</button>
+                                <span id="codeTpmNote" class="assets-form-note"></span>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
                                 <p class="eyebrow eyebrow-tight">Seguridad</p>
                                 <h3>Carpetas autorizadas</h3>
                             </div>
@@ -954,6 +971,6 @@
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20261019a"></script>
+    <script src="/static/js/nexus_settings.js?v=20261019b"></script>
 </body>
 </html>

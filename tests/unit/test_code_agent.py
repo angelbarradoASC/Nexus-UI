@@ -35,9 +35,17 @@ class _ScriptedRouter:
         return self._responses.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def _no_pacing(monkeypatch):
+    """El pacer real esperaria segundos de verdad; aqui solo se prueba el bucle."""
+    monkeypatch.setattr(CodeAgent, "tokens_per_minute", 10**9)
+
+
 @pytest.fixture
 def settings(tmp_path) -> CodeSettingsStore:
-    return CodeSettingsStore(tmp_path / "code_settings.json")
+    store = CodeSettingsStore(tmp_path / "code_settings.json")
+    store.set_tokens_per_minute(1_000_000)   # que el pacer no espere de verdad en estos tests
+    return store
 
 
 @pytest.fixture
@@ -232,26 +240,55 @@ async def test_phase_one_has_nothing_to_execute(settings):
 
 # ── Presupuesto de contexto ──────────────────────────────────────────────────
 
-def test_old_tool_outputs_are_elided_when_the_context_exceeds_the_budget(settings):
-    agent = _agent(_ScriptedRouter(), settings)
+def _agent_with_default_quota(tmp_path) -> CodeAgent:
+    """Agente con la cuota por defecto (6.500 tokens/min) para probar el recorte de contexto."""
+    return CodeAgent(None, llm_router=_ScriptedRouter(), settings=CodeSettingsStore(tmp_path / "default.json"))
+
+
+def _conversation(results: list[int]) -> list[dict]:
     messages = [{"role": "system", "content": "sistema"}, {"role": "user", "content": "tarea"}]
-    for i in range(20):
+    for i, size in enumerate(results):
         messages.append({"role": "assistant", "content": None, "tool_calls": [_call(f"c{i}", "read_file", path="x")]})
-        messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 10_000})
+        messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * size})
+    return messages
+
+
+def _chars(messages) -> int:
+    return sum(len(str(m.get("content") or "")) for m in messages)
+
+
+def test_old_tool_outputs_are_elided_oldest_first_until_the_context_fits(tmp_path):
+    agent = _agent_with_default_quota(tmp_path)
+    messages = _conversation([4_000] * 8)
     messages.append({"role": "tool", "tool_call_id": "pend", "content": "__pendiente_de_respuesta_del_usuario__"})
+    budget = agent._context_char_budget()
 
     agent._prepare_messages(messages)
 
-    tool_contents = [m["content"] for m in messages if m["role"] == "tool"]
-    assert tool_contents[0].startswith("[resultado antiguo omitido")       # lo viejo se omite
-    assert tool_contents[-2] == "x" * 10_000                                 # lo reciente se conserva
-    assert tool_contents[-1] == "__pendiente_de_respuesta_del_usuario__"     # el marcador no se toca
+    contents = [m["content"] for m in messages if m["role"] == "tool"]
+    assert contents[0].startswith("[resultado antiguo omitido")                 # lo viejo se omite primero
+    assert contents[-2] == "x" * 4_000                                           # lo reciente se conserva
+    assert contents[-1] == "__pendiente_de_respuesta_del_usuario__"              # el marcador no se toca
     assert messages[0]["content"] == "sistema" and messages[1]["content"] == "tarea"
-    assert sum(len(str(m.get("content") or "")) for m in messages) <= 100_000 + 10_000
+    assert _chars(messages) <= budget
 
 
-def test_small_contexts_are_left_alone(settings):
-    agent = _agent(_ScriptedRouter(), settings)
+def test_the_context_never_exceeds_the_budget_even_with_one_huge_result(tmp_path):
+    """Visto en vivo: el contexto crecia sin tope (estimacion de 8,3k a 9,6k tokens), cada
+    paso esperaba un minuto entero y la tarea seguia 10 minutos."""
+    agent = _agent_with_default_quota(tmp_path)
+    messages = _conversation([1_000, 1_000, 60_000])
+    budget = agent._context_char_budget()
+
+    agent._prepare_messages(messages)
+
+    last = [m for m in messages if m["role"] == "tool"][-1]["content"]
+    assert last.endswith("pide un trozo mas pequeño si lo necesitas]")
+    assert _chars(messages) <= budget
+
+
+def test_small_contexts_are_left_alone(tmp_path):
+    agent = _agent_with_default_quota(tmp_path)
     messages = [{"role": "tool", "tool_call_id": "c1", "content": "x" * 5_000}]
 
     agent._prepare_messages(messages)
@@ -259,12 +296,41 @@ def test_small_contexts_are_left_alone(settings):
     assert messages[0]["content"] == "x" * 5_000
 
 
+def test_the_context_budget_scales_with_the_configured_quota(tmp_path):
+    low = CodeSettingsStore(tmp_path / "a.json")
+    high = CodeSettingsStore(tmp_path / "b.json")
+    high.set_tokens_per_minute(100_000)
+
+    low_budget = CodeAgent(None, settings=low)._context_char_budget()
+    high_budget = CodeAgent(None, settings=high)._context_char_budget()
+
+    assert low_budget < 20_000 < 100_000 < high_budget
+    # y una peticion de ese tamaño cabe en la cuota (mensajes + esquemas de herramientas)
+    assert (low_budget + 3_100) / 3.3 < low.tokens_per_minute
+
+
 # ── Ajustes (carpetas autorizadas) ───────────────────────────────────────────
 
 def test_settings_default_is_enabled_with_no_workspaces(tmp_path):
     store = CodeSettingsStore(tmp_path / "s.json")
 
-    assert store.load() == {"enabled": True, "workspaces": []}
+    assert store.load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500}
+
+
+def test_tokens_per_minute_is_stored_and_clamped(tmp_path):
+    store = CodeSettingsStore(tmp_path / "s.json")
+
+    assert store.set_tokens_per_minute(50_000)["tokens_per_minute"] == 50_000
+    assert store.tokens_per_minute == 50_000
+    assert store.set_tokens_per_minute(5)["tokens_per_minute"] == 1_000
+    assert store.set_tokens_per_minute(10**9)["tokens_per_minute"] == 1_000_000
+
+
+def test_a_garbage_tokens_per_minute_falls_back_to_the_default(tmp_path):
+    path = tmp_path / "s.json"
+    path.write_text('{"tokens_per_minute": "mucho"}', encoding="utf-8")
+
+    assert CodeSettingsStore(path).tokens_per_minute == 6500
 
 
 def test_settings_add_dedupes_and_remove_works(tmp_path):
@@ -310,4 +376,4 @@ def test_settings_survive_a_corrupted_file(tmp_path):
     path = tmp_path / "s.json"
     path.write_text("{no es json", encoding="utf-8")
 
-    assert CodeSettingsStore(path).load() == {"enabled": True, "workspaces": []}
+    assert CodeSettingsStore(path).load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500}

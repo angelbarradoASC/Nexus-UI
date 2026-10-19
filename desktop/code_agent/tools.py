@@ -23,14 +23,16 @@ from typing import Any
 
 from .workspace import SKIP_DIRS, Workspace, WorkspaceError, redact
 
-READ_MAX_LINES = 400
-READ_MAX_CHARS = 40_000
+# Ventanas pequeñas a proposito: con 8.000 tokens/minuto de cuota, una lectura de 400
+# lineas (~5k tokens) se come casi todo el minuto.
+READ_MAX_LINES = 200
+READ_MAX_CHARS = 14_000
 MAX_FILE_BYTES = 5 * 1024 * 1024
-GREP_MAX_MATCHES = 100
+GREP_MAX_MATCHES = 60
 GREP_MAX_FILE_BYTES = 1024 * 1024
 GREP_MAX_SECONDS = 10.0
-GLOB_MAX_RESULTS = 200
-LIST_MAX_ENTRIES = 200
+GLOB_MAX_RESULTS = 120
+LIST_MAX_ENTRIES = 120
 GIT_MAX_CHARS = 20_000
 GIT_TIMEOUT = 15
 
@@ -195,7 +197,7 @@ def grep(
                 for number, line in enumerate(handle, start=1):
                     if regex.search(line):
                         text = line.rstrip("\r\n")
-                        matches.append(f"{ws.rel(file_path)}:{number}: {text[:200]}")
+                        matches.append(f"{ws.rel(file_path)}:{number}: {text[:160]}")
                         if len(matches) >= GREP_MAX_MATCHES:
                             break
         except OSError:
@@ -267,7 +269,7 @@ def _schema(name: str, description: str, properties: dict[str, Any], required: l
 READ_TOOL_SCHEMAS: list[dict[str, Any]] = [
     _schema(
         "read_file",
-        "Lee un fichero del proyecto con numeros de linea. Maximo ~400 lineas por llamada: para ficheros largos usa start_line/end_line.",
+        "Lee un fichero del proyecto con numeros de linea. Maximo ~200 lineas por llamada: para ficheros largos usa start_line/end_line.",
         {
             "path": {"type": "string", "description": "Ruta relativa al proyecto."},
             "start_line": {"type": "integer"},

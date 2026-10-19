@@ -10,11 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from desktop.code_agent.workspace import WorkspaceError
 from desktop.config import DesktopSettings
-from desktop.storage.code_settings import CodeSettingsStore
+from desktop.storage.code_settings import MAX_TOKENS_PER_MINUTE, MIN_TOKENS_PER_MINUTE, CodeSettingsStore
 from products.desktop.backend.dependencies import get_desktop_settings
 
 router = APIRouter(prefix="/api/desktop/code", tags=["desktop-code"])
@@ -32,10 +32,15 @@ class _EnabledBody(BaseModel):
     enabled: bool
 
 
+class _LimitsBody(BaseModel):
+    tokens_per_minute: int = Field(ge=MIN_TOKENS_PER_MINUTE, le=MAX_TOKENS_PER_MINUTE)
+
+
 def _view(store: CodeSettingsStore) -> dict:
     data = store.load()
     return {
         "enabled": data["enabled"],
+        "tokens_per_minute": data["tokens_per_minute"],
         "workspaces": [
             {"path": item, "name": Path(item).name or item, "exists": Path(item).is_dir()}
             for item in data["workspaces"]
@@ -60,6 +65,12 @@ def add_workspace(body: _PathBody, store: CodeSettingsStore = Depends(get_code_s
 @router.post("/workspaces/remove")
 def remove_workspace(body: _PathBody, store: CodeSettingsStore = Depends(get_code_settings_store)) -> dict:
     store.remove_workspace(body.path)
+    return _view(store)
+
+
+@router.put("/limits")
+def set_limits(body: _LimitsBody, store: CodeSettingsStore = Depends(get_code_settings_store)) -> dict:
+    store.set_tokens_per_minute(body.tokens_per_minute)
     return _view(store)
 
 

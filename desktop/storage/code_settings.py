@@ -20,6 +20,11 @@ from desktop.code_agent.workspace import WorkspaceError, validate_workspace_root
 from desktop.storage.atomic_io import atomic_write_text
 
 
+DEFAULT_TOKENS_PER_MINUTE = 6500   # margen bajo los 8.000/min de la cuenta Groq medida el 2026-10-19
+MIN_TOKENS_PER_MINUTE = 1_000
+MAX_TOKENS_PER_MINUTE = 1_000_000
+
+
 def _key(path: Path) -> str:
     return os.path.normcase(str(path))
 
@@ -36,11 +41,21 @@ class CodeSettingsStore:
         except (OSError, json.JSONDecodeError):
             data = {}
         workspaces = [str(item) for item in data.get("workspaces", []) if isinstance(item, str)]
-        return {"enabled": bool(data.get("enabled", True)), "workspaces": workspaces}
+        try:
+            tpm = int(data.get("tokens_per_minute", DEFAULT_TOKENS_PER_MINUTE))
+        except (TypeError, ValueError):
+            tpm = DEFAULT_TOKENS_PER_MINUTE
+        tpm = min(max(tpm, MIN_TOKENS_PER_MINUTE), MAX_TOKENS_PER_MINUTE)
+        return {"enabled": bool(data.get("enabled", True)), "workspaces": workspaces, "tokens_per_minute": tpm}
 
     @property
     def enabled(self) -> bool:
         return self.load()["enabled"]
+
+    @property
+    def tokens_per_minute(self) -> int:
+        """Presupuesto de tokens/minuto que el agente puede gastar (cuota de tu proveedor de IA)."""
+        return self.load()["tokens_per_minute"]
 
     def workspaces(self) -> list[str]:
         return self.load()["workspaces"]
@@ -67,6 +82,12 @@ class CodeSettingsStore:
     def set_enabled(self, enabled: bool) -> dict[str, Any]:
         data = self.load()
         data["enabled"] = bool(enabled)
+        self._save(data)
+        return data
+
+    def set_tokens_per_minute(self, value: int) -> dict[str, Any]:
+        data = self.load()
+        data["tokens_per_minute"] = min(max(int(value), MIN_TOKENS_PER_MINUTE), MAX_TOKENS_PER_MINUTE)
         self._save(data)
         return data
 

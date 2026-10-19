@@ -877,6 +877,8 @@ function renderCodeSettings(data) {
     const list = document.getElementById("codeWorkspaceList");
     const toggle = document.getElementById("codeEnabledToggle");
     toggle.checked = Boolean(data.enabled);
+    const tpmInput = document.getElementById("codeTpmInput");
+    if (tpmInput && document.activeElement !== tpmInput) { tpmInput.value = data.tokens_per_minute; }
     badge.textContent = data.enabled
         ? `${data.workspaces.length} carpeta${data.workspaces.length === 1 ? "" : "s"}`
         : "desactivado";
@@ -910,6 +912,18 @@ async function addCodeWorkspace() {
 
 async function removeCodeWorkspace(path) {
     renderCodeSettings(await api.post("/api/desktop/code/workspaces/remove", { path }));
+}
+
+async function saveCodeTpm() {
+    const note = document.getElementById("codeTpmNote");
+    const value = Number(document.getElementById("codeTpmInput").value);
+    note.textContent = "";
+    try {
+        renderCodeSettings(await api.put("/api/desktop/code/limits", { tokens_per_minute: value }));
+        note.textContent = "Guardado.";
+    } catch (error) {
+        note.textContent = "Valor no válido (entre 1.000 y 1.000.000).";
+    }
 }
 
 async function toggleCodeEnabled(enabled) {
@@ -969,6 +983,9 @@ function wireEvents() {
     });
     document.getElementById("outlookRefreshBtn").addEventListener("click", () => {
         loadOutlookPriority();
+    });
+    document.getElementById("codeTpmSaveBtn").addEventListener("click", () => {
+        saveCodeTpm();
     });
     document.getElementById("codeWorkspaceAddBtn").addEventListener("click", () => {
         addCodeWorkspace();

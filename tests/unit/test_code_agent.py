@@ -39,6 +39,9 @@ class _ScriptedRouter:
 def _no_pacing(monkeypatch):
     """El pacer real esperaria segundos de verdad; aqui solo se prueba el bucle."""
     monkeypatch.setattr(CodeAgent, "tokens_per_minute", 10**9)
+    # La revision de "terminar sin mirar nada" tiene sus propios tests (abajo); aqui se probaria
+    # a ciegas la mecanica del bucle con respuestas que terminan directamente.
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 0)
 
 
 @pytest.fixture
@@ -377,3 +380,48 @@ def test_settings_survive_a_corrupted_file(tmp_path):
     path.write_text("{no es json", encoding="utf-8")
 
     assert CodeSettingsStore(path).load() == {"enabled": True, "workspaces": [], "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192}}
+
+
+# ── Evidencia obligatoria ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_an_answer_without_looking_at_any_file_is_pushed_back_once(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 1)
+    """Medido: qwen2.5-coder:3b contesto en 2 s con una frase generica sin usar ninguna herramienta."""
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="El historial se pasa al clasificador.")),
+        _resp(_call("c2", "grep", pattern="def saluda")),
+        _resp(_call("c3", "finish", summary="saluda esta en src/app.py:1")),
+    )
+
+    result = await _agent(router, settings).propose("ctx", "¿donde esta saluda?", workspace=str(project))
+
+    assert result["summary"] == "saluda esta en src/app.py:1"
+    objection = _tool_result(router.seen[1], "c1")
+    assert "No has consultado ningun fichero" in objection and "ruta:linea" in objection
+
+
+@pytest.mark.asyncio
+async def test_repeating_the_same_answer_after_the_objection_is_accepted(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 1)
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="Hola, ¿en que te ayudo?")),
+        _resp(_call("c2", "finish", summary="Hola, ¿en que te ayudo?")),
+    )
+
+    result = await _agent(router, settings).propose("ctx", "hola", workspace=str(project))
+
+    assert result["summary"] == "Hola, ¿en que te ayudo?" and len(router.seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_finish_after_reading_files_is_accepted_immediately(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 1)
+    router = _ScriptedRouter(
+        _resp(_call("c1", "read_file", path="src/app.py")),
+        _resp(_call("c2", "finish", summary="saluda devuelve 'hola' (src/app.py:2)")),
+    )
+
+    await _agent(router, settings).propose("ctx", "explica app.py", workspace=str(project))
+
+    assert len(router.seen) == 2

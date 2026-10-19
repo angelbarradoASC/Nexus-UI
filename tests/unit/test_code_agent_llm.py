@@ -273,6 +273,7 @@ async def test_agent_runs_on_the_own_model_without_any_router_and_executes_recov
 @pytest.mark.asyncio
 async def test_own_model_is_not_throttled_by_the_token_quota(monkeypatch, project):
     root, settings = project
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 0)   # esta prueba solo mira el pacer
     settings.set_tokens_per_minute(1_000)                              # cuota minima: con router esperaria
     _scripted(monkeypatch, SimpleNamespace(error=None, tool_calls=None, content='{"name": "finish", "arguments": {"summary": "ok"}}'))
     agent = CodeAgent(None, llm_router=None, settings=settings)

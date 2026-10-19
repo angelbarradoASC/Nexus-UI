@@ -70,6 +70,8 @@ class CodeAgent(ConfirmableAgent):
     # Limite de tiempo por tarea: con poca cuota cada paso espera ~1 min; mejor rendirse con
     # un mensaje claro que dejar el bucle quemando cuota durante minutos.
     max_task_seconds = 240.0
+    # Un intento de terminar sin haber consultado ningun fichero se rechaza una vez.
+    max_finish_reviews = 1
 
     def __init__(self, cfg, *, llm_router=None, store=None, settings=None) -> None:
         self._pacer = TokenPacer(self.tokens_per_minute)
@@ -128,6 +130,22 @@ class CodeAgent(ConfirmableAgent):
                     continue
                 return f"({name})\n" + redact(text)
         return ""
+
+    def _finish_objection(self, messages: list[dict[str, Any]], summary: str) -> str | None:
+        """Una respuesta sobre el codigo sin haber mirado ningun fichero no tiene evidencia
+        (medido: qwen2.5-coder:3b contesto en 2 s con una frase generica). Se rechaza UNA
+        vez; si el modelo insiste con la misma respuesta, se acepta (puede no hacer falta mirar)."""
+        consulted = any(
+            m.get("role") == "tool" and str(m.get("content") or "") and not str(m["content"]).startswith("__pendiente")
+            for m in messages
+        )
+        if consulted:
+            return None
+        return (
+            "No has consultado ningun fichero del proyecto, asi que tu respuesta no tiene evidencia. Usa grep, glob o "
+            "read_file para comprobarlo y cita ruta:linea. Solo si la pregunta no necesita mirar el codigo, repite tu "
+            "respuesta tal cual."
+        )
 
     # ── Cuota y contexto ─────────────────────────────────────────────────────
 

@@ -313,3 +313,67 @@ async def test_reject_without_resume_mode_is_a_plain_cancel():
 @pytest.mark.asyncio
 async def test_reject_with_nothing_pending_returns_none():
     assert await _CodeAgent(_ScriptedRouter()).reject("nadie") is None
+
+
+# ── Rechazar un intento de terminar (max_finish_reviews) ─────────────────────
+
+class _Reviewing(_CodeAgent):
+    max_finish_reviews = 1
+
+    def _finish_objection(self, messages, summary):
+        return "Falta evidencia: lee un fichero antes." if not any(m.get("role") == "tool" for m in messages) else None
+
+
+@pytest.mark.asyncio
+async def test_a_finish_without_evidence_is_rejected_once_and_the_model_gets_to_work():
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="respuesta inventada")),
+        _resp(_call("c2", "read", path="a.py")),
+        _resp(_call("c3", "finish", summary="respuesta con evidencia")),
+    )
+    agent = _Reviewing(router)
+
+    result = await agent.propose("ctx", "explica")
+
+    assert result["summary"] == "respuesta con evidencia"
+    assert agent.reads == ["a.py"]
+    assert dict(_tool_messages(router.seen[1]))["c1"] == "Falta evidencia: lee un fichero antes."
+
+
+@pytest.mark.asyncio
+async def test_the_objection_only_happens_once_if_the_model_insists():
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="no hace falta mirar nada")),
+        _resp(_call("c2", "finish", summary="no hace falta mirar nada")),
+    )
+
+    result = await _Reviewing(router).propose("ctx", "hola")
+
+    assert result["summary"] == "no hace falta mirar nada"
+    assert len(router.seen) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_plain_text_answer_is_also_reviewed_with_a_user_message():
+    router = _ScriptedRouter(
+        _resp(content="Respuesta sin mirar."),
+        _resp(_call("c1", "read", path="a.py")),
+        _resp(content="Respuesta mirando."),
+    )
+
+    result = await _Reviewing(router).propose("ctx", "explica")
+
+    assert result["summary"] == "Respuesta mirando."
+    second = router.seen[1]
+    assert second[-2] == {"role": "assistant", "content": "Respuesta sin mirar."}
+    assert second[-1] == {"role": "user", "content": "Falta evidencia: lee un fichero antes."}
+
+
+@pytest.mark.asyncio
+async def test_the_review_is_off_by_default_and_a_finish_with_evidence_is_never_rejected():
+    off = _ScriptedRouter(_resp(_call("c1", "finish", summary="directo")))
+    assert (await _CodeAgent(off).propose("ctx", "x"))["summary"] == "directo"      # max_finish_reviews = 0
+
+    done = _ScriptedRouter(_resp(_call("c1", "read", path="a.py")), _resp(_call("c2", "finish", summary="ok")))
+    assert (await _Reviewing(done).propose("ctx", "x"))["summary"] == "ok"
+    assert len(done.seen) == 2                                                      # sin vueltas extra

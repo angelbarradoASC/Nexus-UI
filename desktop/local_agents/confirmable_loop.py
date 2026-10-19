@@ -151,6 +151,10 @@ class ConfirmableAgent:
     #   termina la tarea. Con esto activo tambien existe reject().
     batch_readonly_calls: bool = False
     resume_after_execute: bool = False
+    # max_finish_reviews: cuantas veces se puede RECHAZAR un intento de terminar para pedir
+    #   mas trabajo (`_finish_objection`). Un modelo pequeño tiende a contestar sin haber
+    #   mirado nada (medido: qwen2.5-coder:3b, 2 s y una frase generica). 0 = desactivado.
+    max_finish_reviews: int = 0
 
     # Identidad FIJA para persistencia — a diferencia de `agent_id` (que
     # MCPAgent muta en tiempo real segun el servidor activo), esta nunca
@@ -215,6 +219,11 @@ class ConfirmableAgent:
         """Resumen para list_pending() — override si pending.task no basta."""
         return pending.task
 
+    def _finish_objection(self, messages: list[dict[str, Any]], summary: str) -> str | None:
+        """Texto que se devuelve al modelo para rechazar un intento de terminar, o None
+        para aceptarlo. Solo se consulta mientras queden `max_finish_reviews`."""
+        return None
+
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
         """Gancho previo a cada llamada al LLM: las subclases pueden recortar
         `messages` EN SITIO (p. ej. CodeAgent elide salidas antiguas de
@@ -229,6 +238,8 @@ class ConfirmableAgent:
 
         if not messages or messages[0].get("role") != "system":
             messages = [{"role": "system", "content": resolve_prompt_sync(self.prompt_key)}, *messages]
+
+        review_state = {"reviews_left": self.max_finish_reviews}
 
         for _ in range(self.max_loop_steps):
             try:
@@ -255,10 +266,16 @@ class ConfirmableAgent:
                 if stripped and _FOLLOWUP_QUESTION_PATTERN.search(stripped):
                     messages.append({"role": "assistant", "content": content})
                     return {"kind": "ask_user", "question": stripped, "messages": messages, "tool_call_id": None}
+                objection = self._finish_objection(messages, content) if review_state["reviews_left"] > 0 else None
+                if objection:
+                    review_state["reviews_left"] -= 1
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": objection})
+                    continue
                 return {"kind": "finish", "summary": content or "Hecho."}
 
             if self.batch_readonly_calls:
-                batch_outcome = await self._process_tool_batch(messages, response)
+                batch_outcome = await self._process_tool_batch(messages, response, review_state)
                 if batch_outcome is not None:
                     return batch_outcome
                 continue
@@ -297,7 +314,9 @@ class ConfirmableAgent:
 
         return {"kind": "finish", "summary": "No he podido resolverlo en los pasos disponibles."}
 
-    async def _process_tool_batch(self, messages: list[dict[str, Any]], response: Any) -> dict[str, Any] | None:
+    async def _process_tool_batch(
+        self, messages: list[dict[str, Any]], response: Any, review_state: dict[str, int] | None = None
+    ) -> dict[str, Any] | None:
         """Camino de batch_readonly_calls. Devuelve el outcome que corta el
         bucle (pregunta, propuesta, finish) o None si todas las tool calls del
         turno eran lecturas ya resueltas y el bucle debe seguir.
@@ -327,7 +346,15 @@ class ConfirmableAgent:
                 continue
 
             if name == "finish":
-                return {"kind": "finish", "summary": args.get("summary", "Hecho.")}
+                summary = args.get("summary", "Hecho.")
+                state = review_state or {"reviews_left": 0}
+                objection = self._finish_objection(messages, summary) if state["reviews_left"] > 0 else None
+                if objection:
+                    state["reviews_left"] -= 1
+                    messages.append({"role": "tool", "tool_call_id": call_id, "content": objection})
+                    self._ignore_remaining_calls(messages, calls[index + 1:])
+                    return None
+                return {"kind": "finish", "summary": summary}
 
             if name in _ASK_KINDS:
                 messages.append({"role": "tool", "tool_call_id": call_id, "content": _PENDING_PLACEHOLDER})

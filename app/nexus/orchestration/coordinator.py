@@ -224,8 +224,15 @@ class NexusCoordinator:
     ) -> ChatResponse:
         audit_id = f"audit-{uuid.uuid4().hex[:12]}"
         context_key = payload.context_id or payload.user_id
+        # Propuestas de si/no puro (ratón, ticket): si el usuario contesta con otra
+        # cosa, cambio de tema — se descarta la propuesta (la direccion segura: no
+        # se ejecuta nada) y el mensaje se procesa normal. Antes cualquier mensaje
+        # recibia "¿Confirmas…?" hasta decir si/no (visto en vivo con una pregunta
+        # de Cisco tras una propuesta de velocidad de ratón).
         if self._mouse_agent is not None and self._mouse_agent.has_pending(context_key):
-            return await self._handle_mouse_speed_pending(payload, audit_id, context_key)
+            if _match_confirmation(payload.message) is not None:
+                return await self._handle_mouse_speed_pending(payload, audit_id, context_key)
+            self._mouse_agent.cancel(context_key)
         if self._system_task_agent is not None and self._system_task_agent.has_pending(context_key):
             return await self._handle_system_task_pending(payload, audit_id, context_key)
         if self._remote_ops_agent is not None and self._remote_ops_agent.has_pending(context_key):
@@ -235,8 +242,10 @@ class NexusCoordinator:
         if self._mcp_agent is not None and self._mcp_agent.has_pending(context_key):
             return await self._handle_mcp_pending(payload, audit_id, context_key)
         if self._ticket_agent is not None and self._ticket_agent.has_pending(context_key):
-            return await self._handle_assets_ticket_pending(payload, audit_id, context_key)
-        resolution = resolution_override or self._skill_router.resolve(payload.message).to_dict()
+            if _match_confirmation(payload.message) is not None:
+                return await self._handle_assets_ticket_pending(payload, audit_id, context_key)
+            self._ticket_agent.cancel(context_key)
+        resolution =resolution_override or self._skill_router.resolve(payload.message).to_dict()
         skill_id = resolution.get("skill_id", "general.respuesta")
         if skill_id == "desktop.mouse_speed" and self._mouse_agent is not None:
             return await self._handle_mouse_speed_propose(payload, resolution, audit_id, context_key)

@@ -85,7 +85,10 @@ class DesktopApplication:
     def _create_window(self):
         import webview
 
+        from desktop.bridge import DesktopBridge
+
         launch_url = self.settings.startup_url if self.settings.open_operator_on_start else self.settings.local_url
+        bridge = DesktopBridge()
         window = webview.create_window(
             title="Open-Nexus",
             url=launch_url,
@@ -96,7 +99,9 @@ class DesktopApplication:
             min_size=(900, 600),
             text_select=True,
             confirm_close=False,
+            js_api=bridge,
         )
+        bridge._attach(window)
         window.events.shown += self._on_window_shown
         return window
 

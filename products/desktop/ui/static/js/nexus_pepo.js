@@ -132,7 +132,7 @@ async function sendToChat(message) {
                 user_id: 'pepo_user',
                 mode: _pepoCodeMode ? 'code' : 'general',
                 // Solo en modo codigo; el servidor la valida contra las carpetas autorizadas.
-                workspace: _pepoCodeMode ? (document.getElementById('pepoCodeWorkspace')?.value || undefined) : undefined,
+                workspace: _pepoCodeMode ? _selectedCodeWorkspace() : undefined,
                 context_id: _pepoContextId || undefined,
             }),
         });
@@ -558,6 +558,12 @@ let _pepoCodeMode = false;
 function _storeGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function _storeSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* sin almacenamiento */ } }
 
+function _selectedCodeWorkspace() {
+    const value = document.getElementById('pepoCodeWorkspace')?.value;
+    // "__add__" es la opcion de añadir carpeta, no una carpeta: el servidor avisa de que falta elegir.
+    return value && value !== '__add__' ? value : undefined;
+}
+
 function applyCodeMode(settings) {
     const toggle = document.getElementById('pepoCodeToggle');
     const select = document.getElementById('pepoCodeWorkspace');
@@ -570,14 +576,14 @@ function applyCodeMode(settings) {
     let note = '';
     if (!settings.enabled) {
         note = 'Desactivado en Configuración › Modo código.';
-    } else if (!workspaces.length) {
-        note = 'Añade una carpeta en Configuración › Modo código.';
     }
     toggle.disabled = Boolean(note);
     if (note) toggle.checked = false;
 
     _pepoCodeMode = toggle.checked && !note;
     select.hidden = !_pepoCodeMode;
+    // Sin carpetas autorizadas no se bloquea el interruptor: se añade aqui mismo desde el desplegable.
+    if (_pepoCodeMode && !workspaces.length) note = 'Elige «➕ Añadir carpeta…» para empezar.';
     hint.hidden = !note;
     hint.textContent = note;
     if (badge) badge.textContent = _pepoCodeMode ? 'código · solo lectura' : 'polivalente';
@@ -589,33 +595,76 @@ function applyCodeMode(settings) {
     _storeSet(CODE_MODE_KEY, _pepoCodeMode ? '1' : '0');
 }
 
-async function initCodeMode() {
-    const toggle = document.getElementById('pepoCodeToggle');
+const ADD_FOLDER_VALUE = '__add__';
+let _pepoCodeSettings = { enabled: false, workspaces: [] };
+
+function renderCodeWorkspaces(preferredPath) {
     const select = document.getElementById('pepoCodeWorkspace');
-    if (!toggle || !select) return;
-
-    let settings = { enabled: false, workspaces: [] };
-    try {
-        settings = await apiJson('/api/desktop/code/settings');
-    } catch (err) {
-        console.warn('Ajustes del modo codigo no disponibles', err);
-    }
-
+    if (!select) return;
     select.innerHTML = '';
-    for (const item of settings.workspaces || []) {
+    for (const item of _pepoCodeSettings.workspaces || []) {
         const option = document.createElement('option');
         option.value = item.path;
         option.textContent = item.name + (item.exists ? '' : ' (no existe)');
         option.title = item.path;
         select.appendChild(option);
     }
-    const saved = _storeGet(CODE_WORKSPACE_KEY);
-    if (saved && [...select.options].some((o) => o.value === saved)) select.value = saved;
+    // Siempre se ofrece añadir otra: es el camino mas corto cuando aun no hay ninguna.
+    const add = document.createElement('option');
+    add.value = ADD_FOLDER_VALUE;
+    add.textContent = '➕ Añadir carpeta…';
+    select.appendChild(add);
 
+    const wanted = preferredPath || _storeGet(CODE_WORKSPACE_KEY);
+    if (wanted && [...select.options].some((o) => o.value === wanted)) {
+        select.value = wanted;
+    } else if ((_pepoCodeSettings.workspaces || []).length) {
+        select.value = _pepoCodeSettings.workspaces[0].path;
+    }
+}
+
+async function addCodeFolderFromPicker() {
+    const hint = document.getElementById('pepoCodeHint');
+    const bridge = window.pywebview && window.pywebview.api;
+    if (!bridge || !bridge.pick_folder) {
+        if (hint) { hint.hidden = false; hint.textContent = 'El selector de carpetas solo está en la app de escritorio: añádela en Configuración › Modo código.'; }
+        return null;
+    }
+    const chosen = await bridge.pick_folder('');
+    if (!chosen) return null;
+    try {
+        _pepoCodeSettings = await apiJson('/api/desktop/code/workspaces', { method: 'POST', body: JSON.stringify({ path: chosen }) });
+    } catch (err) {
+        if (hint) { hint.hidden = false; hint.textContent = err.message; }
+        return null;
+    }
+    const added = (_pepoCodeSettings.workspaces || []).find((w) => w.path.toLowerCase() === chosen.toLowerCase());
+    return added ? added.path : chosen;
+}
+
+async function initCodeMode() {
+    const toggle = document.getElementById('pepoCodeToggle');
+    const select = document.getElementById('pepoCodeWorkspace');
+    if (!toggle || !select) return;
+
+    try {
+        _pepoCodeSettings = await apiJson('/api/desktop/code/settings');
+    } catch (err) {
+        console.warn('Ajustes del modo codigo no disponibles', err);
+    }
+
+    renderCodeWorkspaces();
     toggle.checked = _storeGet(CODE_MODE_KEY) === '1';
-    toggle.addEventListener('change', () => applyCodeMode(settings));
-    select.addEventListener('change', () => _storeSet(CODE_WORKSPACE_KEY, select.value));
-    applyCodeMode(settings);
+    toggle.addEventListener('change', () => applyCodeMode(_pepoCodeSettings));
+    select.addEventListener('change', async () => {
+        if (select.value === ADD_FOLDER_VALUE) {
+            const added = await addCodeFolderFromPicker();
+            renderCodeWorkspaces(added || undefined);
+            applyCodeMode(_pepoCodeSettings);
+        }
+        if (select.value !== ADD_FOLDER_VALUE) _storeSet(CODE_WORKSPACE_KEY, select.value);
+    });
+    applyCodeMode(_pepoCodeSettings);
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

@@ -915,6 +915,21 @@ async function addCodeWorkspace() {
     }
 }
 
+async function browseCodeWorkspace() {
+    const input = document.getElementById("codeWorkspaceInput");
+    const note = document.getElementById("codeWorkspaceNote");
+    const bridge = window.pywebview && window.pywebview.api;
+    if (!bridge || !bridge.pick_folder) {
+        note.textContent = "El selector de carpetas solo está en la app de escritorio: escribe la ruta a mano.";
+        return;
+    }
+    const chosen = await bridge.pick_folder(input.value.trim());
+    if (chosen) {
+        input.value = chosen;
+        await addCodeWorkspace();
+    }
+}
+
 async function removeCodeWorkspace(path) {
     renderCodeSettings(await api.post("/api/desktop/code/workspaces/remove", { path }));
 }
@@ -1023,6 +1038,11 @@ function wireEvents() {
     });
     document.getElementById("codeTpmSaveBtn").addEventListener("click", () => {
         saveCodeTpm();
+    });
+    document.getElementById("codeWorkspaceBrowseBtn").addEventListener("click", () => {
+        browseCodeWorkspace().catch((error) => {
+            document.getElementById("codeWorkspaceNote").textContent = error.message;
+        });
     });
     document.getElementById("codeWorkspaceAddBtn").addEventListener("click", () => {
         addCodeWorkspace();

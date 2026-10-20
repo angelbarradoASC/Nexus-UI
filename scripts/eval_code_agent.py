@@ -75,13 +75,25 @@ async def run(args: argparse.Namespace) -> None:
         agent.prefetch_hits = 8 if args.prefetch else 0
         if args.no_find_code:
             agent.tools = [t for t in agent.tools if t["function"]["name"] != "find_code"]
+        # Traza: que herramientas uso el modelo y con que argumentos (para analizar trayectorias, no solo el resultado).
+        trace: list[str] = []
+        original_dispatch = agent.dispatch_tool
+
+        async def traced(name, args, _orig=original_dispatch, _trace=trace):
+            _trace.append(f"{name}({json.dumps(args, ensure_ascii=False)[:140]})")
+            return await _orig(name, args)
+
+        agent.dispatch_tool = traced
         calls["n"] = 0
         started = time.time()
         result = await agent.propose(f"eval-{number}", question.question, workspace=str(ROOT))
         elapsed = time.time() - started
         answer = result.get("summary") or result.get("question") or ""
         graded = ev.grade_answer(answer, ev.resolve_symbols(index, question.expect))
-        rows.append({"id": question.id, "split": question.split, **graded, "steps": calls["n"], "seconds": round(elapsed, 1), "answer": answer})
+        rows.append({
+            "id": question.id, "split": question.split, **graded, "steps": calls["n"], "seconds": round(elapsed, 1),
+            "answer": answer, "trace": trace,
+        })
         print(f"[{number:>2}/{len(questions)}] {graded['grade']:10} {calls['n']} pasos {elapsed:5.0f}s  {question.id}  — {graded['why']}", flush=True)
 
     total = len(rows) or 1

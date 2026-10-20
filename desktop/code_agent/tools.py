@@ -26,6 +26,7 @@ from .workspace import SKIP_DIRS, Workspace, WorkspaceError, redact
 # Ventanas pequeñas a proposito: con 8.000 tokens/minuto de cuota, una lectura de 400
 # lineas (~5k tokens) se come casi todo el minuto.
 READ_MAX_LINES = 200
+READ_MIN_LINES = 60
 READ_MAX_CHARS = 14_000
 MAX_FILE_BYTES = 5 * 1024 * 1024
 GREP_MAX_MATCHES = 60
@@ -76,9 +77,14 @@ def read_file(ws: Workspace, path: str, start_line: int | None = None, end_line:
 
     first = max(int(start_line or 1), 1)
     last = int(end_line) if end_line else first + READ_MAX_LINES - 1
-    last = min(last, first + READ_MAX_LINES - 1)
     if last < first:
-        return "end_line debe ser mayor o igual que start_line."
+        # Un modelo pequeño invierte el rango (107-56) y, ante un error, repite la misma llamada: se interpreta
+        # como "desde start_line" en vez de devolver un error que no sabe corregir.
+        last = first + READ_MAX_LINES - 1
+    last = min(last, first + READ_MAX_LINES - 1)
+    # Medido en vivo: un modelo pequeño leia ventanas de 10 lineas una tras otra (8 lecturas seguidas), perdiendo
+    # pasos y contexto. Una lectura diminuta se amplia a un minimo util (el encabezado dice las lineas reales).
+    last = max(last, first + READ_MIN_LINES - 1)
 
     try:
         with target.open("r", encoding="utf-8", errors="replace") as handle:

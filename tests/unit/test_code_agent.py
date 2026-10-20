@@ -555,3 +555,91 @@ async def test_find_code_returns_find_code_hits_candidates(project, settings, mo
     result = _tool_result(router.seen[1], "c1")
     assert result.count(".py:") <= 4                                      # 3 candidatos (+ posibles lineas de codigo)
     assert "1." in result and "3." in result and "4. " not in result
+
+
+# ── grep sin resultados -> candidatos de find_code ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_a_grep_without_matches_gets_find_code_candidates_attached(project, settings):
+    """Visto en vivo: el modelo hizo grep "token limit" y "rate limit" sin usar find_code (pese a la regla
+    del prompt). El resultado de la herramienta SI se lee: se le adjuntan candidatos."""
+    (project / "src" / "cuota.py").write_text(
+        "def aplicar_limite_tokens():\n    # limita los tokens por minuto\n    return 1\n", encoding="utf-8"
+    )
+    router = _ScriptedRouter(
+        _resp(_call("c1", "grep", pattern="token limit")),
+        _resp(_call("c2", "finish", summary="x")),
+    )
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    result = _tool_result(router.seen[1], "c1")
+    assert result.startswith("Sin coincidencias")
+    assert "find_code" in result and "src/cuota.py:1" in result
+
+
+@pytest.mark.asyncio
+async def test_a_grep_with_matches_is_left_untouched(project, settings):
+    router = _ScriptedRouter(_resp(_call("c1", "grep", pattern="def saluda")), _resp(_call("c2", "finish", summary="x")))
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    result = _tool_result(router.seen[1], "c1")
+    assert "src/app.py:1" in result and "find_code" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_grep_without_matches_and_nothing_to_suggest_stays_plain(project, settings):
+    router = _ScriptedRouter(_resp(_call("c1", "grep", pattern="zzqqxx")), _resp(_call("c2", "finish", summary="x")))
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    assert _tool_result(router.seen[1], "c1") == "Sin coincidencias."
+
+
+# ── llamadas repetidas ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_a_third_identical_call_is_not_executed_and_nudges_the_model(project, settings):
+    """Visto en vivo: qwen3:8b repitio la misma lectura 9 veces hasta agotar los 10 minutos."""
+    same = lambda cid: _call(cid, "read_file", path="src/app.py", start_line=1, end_line=2)   # noqa: E731
+    router = _ScriptedRouter(
+        _resp(same("c1")), _resp(same("c2")), _resp(same("c3")), _resp(_call("c4", "finish", summary="x")),
+    )
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    last = router.seen[3]
+    assert "def saluda" in _tool_result(last, "c1")
+    assert "def saluda" in _tool_result(last, "c2")           # una relectura es legitima
+    nudge = _tool_result(last, "c3")
+    assert "def saluda" not in nudge and "finish" in nudge and "find_code" in nudge
+
+
+@pytest.mark.asyncio
+async def test_a_reversed_range_counts_as_the_same_call(project, settings):
+    router = _ScriptedRouter(
+        _resp(_call("c1", "read_file", path="src/app.py", start_line=2, end_line=1)),
+        _resp(_call("c2", "read_file", path="src/app.py", start_line=1, end_line=2)),
+        _resp(_call("c3", "read_file", path="src/app.py", start_line=2, end_line=1)),
+        _resp(_call("c4", "finish", summary="x")),
+    )
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    assert "def saluda" not in _tool_result(router.seen[3], "c3")
+
+
+@pytest.mark.asyncio
+async def test_repeats_are_counted_per_task_not_across_tasks(project, settings):
+    router = _ScriptedRouter(
+        *[_resp(_call(f"a{i}", "read_file", path="src/app.py")) for i in range(2)], _resp(_call("a9", "finish", summary="x")),
+        *[_resp(_call(f"b{i}", "read_file", path="src/app.py")) for i in range(2)], _resp(_call("b9", "finish", summary="x")),
+    )
+    agent = _agent(router, settings)
+
+    await agent.propose("ctx", "pregunta", workspace=str(project))
+    await agent.propose("ctx2", "otra", workspace=str(project))
+
+    for seen in router.seen[3:]:
+        assert all("Ya hiciste" not in str(m.get("content")) for m in seen)

@@ -22,6 +22,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,7 @@ _PREFETCH_ID = "prefetch_1"
 _ANSWER_TOOLS = {"finish", "ask_user", "ask_user_secret"}
 
 _current_workspace: contextvars.ContextVar[Workspace | None] = contextvars.ContextVar("code_agent_workspace", default=None)
+_seen_calls: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar("code_agent_seen_calls", default=None)
 _task_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar("code_agent_deadline", default=None)
 
 
@@ -224,6 +226,33 @@ class CodeAgent(ConfirmableAgent):
         self._pacer.tokens_per_minute = 10**9 if self._own_model() else self._tokens_per_minute()
         limit = self.max_task_seconds_own_model if self._own_model() else self.max_task_seconds
         _task_deadline.set(self._pacer.clock() + limit)
+        _seen_calls.set({})
+
+    def _repeat_nudge(self, name: str, args: dict[str, Any]) -> str | None:
+        """Un modelo pequeño que no sabe como seguir repite la MISMA llamada hasta agotar el tiempo (medido: 9
+        lecturas identicas seguidas). Desde la tercera llamada identica en la tarea no se ejecuta: se devuelve una
+        indicacion que le obliga a cambiar de camino o a responder con lo que ya tiene."""
+        seen = _seen_calls.get()
+        if seen is None:
+            return None
+        normalised = dict(args)
+        if name == "read_file":
+            try:
+                start, end = int(normalised.get("start_line") or 1), int(normalised.get("end_line") or 0)
+            except (TypeError, ValueError):
+                start, end = 1, 0
+            if end and end < start:
+                start, end = end, start
+            normalised["start_line"], normalised["end_line"] = start, end
+        key = name + json.dumps(normalised, sort_keys=True, default=str)
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] <= 2:      # una relectura es legitima: el contexto puede haber omitido el primer resultado
+            return None
+        return (
+            f"Ya hiciste exactamente esta llamada a {name} dos veces y el resultado sigue en la conversacion (mas arriba). Repetirla no "
+            "aporta nada. Elige: (1) si ya tienes la evidencia, responde ahora con finish citando fichero:linea; "
+            "(2) si te falta algo, usa find_code con otras palabras clave o lee OTRO fichero/otro tramo."
+        )
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
         """Mantiene `messages` bajo el presupuesto: omite en sitio las salidas de
@@ -299,6 +328,9 @@ class CodeAgent(ConfirmableAgent):
         workspace = _current_workspace.get()
         if workspace is None:
             return "No hay carpeta de trabajo activa."
+        repeated = self._repeat_nudge(name, args)
+        if repeated:
+            return repeated
         if name == "find_code":
             question = str(args.get("question", "")).strip()
             if not question:
@@ -307,7 +339,29 @@ class CodeAgent(ConfirmableAgent):
             index = await asyncio.to_thread(self._index_for, workspace)
             hits = await asyncio.to_thread(index.search, question, self.find_code_hits, 2, keywords or None)
             return format_hits(hits, question)
-        return await asyncio.to_thread(run_read_tool, workspace, name, args)
+        result = await asyncio.to_thread(run_read_tool, workspace, name, args)
+        if name == "grep" and isinstance(result, str) and result.startswith("Sin coincidencias"):
+            result += await self._find_code_fallback(workspace, str(args.get("pattern", "")))
+        return result
+
+    async def _find_code_fallback(self, workspace: Workspace, pattern: str) -> str:
+        """Un grep sin resultados es el momento en que un modelo pequeño se pierde: busca frases enteras y no usa
+        find_code pese a la regla del prompt. Las instrucciones del prompt no se obedecen de forma fiable; el
+        resultado de la herramienta SI se lee: se adjuntan los candidatos de find_code para esas palabras."""
+        words = " ".join(re.findall(r"[A-Za-z0-9_áéíóúñÁÉÍÓÚÑ]{3,}", pattern))
+        if not words:
+            return ""
+        try:
+            index = await asyncio.to_thread(self._index_for, workspace)
+            hits = await asyncio.to_thread(index.search, words, 5)
+        except Exception:
+            return ""
+        if not hits:
+            return ""
+        return (
+            "\n\nNo hay coincidencias de ese texto exacto, pero find_code (busqueda por concepto) sugiere estos candidatos; "
+            "lee el mas prometedor con read_file:\n\n" + format_hits(hits, words, detail=2)
+        )
 
     # ── Buscador de codigo y pre-carga de evidencia ──────────────────────────
 

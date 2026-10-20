@@ -47,6 +47,9 @@ _DENIED_DIRS: frozenset[str] = frozenset({".git", ".ssh", ".aws", ".gnupg"})
 SKIP_DIRS: frozenset[str] = frozenset({
     ".git", "node_modules", ".venv", "venv", "env", "__pycache__", ".mypy_cache", ".pytest_cache",
     ".ruff_cache", ".tox", ".idea", "dist", "build", "site-packages",
+    # Codigo de terceros: ensucia las busquedas (visto en vivo: "agente de codigo" casaba con el
+    # code interpreter de vendor/open-interpreter). Se puede buscar dentro indicando su ruta.
+    "vendor", "third_party", "thirdparty",
 })
 
 _WINDOWS_RESERVED: frozenset[str] = frozenset(

@@ -44,8 +44,8 @@ def test_read_file_returns_numbered_lines(ws):
 def test_read_file_honours_line_ranges(ws):
     out = tools.read_file(ws, "src/app.py", start_line=4, end_line=5)
 
-    assert "lineas 4-5" in out
-    assert "def saluda" in out and "import os" not in out
+    assert out.startswith("src/app.py (lineas 4-")                    # empieza donde se pide (se amplia hacia delante)
+    assert "def saluda" in out and "import os" not in out              # nada anterior a start_line
 
 
 def test_read_file_truncates_long_files_and_says_how_to_continue(ws):
@@ -256,3 +256,41 @@ def test_every_schema_has_a_matching_dispatcher(ws):
     assert len(names) == len(set(names))
     for name in names:
         assert tools.run_read_tool(ws, name, {"path": "README.md", "pattern": "x"}) is not None
+
+
+# ── Codigo de terceros ───────────────────────────────────────────────────────
+
+def test_vendored_code_is_skipped_by_default_but_searchable_by_path(ws):
+    """Visto en vivo: "agente de codigo" casaba con el code interpreter de vendor/open-interpreter."""
+    (ws.root / "vendor" / "lib").mkdir(parents=True)
+    (ws.root / "vendor" / "lib" / "tercero.py").write_text("def coincide_tercero():\n    pass\n", encoding="utf-8")
+
+    assert "vendor" not in tools.grep(ws, "coincide_tercero")
+    assert "vendor/lib/tercero.py:1" in tools.grep(ws, "coincide_tercero", path="vendor")
+    assert "vendor" not in tools.glob_files(ws, "**/*.py")
+    assert "omitida en busquedas" in tools.list_directory(ws, ".") and "vendor/" in tools.list_directory(ws, ".")
+
+
+def test_tiny_read_windows_are_widened_to_a_useful_minimum(ws):
+    """Un modelo pequeño leia ventanas de 10 lineas una tras otra (8 lecturas seguidas)."""
+    (ws.root / "largo2.txt").write_text("\n".join(f"linea {i}" for i in range(1, 301)), encoding="utf-8")
+
+    out = tools.read_file(ws, "largo2.txt", start_line=100, end_line=109)
+
+    assert f"lineas 100-{99 + tools.READ_MIN_LINES}" in out
+    assert "linea 150" in out and "linea 100" in out
+
+
+def test_widening_never_goes_past_the_end_of_the_file_or_the_cap(ws):
+    short = tools.read_file(ws, "src/app.py", start_line=2, end_line=3)       # el fichero solo tiene 9 lineas
+
+    assert "lineas 2-9" in short
+    big = tools.read_file(ws, "src/app.py", start_line=1, end_line=5000)
+    assert "lineas 1-9" in big
+
+
+def test_a_reversed_line_range_reads_from_start_line_instead_of_failing(ws):
+    """El modelo escribia end_line < start_line y, ante el error, repetia la misma llamada."""
+    out = tools.read_file(ws, "src/app.py", start_line=4, end_line=2)
+
+    assert "def saluda" in out and "debe ser mayor" not in out

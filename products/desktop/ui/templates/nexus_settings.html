@@ -944,6 +944,9 @@
                                 <input id="codeLlmUrl" type="text" placeholder="http://192.168.68.150:11434" style="min-width:260px">
                                 <input id="codeLlmModel" type="text" placeholder="qwen2.5-coder:3b" style="min-width:180px">
                                 <input id="codeLlmCtx" type="number" min="2048" max="131072" step="1024" title="Ventana de contexto (num_ctx)" style="width:110px">
+                                <label class="assets-form-note" title="Los modelos Qwen3 razonan antes de responder: mas preciso pero 10 veces mas lento por paso">
+                                    <input id="codeLlmThink" type="checkbox"> Razonamiento (más lento)
+                                </label>
                             </div>
                             <div class="form-actions">
                                 <button id="codeLlmSaveBtn" type="button">Guardar modelo</button>
@@ -995,6 +998,6 @@
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20261020a"></script>
+    <script src="/static/js/nexus_settings.js?v=20261020b"></script>
 </body>
 </html>

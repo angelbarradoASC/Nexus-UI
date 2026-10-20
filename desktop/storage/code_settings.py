@@ -59,6 +59,7 @@ class CodeSettingsStore:
             "base_url": str(raw_llm.get("base_url", "") or "").strip().rstrip("/"),
             "model": str(raw_llm.get("model", "") or "").strip(),
             "num_ctx": min(max(num_ctx, MIN_NUM_CTX), MAX_NUM_CTX),
+            "think": bool(raw_llm.get("think", False)),
         }
         return {"enabled": bool(data.get("enabled", True)), "workspaces": workspaces, "tokens_per_minute": tpm, "llm": llm}
 
@@ -110,19 +111,22 @@ class CodeSettingsStore:
         self._save(data)
         return data
 
-    def set_llm(self, base_url: str, model: str, num_ctx: int = DEFAULT_NUM_CTX) -> dict[str, Any]:
+    def set_llm(self, base_url: str, model: str, num_ctx: int = DEFAULT_NUM_CTX, think: bool = False) -> dict[str, Any]:
         """Fija el modelo propio. Con `base_url` y `model` vacios lo quita (vuelve al router).
         Lanza ValueError si la URL no es http(s) o falta el modelo."""
         base_url, model = (base_url or "").strip().rstrip("/"), (model or "").strip()
         data = self.load()
         if not base_url and not model:
-            data["llm"] = {"base_url": "", "model": "", "num_ctx": DEFAULT_NUM_CTX}
+            data["llm"] = {"base_url": "", "model": "", "num_ctx": DEFAULT_NUM_CTX, "think": False}
         else:
             if not re.match(r"^https?://[^\s/]+", base_url):
                 raise ValueError("La URL del modelo debe empezar por http:// o https://")
             if not model:
                 raise ValueError("Falta el nombre del modelo (por ejemplo qwen2.5-coder:3b).")
-            data["llm"] = {"base_url": base_url, "model": model, "num_ctx": min(max(int(num_ctx), MIN_NUM_CTX), MAX_NUM_CTX)}
+            data["llm"] = {
+                "base_url": base_url, "model": model,
+                "num_ctx": min(max(int(num_ctx), MIN_NUM_CTX), MAX_NUM_CTX), "think": bool(think),
+            }
         self._save(data)
         return data
 

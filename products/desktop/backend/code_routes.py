@@ -44,6 +44,7 @@ class _ModelBody(BaseModel):
     base_url: str = ""
     model: str = ""
     num_ctx: int = Field(default=DEFAULT_NUM_CTX, ge=MIN_NUM_CTX, le=MAX_NUM_CTX)
+    think: bool = False
 
 
 class _LimitsBody(BaseModel):
@@ -93,7 +94,7 @@ def set_limits(body: _LimitsBody, store: CodeSettingsStore = Depends(get_code_se
 def set_model(body: _ModelBody, store: CodeSettingsStore = Depends(get_code_settings_store)) -> dict:
     """Modelo propio del agente (Ollama). Con URL y modelo vacios vuelve al router de siempre."""
     try:
-        store.set_llm(body.base_url, body.model, body.num_ctx)
+        store.set_llm(body.base_url, body.model, body.num_ctx, body.think)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     return _view(store)

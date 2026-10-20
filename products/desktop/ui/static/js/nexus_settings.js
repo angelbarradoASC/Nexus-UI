@@ -882,6 +882,8 @@ function renderCodeSettings(data) {
         const field = document.getElementById(id);
         if (field && document.activeElement !== field) { field.value = value; }
     }
+    const thinkBox = document.getElementById("codeLlmThink");
+    if (thinkBox) { thinkBox.checked = Boolean(llm.think); }
     const tpmInput = document.getElementById("codeTpmInput");
     if (tpmInput && document.activeElement !== tpmInput) { tpmInput.value = data.tokens_per_minute; }
     badge.textContent = data.enabled
@@ -942,6 +944,7 @@ async function saveCodeLlm() {
             base_url: document.getElementById("codeLlmUrl").value.trim(),
             model: document.getElementById("codeLlmModel").value.trim(),
             num_ctx: Number(document.getElementById("codeLlmCtx").value) || 8192,
+            think: document.getElementById("codeLlmThink").checked,
         }));
         note.textContent = "Guardado.";
     } catch (error) {

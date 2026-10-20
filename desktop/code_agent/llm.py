@@ -33,6 +33,7 @@ logger = logging.getLogger("nexus.code_agent")
 
 _FENCE = re.compile(r"```(?:json|tool_call|python)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _TAGGED = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL | re.IGNORECASE)
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 def _tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -124,10 +125,16 @@ def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class OllamaToolClient:
-    def __init__(self, base_url: str, model: str, *, num_ctx: int = 8192, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self, base_url: str, model: str, *, num_ctx: int = 8192, think: bool | None = False,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.num_ctx = num_ctx
+        # Qwen3 "piensa" antes de cada respuesta: medido en el servidor, 327-459 tokens de
+        # razonamiento = 58-72 s por paso; con think=False, 5,5 s. None = no enviar el parametro.
+        self.think = think
         self._client = client
 
     async def call(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
@@ -144,15 +151,16 @@ class OllamaToolClient:
         }
         if kwargs.get("tools"):
             body["tools"] = kwargs["tools"]
+        if self.think is not None:
+            body["think"] = self.think
         timeout = max(float(kwargs.get("timeout") or 60.0), 300.0)   # un modelo local puede tardar en cargar
         started = time.monotonic()
         try:
-            if self._client is not None:
-                reply = await self._client.post(f"{self.base_url}/api/chat", json=body, timeout=timeout)
-            else:
-                async with httpx.AsyncClient() as client:
-                    reply = await client.post(f"{self.base_url}/api/chat", json=body, timeout=timeout)
-            data = reply.json()
+            reply, data = await self._post(body, timeout)
+            if reply.status_code >= 400 and "think" in str(data.get("error", "")).lower() and "think" in body:
+                # Un modelo sin modo razonamiento rechaza el parametro: se reintenta sin el.
+                body.pop("think")
+                reply, data = await self._post(body, timeout)
         except Exception as exc:
             return self._result(error=f"ollama_error | {type(exc).__name__}: {exc}", started=started)
         if reply.status_code >= 400 or "error" in data:
@@ -164,7 +172,16 @@ class OllamaToolClient:
             for c in message.get("tool_calls") or []
             if isinstance(c.get("function"), dict) and c["function"].get("name")
         ]
-        return self._result(content=message.get("content") or "", tool_calls=calls or None, started=started)
+        content = _THINK.sub("", message.get("content") or "").strip()
+        return self._result(content=content, tool_calls=calls or None, started=started)
+
+    async def _post(self, body: dict[str, Any], timeout: float) -> tuple[Any, dict[str, Any]]:
+        if self._client is not None:
+            reply = await self._client.post(f"{self.base_url}/api/chat", json=body, timeout=timeout)
+        else:
+            async with httpx.AsyncClient() as client:
+                reply = await client.post(f"{self.base_url}/api/chat", json=body, timeout=timeout)
+        return reply, reply.json()
 
     def _result(self, *, started: float, content: str = "", tool_calls: Any = None, error: str | None = None) -> Any:
         return SimpleNamespace(
@@ -190,7 +207,7 @@ class CodeLLM:
     async def call(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
         own = self.configured_model()
         if own:
-            client = OllamaToolClient(own["base_url"], own["model"], num_ctx=own["num_ctx"])
+            client = OllamaToolClient(own["base_url"], own["model"], num_ctx=own["num_ctx"], think=own.get("think", False))
             response = await client.call(messages, **kwargs)
         elif self._router is not None:
             response = await self._router.call(messages=messages, **kwargs)

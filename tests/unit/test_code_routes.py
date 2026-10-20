@@ -28,7 +28,7 @@ def test_settings_start_enabled_and_empty(tmp_path):
     client, _ = _client(tmp_path)
 
     assert client.get("/api/desktop/code/settings").json() == {
-        "enabled": True, "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192}, "workspaces": [],
+        "enabled": True, "tokens_per_minute": 6500, "llm": {"base_url": "", "model": "", "num_ctx": 8192, "think": False}, "workspaces": [],
     }
 
 

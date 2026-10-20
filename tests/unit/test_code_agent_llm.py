@@ -136,6 +136,7 @@ async def test_request_uses_native_chat_with_the_context_window_and_converts_mes
     assert seen["url"] == "http://servidor:11434/api/chat"          # nativo, no /v1: solo asi se fija num_ctx
     assert body["model"] == "qwen2.5-coder:3b" and body["stream"] is False
     assert body["options"] == {"num_ctx": 16384, "temperature": 0.1, "num_predict": 900}
+    assert body["think"] is False                                    # por defecto sin razonamiento
     assert body["tools"] == TOOLS
     assistant = body["messages"][1]
     assert assistant["content"] == "" and assistant["tool_calls"][0]["function"]["arguments"] == {"pattern": "x"}
@@ -209,16 +210,16 @@ async def test_code_llm_prefers_the_own_model_and_never_touches_the_router(monke
     used = {}
 
     async def fake_call(self, messages, **kwargs):
-        used.update(url=self.base_url, model=self.model, num_ctx=self.num_ctx)
+        used.update(url=self.base_url, model=self.model, num_ctx=self.num_ctx, think=self.think)
         return SimpleNamespace(error=None, content="propio", tool_calls=None)
 
     monkeypatch.setattr(OllamaToolClient, "call", fake_call)
-    own = {"base_url": "http://servidor:11434", "model": "qwen2.5-coder:3b", "num_ctx": 8192}
+    own = {"base_url": "http://servidor:11434", "model": "qwen2.5-coder:3b", "num_ctx": 8192, "think": True}
 
     response = await CodeLLM(router, _Settings(own)).call([{"role": "user", "content": "x"}])
 
     assert response.content == "propio" and router.calls == []
-    assert used == {"url": "http://servidor:11434", "model": "qwen2.5-coder:3b", "num_ctx": 8192}
+    assert used == {"url": "http://servidor:11434", "model": "qwen2.5-coder:3b", "num_ctx": 8192, "think": True}
 
 
 @pytest.mark.asyncio
@@ -326,7 +327,9 @@ def test_settings_own_model_roundtrip_validation_and_clearing(tmp_path):
     assert store.llm() is None
 
     store.set_llm("http://192.168.68.150:11434/", "qwen2.5-coder:3b", 16384)
-    assert store.llm() == {"base_url": "http://192.168.68.150:11434", "model": "qwen2.5-coder:3b", "num_ctx": 16384}
+    assert store.llm() == {"base_url": "http://192.168.68.150:11434", "model": "qwen2.5-coder:3b", "num_ctx": 16384, "think": False}
+    store.set_llm("http://192.168.68.150:11434", "qwen3:8b", 8192, think=True)
+    assert store.llm()["think"] is True
 
     store.set_llm("http://x:1", "m", 10)                       # num_ctx se acota
     assert store.llm()["num_ctx"] == 2048
@@ -381,3 +384,55 @@ def test_api_connection_test_reports_each_situation(tmp_path, monkeypatch):
 
     monkeypatch.setattr(code_routes.httpx, "get", down)
     assert "No responde" in client.post("/api/desktop/code/model/test").json()["detail"]
+
+
+# ── Razonamiento (think) ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_think_is_sent_as_configured_and_omitted_when_none():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "ok"}})
+
+    await _ollama(handler, think=True).call([{"role": "user", "content": "x"}])
+    await _ollama(handler, think=None).call([{"role": "user", "content": "x"}])
+
+    assert bodies[0]["think"] is True and "think" not in bodies[1]
+
+
+@pytest.mark.asyncio
+async def test_a_model_without_reasoning_mode_is_retried_without_the_parameter():
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "think" in body:
+            return httpx.Response(400, json={"error": "\"qwen2.5-coder:3b\" does not support thinking"})
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "hecho"}})
+
+    response = await _ollama(handler, think=False).call([{"role": "user", "content": "x"}])
+
+    assert response.error is None and response.content == "hecho"
+    assert len(bodies) == 2 and "think" not in bodies[1]
+
+
+@pytest.mark.asyncio
+async def test_inline_think_blocks_are_removed_from_the_answer():
+    def handler(request):
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "<think>\nrazono...\n</think>\nLa respuesta."}})
+
+    response = await _ollama(handler, think=True).call([{"role": "user", "content": "x"}])
+
+    assert response.content == "La respuesta."
+
+
+def test_api_accepts_the_think_flag(tmp_path):
+    client, store = _client(tmp_path)
+
+    ok = client.put("/api/desktop/code/model", json={"base_url": "http://s:11434", "model": "qwen3:8b", "think": True})
+
+    assert ok.status_code == 200 and ok.json()["llm"]["think"] is True
+    assert store.llm()["think"] is True

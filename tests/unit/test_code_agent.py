@@ -425,3 +425,103 @@ async def test_a_finish_after_reading_files_is_accepted_immediately(project, set
     await _agent(router, settings).propose("ctx", "explica app.py", workspace=str(project))
 
     assert len(router.seen) == 2
+
+
+# ── Buscador de codigo y pre-carga de evidencia ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_the_harness_prefetches_candidates_before_the_first_model_call(project, settings):
+    router = _ScriptedRouter(_resp(_call("c1", "finish", summary="ok")))
+
+    await _agent(router, settings).propose("ctx", "¿donde esta la funcion saluda?", workspace=str(project))
+
+    first = router.seen[0]
+    assert [m["role"] for m in first[-3:]] == ["user", "assistant", "tool"]            # tarea, find_code "pedido", resultado
+    assert first[-2]["tool_calls"][0]["function"]["name"] == "find_code"
+    prefetch = first[-1]["content"]
+    assert first[-1]["tool_call_id"] == "prefetch_1"
+    assert "src/app.py:1" in prefetch and "saluda" in prefetch
+    assert "pueden NO ser los correctos" in prefetch
+
+
+@pytest.mark.asyncio
+async def test_prefetch_does_not_count_as_having_looked_so_the_model_must_still_read(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 1)
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="saluda esta por ahi")),
+        _resp(_call("c2", "read_file", path="src/app.py")),
+        _resp(_call("c3", "finish", summary="saluda esta en src/app.py:1")),
+    )
+
+    result = await _agent(router, settings).propose("ctx", "¿donde esta saluda?", workspace=str(project))
+
+    assert result["summary"] == "saluda esta en src/app.py:1"
+    assert "No has consultado ningun fichero" in _tool_result(router.seen[1], "c1")    # la pre-carga no valio como lectura
+
+
+@pytest.mark.asyncio
+async def test_the_model_can_search_again_with_find_code_and_english_keywords(project, settings):
+    (project / "src" / "otro.py").write_text("def notify_watcher():\n    # avisa al vigilante\n    return 1\n", encoding="utf-8")
+    router = _ScriptedRouter(
+        _resp(_call("c1", "find_code", question="centinela de avisos", keywords=["notify", "watcher"])),
+        _resp(_call("c2", "finish", summary="en src/otro.py:1")),
+    )
+
+    await _agent(router, settings).propose("ctx", "¿quien avisa al centinela?", workspace=str(project))
+
+    assert "src/otro.py:1" in _tool_result(router.seen[1], "c1")
+
+
+@pytest.mark.asyncio
+async def test_find_code_without_a_question_or_without_results_explains_itself(project, settings):
+    router = _ScriptedRouter(
+        _resp(_call("c1", "find_code", question="  "), _call("c2", "find_code", question="zzqqxx")),
+        _resp(_call("c3", "finish", summary="nada")),
+    )
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    assert "Falta la pregunta" in _tool_result(router.seen[1], "c1")
+    assert "Sin resultados" in _tool_result(router.seen[1], "c2")
+
+
+@pytest.mark.asyncio
+async def test_no_prefetch_when_nothing_matches(project, settings):
+    router = _ScriptedRouter(_resp(_call("c1", "finish", summary="ok")))
+
+    await _agent(router, settings).propose("ctx", "zzqqxx", workspace=str(project))
+
+    assert [m["role"] for m in router.seen[0]] == ["system", "user"]
+
+
+@pytest.mark.asyncio
+async def test_the_index_is_reused_between_questions_and_picks_up_changes(project, settings):
+    agent = _agent(_ScriptedRouter(), settings)
+    ws = agent._open_workspace(str(project))
+
+    first = await asyncio.to_thread(agent._index_for, ws)
+    (project / "src" / "nuevo.py").write_text("def purgar_cache():\n    return 1\n", encoding="utf-8")
+    second = await asyncio.to_thread(agent._index_for, ws)
+
+    assert first is second
+    assert any(c.name == "purgar_cache" for c in second._chunks)
+
+
+def test_the_prefetched_evidence_is_the_last_thing_to_be_elided(tmp_path):
+    agent = _agent_with_default_quota(tmp_path)
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "q"},
+                {"role": "tool", "tool_call_id": "prefetch_1", "content": "P" * 6_000}]
+    for i in range(4):
+        messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x" * 6_000})
+
+    agent._prepare_messages(messages)
+
+    contents = {m["tool_call_id"]: m["content"] for m in messages if m["role"] == "tool"}
+    assert contents["prefetch_1"] == "P" * 6_000                                       # se conserva
+    assert contents["c0"].startswith("[resultado antiguo omitido")                     # se omite lo demas, antes
+
+
+def test_find_code_is_offered_to_the_model():
+    names = [t["function"]["name"] for t in CodeAgent.tools]
+
+    assert "find_code" in names and "read_file" in names

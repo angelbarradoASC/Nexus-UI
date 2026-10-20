@@ -1,0 +1,282 @@
+[
+  {
+    "id": "historial-clasificador",
+    "split": "dev",
+    "question": "¿Dónde se decide si el historial de la conversación se pasa al clasificador de skills?",
+    "expect": [
+      {
+        "path": "desktop/runtime/skill_router.py",
+        "symbol": "DesktopSkillRouter.resolve_llm"
+      },
+      {
+        "path": "desktop/runtime/skill_router.py",
+        "symbol": "DesktopSkillRouter.is_followup"
+      }
+    ]
+  },
+  {
+    "id": "cuota-tokens",
+    "split": "holdout",
+    "question": "¿Dónde se aplica el límite de tokens por minuto del agente de código?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/pacer.py",
+        "symbol": "TokenPacer.acquire"
+      },
+      {
+        "path": "desktop/code_agent/pacer.py",
+        "symbol": "PacedRouter.call"
+      },
+      {
+        "path": "desktop/code_agent/agent.py",
+        "symbol": "CodeAgent._begin_task"
+      }
+    ]
+  },
+  {
+    "id": "carpeta-autorizada",
+    "split": "dev",
+    "question": "¿Dónde se comprueba que una carpeta está autorizada para el modo código?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/agent.py",
+        "symbol": "CodeAgent._open_workspace"
+      },
+      {
+        "path": "desktop/storage/code_settings.py",
+        "symbol": "CodeSettingsStore.is_allowed"
+      }
+    ]
+  },
+  {
+    "id": "ficheros-credenciales",
+    "split": "holdout",
+    "question": "¿Cómo evita PEPO leer ficheros de credenciales como el .env?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "_DENIED_FILE_PATTERNS"
+      },
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "Workspace.resolve_readable"
+      },
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "is_denied_name"
+      }
+    ]
+  },
+  {
+    "id": "tapar-secretos",
+    "split": "dev",
+    "question": "¿Dónde se tapan las claves y tokens que aparecen en el código antes de mandarlo al modelo?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "redact"
+      }
+    ]
+  },
+  {
+    "id": "salir-de-carpeta",
+    "split": "holdout",
+    "question": "¿Dónde se impide salir de la carpeta de trabajo usando rutas como ../?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "Workspace.resolve"
+      }
+    ]
+  },
+  {
+    "id": "busqueda-web-chat",
+    "split": "dev",
+    "question": "¿Qué función hace la búsqueda en internet cuando preguntas algo de actualidad en el chat?",
+    "expect": [
+      {
+        "path": "app/nexus/orchestration/coordinator.py",
+        "symbol": "NexusCoordinator._handle_web_search_chat"
+      },
+      {
+        "path": "app/nexus/prospecting/service.py",
+        "symbol": "ProspectingAgentService.web_search"
+      }
+    ]
+  },
+  {
+    "id": "limpiar-consulta",
+    "split": "holdout",
+    "question": "¿Dónde se quita la orden \"busca en internet que...\" antes de lanzar la búsqueda?",
+    "expect": [
+      {
+        "path": "app/nexus/orchestration/coordinator.py",
+        "symbol": "_clean_search_query"
+      },
+      {
+        "path": "app/nexus/orchestration/coordinator.py",
+        "symbol": "_SEARCH_COMMAND_PREFIX"
+      }
+    ]
+  },
+  {
+    "id": "agrupar-correos",
+    "split": "dev",
+    "question": "¿Dónde se agrupan los correos importantes de un mismo hilo para avisar una sola vez?",
+    "expect": [
+      {
+        "path": "desktop/local_agents/outlook_watcher_agent.py",
+        "symbol": "OutlookWatcherAgent._tick"
+      },
+      {
+        "path": "desktop/local_agents/outlook_watcher_agent.py",
+        "symbol": "OutlookWatcherAgent._notify_group"
+      }
+    ]
+  },
+  {
+    "id": "cache-puntuacion-correo",
+    "split": "holdout",
+    "question": "¿Dónde se guarda la puntuación de cada correo para no volver a pedírsela al modelo?",
+    "expect": [
+      {
+        "path": "app/nexus/mail/outlook.py",
+        "symbol": "OutlookMailManager._remember_score"
+      },
+      {
+        "path": "app/nexus/mail/outlook.py",
+        "symbol": "OutlookMailManager._apply_cached_scores"
+      },
+      {
+        "path": "app/nexus/mail/outlook.py",
+        "symbol": "OutlookMailManager._save_scores"
+      },
+      {
+        "path": "app/nexus/mail/outlook.py",
+        "symbol": "OutlookMailManager._score_pending_with_llm"
+      }
+    ]
+  },
+  {
+    "id": "mensaje-seguimiento",
+    "split": "dev",
+    "question": "¿Qué decide que un mensaje corto sea un seguimiento de la conversación anterior?",
+    "expect": [
+      {
+        "path": "desktop/runtime/skill_router.py",
+        "symbol": "DesktopSkillRouter.is_followup"
+      }
+    ]
+  },
+  {
+    "id": "propuesta-raton-caduca",
+    "split": "holdout",
+    "question": "¿Dónde se descarta una propuesta de cambiar la velocidad del ratón si el usuario habla de otra cosa?",
+    "expect": [
+      {
+        "path": "app/nexus/orchestration/coordinator.py",
+        "symbol": "NexusCoordinator.handle_chat"
+      }
+    ]
+  },
+  {
+    "id": "respuesta-sin-mirar",
+    "split": "dev",
+    "question": "¿Dónde se rechaza una respuesta del agente de código que no ha mirado ningún fichero?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/agent.py",
+        "symbol": "CodeAgent._finish_objection"
+      },
+      {
+        "path": "desktop/local_agents/confirmable_loop.py",
+        "symbol": "ConfirmableAgent._run_loop"
+      }
+    ]
+  },
+  {
+    "id": "tool-call-en-texto",
+    "split": "holdout",
+    "question": "¿Cómo se recupera una llamada a una herramienta que el modelo escribe como texto JSON?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/llm.py",
+        "symbol": "extract_text_tool_calls"
+      },
+      {
+        "path": "desktop/code_agent/llm.py",
+        "symbol": "recover_text_tool_calls"
+      }
+    ]
+  },
+  {
+    "id": "selector-carpetas",
+    "split": "dev",
+    "question": "¿Dónde se abre el selector de carpetas nativo de Windows?",
+    "expect": [
+      {
+        "path": "desktop/bridge.py",
+        "symbol": "DesktopBridge.pick_folder"
+      }
+    ]
+  },
+  {
+    "id": "recortar-contexto",
+    "split": "holdout",
+    "question": "¿Dónde se recorta el contexto cuando la conversación del agente se hace demasiado larga?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/agent.py",
+        "symbol": "CodeAgent._prepare_messages"
+      },
+      {
+        "path": "desktop/local_agents/confirmable_loop.py",
+        "symbol": "ConfirmableAgent._prepare_messages"
+      }
+    ]
+  },
+  {
+    "id": "carpeta-demasiado-amplia",
+    "split": "dev",
+    "question": "¿Dónde se valida que la carpeta de un proyecto no sea demasiado amplia, como la raíz del disco?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/workspace.py",
+        "symbol": "validate_workspace_root"
+      }
+    ]
+  },
+  {
+    "id": "skill-para-internet",
+    "split": "holdout",
+    "question": "¿Dónde se decide qué skill usar cuando la pregunta necesita datos de internet?",
+    "expect": [
+      {
+        "path": "desktop/runtime/skill_router.py",
+        "symbol": "DesktopSkillRouter._heuristic_match"
+      }
+    ]
+  },
+  {
+    "id": "mensajes-ollama",
+    "split": "dev",
+    "question": "¿Dónde se convierte el formato de los mensajes al que entiende Ollama?",
+    "expect": [
+      {
+        "path": "desktop/code_agent/llm.py",
+        "symbol": "_to_ollama_messages"
+      }
+    ]
+  },
+  {
+    "id": "ventana-puente-js",
+    "split": "holdout",
+    "question": "¿Cómo se crea la ventana de escritorio y se le pasa el puente de JavaScript?",
+    "expect": [
+      {
+        "path": "desktop/application.py",
+        "symbol": "DesktopApplication._create_window"
+      }
+    ]
+  }
+]

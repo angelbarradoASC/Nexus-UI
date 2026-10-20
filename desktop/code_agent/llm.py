@@ -153,6 +153,8 @@ class OllamaToolClient:
             body["tools"] = kwargs["tools"]
         if self.think is not None:
             body["think"] = self.think
+        if kwargs.get("json"):
+            body["format"] = "json"      # salida JSON obligatoria (expansion de la pregunta)
         timeout = max(float(kwargs.get("timeout") or 60.0), 300.0)   # un modelo local puede tardar en cargar
         started = time.monotonic()
         try:

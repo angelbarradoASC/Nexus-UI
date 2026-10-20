@@ -1,0 +1,103 @@
+[
+  {
+    "id": "arranque-vigilante-correo",
+    "split": "fresh",
+    "question": "¿Dónde arranca en segundo plano el vigilante del correo cuando se abre la aplicación?",
+    "expect": [
+      {"path": "desktop/application.py", "symbol": "DesktopApplication._start_outlook_watcher"}
+    ]
+  },
+  {
+    "id": "notificacion-windows",
+    "split": "fresh",
+    "question": "¿Dónde se muestra la notificación de Windows desde la bandeja del sistema?",
+    "expect": [
+      {"path": "desktop/tray.py", "symbol": "SystemTray.notify"}
+    ]
+  },
+  {
+    "id": "token-microsoft-silencioso",
+    "split": "fresh",
+    "question": "¿Cómo se obtiene el token de Microsoft sin volver a pedir el login al usuario?",
+    "expect": [
+      {"path": "app/nexus/mail/outlook.py", "symbol": "OutlookMailManager._acquire_token_silent"}
+    ]
+  },
+  {
+    "id": "cuenta-de-envio",
+    "split": "fresh",
+    "question": "¿Dónde se elige por qué cuenta de correo sale cada envío cuando hay varias?",
+    "expect": [
+      {"path": "app/nexus/outreach/service.py", "symbol": "OutreachManager.pick_account"}
+    ]
+  },
+  {
+    "id": "normativa-a-sectores",
+    "split": "fresh",
+    "question": "¿Dónde se convierte lo que dice el usuario sobre una normativa en los sectores reales a los que aplica?",
+    "expect": [
+      {"path": "app/nexus/api/routes/prospecting.py", "symbol": "_ground_regulation"},
+      {"path": "app/nexus/prospecting/campaign_decompose.py", "symbol": "CampaignDecomposer._ground_regulation"}
+    ]
+  },
+  {
+    "id": "descartar-bandeja-otros",
+    "split": "fresh",
+    "question": "¿Dónde se descartan sin gastar modelo los correos de la bandeja Otros de Outlook?",
+    "expect": [
+      {"path": "app/nexus/mail/outlook.py", "symbol": "OutlookMailManager._apply_free_prefilter"}
+    ]
+  },
+  {
+    "id": "escalar-nivel-llm",
+    "split": "fresh",
+    "question": "¿Dónde se manda la petición al modelo y se pasa al siguiente nivel si el actual falla?",
+    "expect": [
+      {"path": "app/agents/llm_router.py", "symbol": "LLMRouter.call"}
+    ]
+  },
+  {
+    "id": "cifrado-credenciales",
+    "split": "fresh",
+    "question": "¿Con qué se cifran las credenciales guardadas de los dispositivos?",
+    "expect": [
+      {"path": "app/agents/tools/credential_store.py", "symbol": "CredentialStore"}
+    ]
+  },
+  {
+    "id": "guardar-conversaciones",
+    "split": "fresh",
+    "question": "¿Dónde se guardan los mensajes de las conversaciones de PEPO?",
+    "expect": [
+      {"path": "desktop/storage/conversations.py", "symbol": "PepoConversationStore.append_turn"},
+      {"path": "desktop/storage/conversations.py", "symbol": "PepoConversationStore.create_conversation"},
+      {"path": "desktop/storage/conversations.py", "symbol": "PepoConversationStore"}
+    ]
+  },
+  {
+    "id": "limite-lectura-antigua",
+    "split": "fresh",
+    "question": "¿Cuánto texto como máximo lee PEPO de un fichero con la herramienta de leer ficheros del PC?",
+    "expect": [
+      {"path": "desktop/local_agents/system_task_agent.py", "symbol": "SystemTaskAgent._read_file_sync"}
+    ]
+  },
+  {
+    "id": "arranque-servidor-local",
+    "split": "fresh",
+    "question": "¿Dónde arranca el servidor local de la aplicación y se espera a que esté listo?",
+    "expect": [
+      {"path": "desktop/application.py", "symbol": "DesktopApplication.run"}
+    ]
+  },
+  {
+    "id": "presupuesto-mensual",
+    "split": "fresh",
+    "question": "¿Dónde se cuenta cuántas consultas de pago se han gastado este mes y se bloquea al llegar al límite?",
+    "expect": [
+      {"path": "app/nexus/prospecting/api_budget.py", "symbol": "_MonthlyApiBudget.check_or_raise"},
+      {"path": "app/nexus/prospecting/api_budget.py", "symbol": "_MonthlyApiBudget.increment"},
+      {"path": "app/nexus/prospecting/api_budget.py", "symbol": "_MonthlyApiBudget.status"}
+    ]
+  }
+]

@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,8 @@ from typing import Any
 
 from desktop.local_agents.confirmable_loop import ConfirmableAgent, PendingAction
 
+from .citations import citations, verify_citations
+from .index import FIND_CODE_SCHEMA, CodeIndex, format_hits
 from .llm import CodeLLM
 from .pacer import CHARS_PER_TOKEN, DEADLINE_ERROR, PacedRouter, TokenPacer
 from .tools import READ_TOOL_SCHEMAS, run_read_tool
@@ -48,6 +52,9 @@ _MIN_CONTEXT_CHARS = 10_000
 _ELIDED_PREFIX = "[resultado antiguo omitido"
 _TRUNCATED_NOTE = "\n[... recortado para caber en la cuota de tokens; pide un trozo mas pequeño si lo necesitas]"
 
+_PREFETCH_ID = "prefetch_1"
+_ANSWER_TOOLS = {"finish", "ask_user", "ask_user_secret"}
+
 _current_workspace: contextvars.ContextVar[Workspace | None] = contextvars.ContextVar("code_agent_workspace", default=None)
 _task_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar("code_agent_deadline", default=None)
 
@@ -56,7 +63,10 @@ class CodeAgent(ConfirmableAgent):
     prompt_key = "pepo.code_loop"
     agent_id = "code"
     persistence_key = "code"
-    tools = list(READ_TOOL_SCHEMAS)
+    tools = [*READ_TOOL_SCHEMAS, FIND_CODE_SCHEMA]
+    # Prefijos de ruta que el indice no ve (la evaluacion excluye sus propias preguntas).
+    index_exclude_prefixes: tuple[str, ...] = ()
+    prefetch_hits = 8
 
     batch_readonly_calls = True
     resume_after_execute = True
@@ -70,12 +80,14 @@ class CodeAgent(ConfirmableAgent):
     # Limite de tiempo por tarea: con poca cuota cada paso espera ~1 min; mejor rendirse con
     # un mensaje claro que dejar el bucle quemando cuota durante minutos.
     max_task_seconds = 240.0
-    # Un intento de terminar sin haber consultado ningun fichero se rechaza una vez.
-    max_finish_reviews = 1
+    # Un intento de terminar se rechaza hasta 2 veces: una por no haber mirado nada y otra por citas
+    # ausentes o no verificables. Si el modelo insiste, se acepta (puede ser una charla sin codigo).
+    max_finish_reviews = 2
 
     def __init__(self, cfg, *, llm_router=None, store=None, settings=None) -> None:
         self._pacer = TokenPacer(self.tokens_per_minute)
         # Siempre hay "LLM": el modelo propio (Ollama) si esta configurado en los ajustes, o el router.
+        self._indexes: dict[str, CodeIndex] = {}
         self._has_router = llm_router is not None
         paced = PacedRouter(CodeLLM(llm_router, settings), self._pacer, deadline_fn=_task_deadline.get)
         super().__init__(cfg, llm_router=paced, store=store)
@@ -137,15 +149,46 @@ class CodeAgent(ConfirmableAgent):
         vez; si el modelo insiste con la misma respuesta, se acepta (puede no hacer falta mirar)."""
         consulted = any(
             m.get("role") == "tool" and str(m.get("content") or "") and not str(m["content"]).startswith("__pendiente")
+            and m.get("tool_call_id") != _PREFETCH_ID      # la pre-carga la hizo el arnes, no el modelo
             for m in messages
         )
-        if consulted:
+        if not consulted:
+            return (
+                "No has consultado ningun fichero del proyecto, asi que tu respuesta no tiene evidencia. Usa grep, glob o "
+                "read_file para comprobarlo y cita ruta:linea. Solo si la pregunta no necesita mirar el codigo, repite tu "
+                "respuesta tal cual."
+            )
+        return self._citation_objection(messages, summary)
+
+    def _citation_objection(self, messages: list[dict[str, Any]], summary: str) -> str | None:
+        """Exige citas `ruta:linea` verificables (ver citations.py). None si todo cuadra."""
+        workspace = _current_workspace.get()
+        if workspace is None:
             return None
-        return (
-            "No has consultado ningun fichero del proyecto, asi que tu respuesta no tiene evidencia. Usa grep, glob o "
-            "read_file para comprobarlo y cita ruta:linea. Solo si la pregunta no necesita mirar el codigo, repite tu "
-            "respuesta tal cual."
+        seen = "\n".join(
+            [str(m.get("content") or "") for m in messages if m.get("role") == "tool"]
+            # Argumentos de las llamadas reales (read_file, grep...), NO los de la propia respuesta final
+            # (finish/ask_user): si no, citar un fichero bastaria para darlo por "visto".
+            + [
+                str(c.get("function", {}).get("arguments", ""))
+                for m in messages for c in (m.get("tool_calls") or [])
+                if c.get("function", {}).get("name") not in _ANSWER_TOOLS
+            ]
         )
+        index = self._indexes.get(os.path.normcase(str(workspace.root)))
+        known = (lambda: [c.path for c in index._chunks]) if index is not None else (lambda: ())
+        valid, problems = verify_citations(summary, workspace, seen, known)
+        if problems:
+            return (
+                "Algunas citas de tu respuesta no son verificables:\n- " + "\n- ".join(problems)
+                + "\nLee el trozo exacto con read_file y cita ruta:linea de la funcion que responde a la pregunta."
+            )
+        if not valid and not citations(summary):
+            return (
+                "Tu respuesta no cita ninguna ruta:linea. Indica el fichero y la linea exactos de la funcion que responde "
+                "(los numeros de linea salen en read_file). Solo si la pregunta no trata del codigo, repite tu respuesta tal cual."
+            )
+        return None
 
     # ── Cuota y contexto ─────────────────────────────────────────────────────
 
@@ -182,6 +225,8 @@ class CodeAgent(ConfirmableAgent):
         if total <= budget:
             return
         tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        # La pre-carga (find_code automatico) es lo mas valioso: se omite en ultimo lugar.
+        tool_indexes.sort(key=lambda i: messages[i].get("tool_call_id") == _PREFETCH_ID)
         for index in tool_indexes[:-1]:
             content = str(messages[index].get("content") or "")
             if content.startswith(_ELIDED_PREFIX) or content.startswith("__pendiente") or len(content) < 300:
@@ -234,7 +279,50 @@ class CodeAgent(ConfirmableAgent):
         workspace = _current_workspace.get()
         if workspace is None:
             return "No hay carpeta de trabajo activa."
+        if name == "find_code":
+            question = str(args.get("question", "")).strip()
+            if not question:
+                return "Falta la pregunta de find_code."
+            keywords = [str(k) for k in (args.get("keywords") or []) if isinstance(k, (str, int))][:14]
+            index = await asyncio.to_thread(self._index_for, workspace)
+            hits = await asyncio.to_thread(index.search, question, self.prefetch_hits, 2, keywords or None)
+            return format_hits(hits, question)
         return await asyncio.to_thread(run_read_tool, workspace, name, args)
+
+    # ── Buscador de codigo y pre-carga de evidencia ──────────────────────────
+
+    def _index_for(self, workspace: Workspace) -> CodeIndex:
+        """Indice incremental por carpeta (se reutiliza entre preguntas; solo reindexa lo que cambia)."""
+        key = os.path.normcase(str(workspace.root))
+        index = self._indexes.get(key)
+        if index is None:
+            index = self._indexes[key] = CodeIndex(workspace, exclude_prefixes=self.index_exclude_prefixes)
+        index.refresh()
+        return index
+
+    async def _prefetch(self, workspace: Workspace, task: str) -> list[dict[str, Any]]:
+        """El arnes busca ANTES de la primera llamada al modelo y le entrega los candidatos como
+        si los hubiera pedido con find_code: un modelo pequeño empieza con pistas reales en vez de
+        buscar a ciegas con frases enteras (medido: asi fallaban 3B y 8B)."""
+        try:
+            index = await asyncio.to_thread(self._index_for, workspace)
+            hits = await asyncio.to_thread(index.search, task, self.prefetch_hits)
+        except Exception:
+            logger.exception("CodeAgent: fallo en la pre-carga de evidencia")
+            return []
+        if not hits:
+            return []
+        return [
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": _PREFETCH_ID, "type": "function",
+                "function": {"name": "find_code", "arguments": json.dumps({"question": task}, ensure_ascii=False)},
+            }]},
+            {"role": "tool", "tool_call_id": _PREFETCH_ID, "content": (
+                "Candidatos encontrados automaticamente para tu pregunta (pueden NO ser los correctos: leelos con "
+                "read_file y comprueba que responden exactamente a lo que se pregunta; si no, vuelve a buscar con "
+                "find_code usando otras palabras o keywords en ingles):\n\n" + format_hits(hits, task)
+            )},
+        ]
 
     async def execute(self, pending: PendingAction) -> dict[str, Any]:
         # Fase 1: ninguna herramienta propone acciones, asi que no hay nada que ejecutar.
@@ -269,6 +357,7 @@ class CodeAgent(ConfirmableAgent):
                 {"role": "system", "content": self._system_prompt(ws)},
                 *(history or []),
                 {"role": "user", "content": task},
+                *(await self._prefetch(ws, task)),
             ]
             outcome = await self._run_loop(seed)
             stored = self._store_outcome(context_id, task, outcome)

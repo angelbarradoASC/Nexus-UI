@@ -6,7 +6,8 @@ respuesta final cita un fichero y una linea correctos, cuantos pasos dio y cuant
 
 Uso (desde la raiz del repo, con el venv):
     python scripts/eval_code_agent.py --model qwen3:8b --set fresh
-    python scripts/eval_code_agent.py --model qwen3:8b --set fresh --no-prefetch   # sin pre-carga
+    python scripts/eval_code_agent.py --model qwen3:8b --set fresh --prefetch      # con pre-carga (opt-in)
+    python scripts/eval_code_agent.py --model qwen3:8b --set fresh --no-find-code  # ablacion: sin find_code
     python scripts/eval_code_agent.py --retrieval-only                              # solo el buscador, sin LLM
 
 --set: dev | holdout | fresh | all.   --limit N: solo las N primeras.
@@ -71,10 +72,9 @@ async def run(args: argparse.Namespace) -> None:
     for number, question in enumerate(questions, start=1):
         agent = CodeAgent(None, llm_router=None, settings=settings)
         agent.index_exclude_prefixes = EXCLUDE
-        if args.no_prefetch:
-            async def no_prefetch(ws, task):
-                return []
-            agent._prefetch = no_prefetch
+        agent.prefetch_hits = 8 if args.prefetch else 0
+        if args.no_find_code:
+            agent.tools = [t for t in agent.tools if t["function"]["name"] != "find_code"]
         calls["n"] = 0
         started = time.time()
         result = await agent.propose(f"eval-{number}", question.question, workspace=str(ROOT))
@@ -88,7 +88,7 @@ async def run(args: argparse.Namespace) -> None:
     correct = sum(1 for r in rows if r["grade"] == "correcta")
     partial = sum(1 for r in rows if r["grade"] == "parcial")
     print(
-        f"\nmodelo={args.model} think={args.think} prefetch={'no' if args.no_prefetch else 'si'} conjunto={args.set}: "
+        f"\nmodelo={args.model} think={args.think} prefetch={'si' if args.prefetch else 'no'} find_code={'no' if args.no_find_code else 'si'} conjunto={args.set}: "
         f"correctas {correct}/{total} ({correct / total:.0%}), parciales {partial}, "
         f"pasos medios {sum(r['steps'] for r in rows) / total:.1f}, tiempo medio {sum(r['seconds'] for r in rows) / total:.0f}s"
     )
@@ -104,7 +104,8 @@ def main() -> None:
     parser.add_argument("--think", action="store_true", help="activa el razonamiento (mas lento)")
     parser.add_argument("--set", default="fresh", choices=["dev", "holdout", "fresh", "all"])
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--no-prefetch", action="store_true", help="sin pre-carga de evidencia (linea base)")
+    parser.add_argument("--prefetch", action="store_true", help="activa la pre-carga de evidencia (por defecto apagada: empeoraba)")
+    parser.add_argument("--no-find-code", action="store_true", help="sin la herramienta find_code (ablacion)")
     parser.add_argument("--retrieval-only", action="store_true", help="solo mide el buscador, sin LLM")
     parser.add_argument("--out", help="guarda los resultados en este JSON")
     args = parser.parse_args()

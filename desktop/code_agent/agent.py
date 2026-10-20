@@ -66,7 +66,13 @@ class CodeAgent(ConfirmableAgent):
     tools = [*READ_TOOL_SCHEMAS, FIND_CODE_SCHEMA]
     # Prefijos de ruta que el indice no ve (la evaluacion excluye sus propias preguntas).
     index_exclude_prefixes: tuple[str, ...] = ()
-    prefetch_hits = 8
+    # Resultados que devuelve find_code cuando el MODELO la llama.
+    find_code_hits = 8
+    # Pre-carga: el arnes ejecuta find_code antes de la primera llamada y entrega los candidatos.
+    # APAGADA por defecto (0): medido el 2026-10-20 con qwen3:8b sobre 12 preguntas que no se usaron
+    # para afinar, con pre-carga acierta 5/12 y 4/12; sin ella, 9/12. El modelo se ancla en los
+    # candidatos y termina antes (4-5 pasos frente a 7-8) con respuestas mas flojas.
+    prefetch_hits = 0
 
     batch_readonly_calls = True
     resume_after_execute = True
@@ -299,7 +305,7 @@ class CodeAgent(ConfirmableAgent):
                 return "Falta la pregunta de find_code."
             keywords = [str(k) for k in (args.get("keywords") or []) if isinstance(k, (str, int))][:14]
             index = await asyncio.to_thread(self._index_for, workspace)
-            hits = await asyncio.to_thread(index.search, question, self.prefetch_hits, 2, keywords or None)
+            hits = await asyncio.to_thread(index.search, question, self.find_code_hits, 2, keywords or None)
             return format_hits(hits, question)
         return await asyncio.to_thread(run_read_tool, workspace, name, args)
 
@@ -318,6 +324,8 @@ class CodeAgent(ConfirmableAgent):
         """El arnes busca ANTES de la primera llamada al modelo y le entrega los candidatos como
         si los hubiera pedido con find_code: un modelo pequeño empieza con pistas reales en vez de
         buscar a ciegas con frases enteras (medido: asi fallaban 3B y 8B)."""
+        if not self.prefetch_hits:
+            return []
         try:
             index = await asyncio.to_thread(self._index_for, workspace)
             hits = await asyncio.to_thread(index.search, task, self.prefetch_hits)

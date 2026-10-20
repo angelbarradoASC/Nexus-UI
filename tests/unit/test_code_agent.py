@@ -430,7 +430,8 @@ async def test_a_finish_after_reading_files_is_accepted_immediately(project, set
 # ── Buscador de codigo y pre-carga de evidencia ──────────────────────────────
 
 @pytest.mark.asyncio
-async def test_the_harness_prefetches_candidates_before_the_first_model_call(project, settings):
+async def test_the_harness_prefetches_candidates_before_the_first_model_call(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "prefetch_hits", 8)          # opt-in: apagada por defecto
     router = _ScriptedRouter(_resp(_call("c1", "finish", summary="ok")))
 
     await _agent(router, settings).propose("ctx", "¿donde esta la funcion saluda?", workspace=str(project))
@@ -446,6 +447,7 @@ async def test_the_harness_prefetches_candidates_before_the_first_model_call(pro
 
 @pytest.mark.asyncio
 async def test_prefetch_does_not_count_as_having_looked_so_the_model_must_still_read(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "prefetch_hits", 8)
     monkeypatch.setattr(CodeAgent, "max_finish_reviews", 1)
     router = _ScriptedRouter(
         _resp(_call("c1", "finish", summary="saluda esta por ahi")),
@@ -486,7 +488,8 @@ async def test_find_code_without_a_question_or_without_results_explains_itself(p
 
 
 @pytest.mark.asyncio
-async def test_no_prefetch_when_nothing_matches(project, settings):
+async def test_no_prefetch_when_nothing_matches(project, settings, monkeypatch):
+    monkeypatch.setattr(CodeAgent, "prefetch_hits", 8)
     router = _ScriptedRouter(_resp(_call("c1", "finish", summary="ok")))
 
     await _agent(router, settings).propose("ctx", "zzqqxx", workspace=str(project))
@@ -525,3 +528,30 @@ def test_find_code_is_offered_to_the_model():
     names = [t["function"]["name"] for t in CodeAgent.tools]
 
     assert "find_code" in names and "read_file" in names
+
+
+@pytest.mark.asyncio
+async def test_prefetch_is_off_by_default_because_it_made_the_agent_worse(project, settings):
+    """Medido el 2026-10-20 con qwen3:8b (12 preguntas no usadas para afinar): con pre-carga 5/12 y 4/12 correctas,
+    sin ella 9/12. El modelo se ancla en los candidatos y termina antes con respuestas mas flojas."""
+    assert CodeAgent.prefetch_hits == 0
+    router = _ScriptedRouter(_resp(_call("c1", "finish", summary="ok")))
+
+    await _agent(router, settings).propose("ctx", "¿donde esta la funcion saluda?", workspace=str(project))
+
+    assert [m["role"] for m in router.seen[0]] == ["system", "user"]         # sin pre-carga
+    assert "find_code" in [t["function"]["name"] for t in CodeAgent.tools]  # pero la herramienta sigue ahi
+
+
+@pytest.mark.asyncio
+async def test_find_code_returns_find_code_hits_candidates(project, settings, monkeypatch):
+    for i in range(12):
+        (project / "src" / f"mod{i}.py").write_text(f"def saluda_{i}():\n    return 'hola'\n", encoding="utf-8")
+    monkeypatch.setattr(CodeAgent, "find_code_hits", 3)
+    router = _ScriptedRouter(_resp(_call("c1", "find_code", question="saluda hola")), _resp(_call("c2", "finish", summary="x")))
+
+    await _agent(router, settings).propose("ctx", "pregunta", workspace=str(project))
+
+    result = _tool_result(router.seen[1], "c1")
+    assert result.count(".py:") <= 4                                      # 3 candidatos (+ posibles lineas de codigo)
+    assert "1." in result and "3." in result and "4. " not in result

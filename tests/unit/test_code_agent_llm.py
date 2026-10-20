@@ -436,3 +436,22 @@ def test_api_accepts_the_think_flag(tmp_path):
 
     assert ok.status_code == 200 and ok.json()["llm"]["think"] is True
     assert store.llm()["think"] is True
+
+
+@pytest.mark.asyncio
+async def test_own_model_gets_a_longer_deadline_and_an_honest_timeout_message(monkeypatch, project):
+    """Visto en la evaluacion: con qwen3:8b (~25 s/paso) las tareas de 9-14 pasos se cortaban a los 4 min
+    con un mensaje sobre la cuota de tokens que no aplicaba a un modelo propio."""
+    root, settings = project
+    monkeypatch.setattr(CodeAgent, "max_finish_reviews", 0)
+    _scripted(monkeypatch, *[
+        SimpleNamespace(error=None, tool_calls=None, content='{"name": "list_directory", "arguments": {}}') for _ in range(5)
+    ])
+    agent = CodeAgent(None, llm_router=None, settings=settings)
+    assert agent.max_task_seconds_own_model > agent.max_task_seconds
+    agent.max_task_seconds_own_model = -1.0                     # fuerza que se agote ya
+
+    result = await agent.propose("ctx", "explora", workspace=str(root))
+
+    assert "tiempo maximo" in result["summary"] and "qwen2.5-coder:3b" in result["summary"]
+    assert "cuota" not in result["summary"]

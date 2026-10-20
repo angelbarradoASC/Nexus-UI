@@ -80,6 +80,9 @@ class CodeAgent(ConfirmableAgent):
     # Limite de tiempo por tarea: con poca cuota cada paso espera ~1 min; mejor rendirse con
     # un mensaje claro que dejar el bucle quemando cuota durante minutos.
     max_task_seconds = 240.0
+    # Un modelo propio no espera cuota pero cada paso tarda lo que tarde la maquina (medido: ~25 s por
+    # paso con qwen3:8b y una tarea de 9-14 pasos): el limite de la nube cortaba tareas que iban bien.
+    max_task_seconds_own_model = 600.0
     # Un intento de terminar se rechaza hasta 2 veces: una por no haber mirado nada y otra por citas
     # ausentes o no verificables. Si el modelo insiste, se acepta (puede ser una charla sin codigo).
     max_finish_reviews = 2
@@ -213,7 +216,8 @@ class CodeAgent(ConfirmableAgent):
         """Aplica la cuota configurada (un modelo propio no tiene cuota que respetar) y
         arranca el reloj de la tarea."""
         self._pacer.tokens_per_minute = 10**9 if self._own_model() else self._tokens_per_minute()
-        _task_deadline.set(self._pacer.clock() + self.max_task_seconds)
+        limit = self.max_task_seconds_own_model if self._own_model() else self.max_task_seconds
+        _task_deadline.set(self._pacer.clock() + limit)
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> None:
         """Mantiene `messages` bajo el presupuesto: omite en sitio las salidas de
@@ -245,7 +249,17 @@ class CodeAgent(ConfirmableAgent):
 
     def _store_outcome(self, context_id: str, task: str, outcome: dict[str, Any]) -> dict[str, Any]:
         summary = str(outcome.get("summary", ""))
-        if outcome.get("kind") == "finish" and DEADLINE_ERROR in summary:
+        own = self._own_model()
+        if outcome.get("kind") == "finish" and DEADLINE_ERROR in summary and own:
+            outcome = {
+                "kind": "finish",
+                "summary": (
+                    f"Se agoto el tiempo maximo de la tarea ({int(self.max_task_seconds_own_model // 60)} min) con el modelo "
+                    f"local {own['model']}: la pregunta necesitaba mas pasos de los que da tiempo. Prueba con una pregunta mas "
+                    "concreta (nombra el modulo o la funcion) o con un modelo mas rapido."
+                ),
+            }
+        elif outcome.get("kind") == "finish" and DEADLINE_ERROR in summary:
             outcome = {
                 "kind": "finish",
                 "summary": (

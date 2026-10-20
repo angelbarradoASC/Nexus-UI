@@ -124,3 +124,23 @@ Cada fase termina verificada **en la app de escritorio real** (no en navegador) 
 
 **Mejoras pendientes sin depender de la cuota:** al agotar el tiempo, devolver lo averiguado hasta ese momento en vez de solo el aviso; progreso visible en la UI (fase 4).
 
+
+### Refuerzo del arnés con modelos propios (2026-10-20)
+
+Objetivo del usuario: preguntas simples sobre código resueltas con los modelos que ya tiene (`qwen3:8b` think=false y `qwen2.5-coder:3b` en 192.168.68.150), mejorando el arnés y no el modelo.
+
+**Medido** (conjunto `tests/eval/code_questions_fresh.json`, 12 preguntas no vistas al afinar; corrector estricto, que infravalora respuestas alternativas válidas):
+
+| Configuración (qwen3:8b) | Aciertos |
+|---|---|
+| Pre-carga de candidatos (A) | 5/12 |
+| Pre-carga + verificador de citas (B) | 4/12 |
+| **Sin pre-carga, `find_code` como herramienta** | **9/12** (7,8 pasos, 199 s de media) |
+| Sin `find_code` (4 preguntas) | 0/4 (se rinde pronto) |
+
+- Hipótesis refutada: empujar candidatos al contexto empeora (el modelo se ancla en ellos). Queda apagada (`prefetch_hits = 0`).
+- Lo que sí ayuda: `find_code` que el modelo llama él mismo (BM25 + sinónimos ES→EN + AST), y que `grep` sin resultados adjunte candidatos de `find_code` (un resultado de herramienta se lee; una regla del prompt no se obedece de forma fiable).
+- Recuperación léxica pura: recall@8 = 0,58 en el conjunto fresco.
+- Guardas añadidas tras trazas en vivo: ventana mínima de lectura (60 líneas), rangos invertidos tolerados, y la 3ª llamada idéntica en una tarea no se ejecuta (qwen3:8b repitió la misma lectura 9 veces hasta agotar los 10 min). `vendor/` y `third_party/` fuera del índice.
+- Velocidad: ~150–200 s por pregunta con qwen3:8b (60 % CPU / 40 % GPU en el servidor). `qwen3:4b` (2,5 GB) cabría entero en GPU; no descargado, pendiente de OK.
+- Verificador de citas: efecto no medible con este conjunto (ruido mayor que la señal).

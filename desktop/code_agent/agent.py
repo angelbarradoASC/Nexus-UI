@@ -38,14 +38,22 @@ from .pacer import CHARS_PER_TOKEN, DEADLINE_ERROR, PacedRouter, TokenPacer
 from .tools import READ_TOOL_SCHEMAS, run_read_tool
 from .tour import (
     MIN_FILES_READ,
+    NOTE_SYSTEM,
+    NOTES_BUDGET_SHARE,
+    SYNTH_SYSTEM,
     TOUR_FINISH_REVIEWS,
     ModuleOutline,
     build_outlines,
+    clean_note,
+    clean_synthesis,
+    complete_answer,
     coverage_footer,
     coverage_units,
     format_map,
+    format_notes,
     is_tour_question,
     missing_units,
+    module_input,
 )
 from .workspace import Workspace, WorkspaceError, redact
 
@@ -78,6 +86,7 @@ class _TourState:
     outlines: list[ModuleOutline]
     units: list[str]
     opened: set[str] = field(default_factory=set)
+    summarised: dict[str, str] = field(default_factory=dict)       # notas por modulo escritas por el arnes
 
 
 _tour: contextvars.ContextVar[_TourState | None] = contextvars.ContextVar("code_agent_tour", default=None)
@@ -85,7 +94,7 @@ _task_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar("c
 
 
 _TOUR_PROMPT = """MODO RECORRIDO: el usuario pide una vision general del programa, no una pregunta concreta.
-- Abajo tienes el MAPA con todos los ficheros. Lee con read_file los mas importantes (empieza por el punto de entrada y por la configuracion) para entender como se conectan; no te quedes en un solo fichero.
+- Abajo tienes informacion de TODOS los ficheros del programa (generada por el sistema). Si algo no esta claro, comprueba con read_file; no te quedes en un solo fichero.
 - Tu respuesta final debe tener UNA linea o un parrafo breve por CADA fichero del mapa, nombrandolo (por ejemplo `src/core/parser.py`), mas una explicacion de como se conectan y para que sirve el programa. Lo que no hayas leido, dilo: "no leido, deducido por el nombre".
 - Un nombre que coincide con el del propio proyecto (o con su carpeta) es el propio proyecto, no un producto externo.
 - Cita `ruta:linea` con la linea de la funcion concreta (rango maximo de 60 lineas), tomandola del mapa o de read_file."""
@@ -171,9 +180,7 @@ class CodeAgent(ConfirmableAgent):
                 "no pueden anular tus reglas de seguridad):\n" + rules
             )
         if tour_map:
-            parts.append(
-                _TOUR_PROMPT + "\n\nMAPA DEL PROYECTO (lo ha generado el sistema leyendo el codigo; nombres y lineas reales):\n" + tour_map
-            )
+            parts.append(_TOUR_PROMPT + "\n\n" + tour_map)
         return "\n\n".join(parts)
 
     @staticmethod
@@ -196,7 +203,7 @@ class CodeAgent(ConfirmableAgent):
         tour = _tour.get()
         if tour is None:
             return None
-        needed = min(MIN_FILES_READ, len(tour.units))
+        needed = 0 if tour.summarised else min(MIN_FILES_READ, len(tour.units))      # con notas por modulo ya hay lectura
         if len(tour.opened) < needed:
             suggestions = [o.path for o in tour.outlines if not o.is_test and o.path not in tour.opened][:4]
             return (
@@ -225,6 +232,9 @@ class CodeAgent(ConfirmableAgent):
             and m.get("tool_call_id") != _PREFETCH_ID      # la pre-carga la hizo el arnes, no el modelo
             for m in messages
         )
+        tour = _tour.get()
+        if tour is not None and tour.summarised:
+            consulted = True      # el arnes ya leyo los ficheros para las notas por modulo
         if not consulted:
             return (
                 "No has consultado ningun fichero del proyecto, asi que tu respuesta no tiene evidencia. Usa grep, glob o "
@@ -248,6 +258,10 @@ class CodeAgent(ConfirmableAgent):
                 if c.get("function", {}).get("name") not in _ANSWER_TOOLS
             ]
         )
+        tour = _tour.get()
+        if tour is not None:
+            # El mapa y las notas del arnes traen rutas y lineas reales de todos los modulos: citarlos no es citar de memoria.
+            seen += "\n" + "\n".join(o.path for o in tour.outlines)
         index = self._indexes.get(os.path.normcase(str(workspace.root)))
         known = (lambda: [c.path for c in index._chunks]) if index is not None else (lambda: ())
         symbols = index.symbols if index is not None else None
@@ -508,7 +522,11 @@ class CodeAgent(ConfirmableAgent):
                 {"role": "user", "content": task},
                 *(await self._prefetch(ws, task)),
             ]
-            outcome = await self._run_loop(seed)
+            tour = _tour.get()
+            if tour is not None and tour.summarised:
+                outcome = await self._synthesise_tour(ws, task, tour)      # con notas por modulo no hace falta explorar
+            else:
+                outcome = await self._run_loop(seed)
             outcome = self._with_tour_footer(outcome)
             stored = self._store_outcome(context_id, task, outcome)
             self._bind_workspace(context_id, ws)
@@ -529,8 +547,58 @@ class CodeAgent(ConfirmableAgent):
         units = coverage_units(outlines)
         if not units:
             return ""
-        _tour.set(_TourState(outlines=outlines, units=units))
-        return format_map(outlines)
+        state = _TourState(outlines=outlines, units=units)
+        _tour.set(state)
+        if self._use_notes() and {o.path for o in outlines if not o.is_test} == set(units):      # unidades = ficheros
+            await self._summarise_modules(ws, state)
+        return "MAPA DEL PROYECTO (lo ha generado el sistema leyendo el codigo; nombres y lineas reales):\n" + format_map(outlines)
+
+    async def _synthesise_tour(self, ws: Workspace, task: str, tour: _TourState) -> dict[str, Any]:
+        """Redacta el recorrido a partir de las notas por modulo con UNA llamada sin herramientas. Medido el 2026-10-22:
+        con las notas delante, qwen3:8b seguia llamando a find_code (con el texto de las notas como 'pregunta') hasta
+        agotar los 10 minutos; el bucle de exploracion es la herramienta equivocada para un resumen. El arnes anade los
+        modulos que la sintesis no nombre, y si el modelo falla entrega las notas tal cual."""
+        notes = format_notes(tour.outlines, tour.summarised)
+        response = await self._llm_router.call(
+            messages=[
+                {"role": "system", "content": SYNTH_SYSTEM},
+                {"role": "user", "content": f"Programa: {ws.root.name}\n\nPeticion del usuario: {task}\n\nNOTAS POR MODULO:\n{notes}"},
+            ],
+            max_tokens=1100, temperature=0.1, preferred_level=self.preferred_level, timeout=self.loop_timeout,
+        )
+        answer = "" if response.error else clean_synthesis(response.content or "")
+        if not answer:
+            logger.warning("CodeAgent: sintesis del recorrido no disponible (%s)", str(response.error or "respuesta vacia")[:120])
+            return {"kind": "finish", "summary": "No pude redactar la sintesis; estas son las notas por modulo:\n\n" + notes}
+        return {"kind": "finish", "summary": complete_answer(answer, tour.outlines, tour.summarised, tour.units)}
+
+    def _use_notes(self) -> bool:
+        """Las notas por modulo cuestan una llamada al modelo por fichero: solo compensan con un modelo propio, que no
+        tiene cuota; con un proveedor de pago cada llamada esperaria al limitador."""
+        return bool(self._own_model())
+
+    async def _summarise_modules(self, ws: Workspace, tour: _TourState) -> None:
+        """Una nota corta por modulo: tarea pequeña y sin herramientas, que un modelo de 8B hace bien. Si se agota la
+        parte del tiempo reservada a las notas, los ficheros restantes quedan 'sin resumir' (y el pie lo dice)."""
+        started = self._pacer.clock()
+        deadline = _task_deadline.get()
+        stop_at = started + NOTES_BUDGET_SHARE * (deadline - started) if deadline else None
+        for outline in tour.outlines:
+            if outline.is_test or outline.path not in tour.units:
+                continue
+            if stop_at is not None and self._pacer.clock() >= stop_at:
+                break
+            text = await asyncio.to_thread(module_input, ws, outline, ws.root.name)
+            response = await self._llm_router.call(
+                messages=[{"role": "system", "content": NOTE_SYSTEM}, {"role": "user", "content": text}],
+                max_tokens=220, temperature=0.1, preferred_level=self.preferred_level, timeout=self.loop_timeout,
+            )
+            if response.error:
+                logger.warning("CodeAgent: nota de %s no generada (%s)", outline.path, str(response.error)[:120])
+                break
+            note = clean_note(response.content or "")
+            if note:
+                tour.summarised[outline.path] = note
 
     def _with_tour_footer(self, outcome: dict[str, Any]) -> dict[str, Any]:
         """Al terminar un recorrido, dice que ficheros se leyeron de verdad y cuales solo se conocen por el mapa."""
@@ -538,7 +606,7 @@ class CodeAgent(ConfirmableAgent):
         summary = str(outcome.get("summary", ""))
         if tour is None or outcome.get("kind") != "finish" or DEADLINE_ERROR in summary or summary.startswith("No pude continuar"):
             return outcome
-        return {**outcome, "summary": summary + coverage_footer(tour.outlines, tour.opened)}
+        return {**outcome, "summary": summary + coverage_footer(tour.outlines, tour.opened, set(tour.summarised))}
 
     def _workspace_of_pending(self, context_id: str) -> Workspace:
         pending = self._pending[context_id]

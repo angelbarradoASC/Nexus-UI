@@ -265,3 +265,39 @@ async def test_agent_applies_the_configured_quota_and_stops_when_out_of_time(tmp
     assert "2000 por minuto" in result["summary"]
     assert "code_agent_deadline" not in result["summary"]
     assert len(router.calls) <= 2                  # no sigue quemando llamadas
+
+
+# ── Una llamada colgada no puede superar el limite de la tarea ───────────────
+
+@pytest.mark.asyncio
+async def test_a_hung_model_call_is_cancelled_at_the_task_deadline():
+    """Visto en vivo (2026-10-22): una peticion al servidor se quedo colgada 24 minutos y el limite de 10 min, que solo
+    se miraba entre llamadas, no se aplico."""
+    import asyncio
+    import time
+
+    from desktop.code_agent.pacer import DEADLINE_ERROR
+
+    class _Hangs:
+        async def call(self, messages, **kwargs):
+            await asyncio.sleep(30)
+
+    pacer = TokenPacer(10**9)
+    paced = PacedRouter(_Hangs(), pacer, deadline_fn=lambda: time.monotonic() + 0.2)
+
+    started = time.monotonic()
+    response = await paced.call([{"role": "user", "content": "hola"}])
+
+    assert response.error == DEADLINE_ERROR
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.asyncio
+async def test_without_a_deadline_the_call_is_not_bounded():
+    class _Slow:
+        async def call(self, messages, **kwargs):
+            return SimpleNamespace(error=None, content="ok", tool_calls=None)
+
+    response = await PacedRouter(_Slow(), TokenPacer(10**9)).call([{"role": "user", "content": "hola"}])
+
+    assert response.content == "ok"

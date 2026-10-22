@@ -13,9 +13,12 @@ from desktop.code_agent.tour import (
     build_outlines,
     coverage_footer,
     coverage_units,
+    clean_note,
     format_map,
+    format_notes,
     is_tour_question,
     missing_units,
+    module_input,
 )
 from desktop.code_agent.workspace import Workspace
 
@@ -140,12 +143,84 @@ def test_missing_units_matches_by_path_or_file_name_ignoring_case_and_accents(ou
 def test_footer_says_what_was_read_and_what_is_only_deduced(outlines):
     footer = coverage_footer(outlines, {"main.py"})
 
-    assert "lei 1 de 2" in footer
-    assert "Leidos: main.py." in footer
+    assert "2 ficheros con codigo" in footer
+    assert "Leidos a fondo: main.py." in footer
     assert "NO abiertos" in footer and "src/core/parser.py" in footer and "deduccion" in footer
 
 
 def test_footer_has_no_unread_section_when_everything_was_opened(outlines):
     footer = coverage_footer(outlines, {"main.py", "src/core/parser.py"})
 
-    assert "lei 2 de 2" in footer and "NO abiertos" not in footer
+    assert "Leidos a fondo: main.py, src/core/parser.py." in footer and "NO abiertos" not in footer
+
+
+def test_footer_separates_skimmed_files_from_deep_reads_and_deductions(outlines):
+    footer = coverage_footer(outlines, {"main.py"}, summarised={"main.py", "src/core/parser.py"})
+
+    assert "Resumidos a partir de su esquema" in footer and "sin leer el resto: src/core/parser.py" in footer
+    assert "Leidos a fondo: main.py." in footer
+    assert "NO abiertos" not in footer
+
+
+# ── Notas por modulo ─────────────────────────────────────────────────────────
+
+def test_the_module_input_has_the_outline_and_the_numbered_head_of_the_file(project, outlines):
+    parser = next(o for o in outlines if o.path == "src/core/parser.py")
+
+    text = module_input(project, parser, "Proyecto")
+
+    assert text.startswith("Programa: Proyecto")
+    assert "parsear:12" in text and "Mensaje:4 (2 metodos)" in text            # esquema
+    assert "def parsear():" in text and "     4\tclass Mensaje:" in text        # cabecera con numeros de linea
+
+
+def test_the_module_input_is_bounded(tmp_path):
+    root = tmp_path / "p"
+    root.mkdir()
+    (root / "ancho.py").write_text("def f():\n    pass\n" + "\n".join("x = '" + "a" * 300 + "'" for _ in range(100)), encoding="utf-8")
+    index = CodeIndex(Workspace(root))
+    index.refresh()
+    outline = build_outlines(index)
+
+    assert outline and len(module_input(Workspace(root), outline[0], "p")) == 4_500
+
+
+def test_notes_are_cleaned_and_bounded():
+    assert clean_note("<think>mmm</think>\n- Lee el fichero.\n\nY lo parsea.") == "Lee el fichero. Y lo parsea."
+    assert len(clean_note("palabra " * 200)) <= 425
+    assert clean_note(None) == "" and clean_note("   ") == ""
+
+
+def test_the_notes_block_lists_every_module_and_marks_the_unsummarised(outlines):
+    text = format_notes(outlines, {"main.py": "Arranca."})
+
+    assert "- main.py (9 lin.): Arranca." in text
+    assert "- src/core/parser.py" in text and "sin resumir" in text
+    assert "test_parser" not in text
+
+
+# ── Sintesis ─────────────────────────────────────────────────────────────────
+
+def test_complete_answer_adds_only_the_modules_the_answer_does_not_name(outlines):
+    from desktop.code_agent.tour import complete_answer
+
+    units = coverage_units(outlines)
+    notes = {"main.py": "Arranca.", "src/core/parser.py": "Parsea."}
+
+    assert complete_answer("`main.py` y `src/core/parser.py`", outlines, notes, units) == "`main.py` y `src/core/parser.py`"
+    out = complete_answer("Solo main.py", outlines, notes, units)
+    assert "no menciona" in out and "- `src/core/parser.py` (17 lin.): Parsea." in out and "- `main.py`" not in out.split("no menciona")[1]
+
+
+def test_complete_answer_marks_modules_that_have_no_note(outlines):
+    from desktop.code_agent.tour import complete_answer
+
+    out = complete_answer("nada", outlines, {}, coverage_units(outlines))
+
+    assert out.count("sin resumir") == 2
+
+
+def test_clean_synthesis_drops_reasoning_blocks():
+    from desktop.code_agent.tour import clean_synthesis
+
+    assert clean_synthesis("<think>x</think>\n\nHola") == "Hola" and clean_synthesis(None) == ""

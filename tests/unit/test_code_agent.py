@@ -708,7 +708,7 @@ async def test_a_finished_tour_says_which_files_were_never_opened(tour_project, 
 
     result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
 
-    assert "lei 3 de 3 ficheros" in result["summary"] and "NO abiertos" not in result["summary"]
+    assert "Leidos a fondo: main.py, core/indexer.py, core/parser.py." in result["summary"] and "NO abiertos" not in result["summary"]
 
 
 @pytest.mark.asyncio
@@ -737,3 +737,85 @@ async def test_tour_state_does_not_leak_into_the_next_question(tour_project, set
     result = await agent.propose("ctx2", "¿donde esta parsear?", workspace=str(tour_project))
 
     assert result["summary"] == "x"          # sin pie de cobertura
+
+
+@pytest.fixture
+def with_notes(monkeypatch):
+    """Las notas por modulo solo se piden con modelo propio; aqui se fuerzan con un router simulado."""
+    monkeypatch.setattr(CodeAgent, "_use_notes", lambda self: True)
+
+
+@pytest.mark.asyncio
+async def test_each_module_gets_a_note_and_the_harness_asks_for_the_synthesis(tour_project, settings, with_notes):
+    """Medido: dejando al modelo navegar, hizo 21 find_code sin abrir un fichero; con las notas delante siguio
+    explorando. El arnes lee, pide una nota por modulo y luego UNA sintesis sin herramientas (sin bucle)."""
+    router = _ScriptedRouter(
+        _resp(content="Arranca el programa. `main` (L4)."),
+        _resp(content="Indexa. `indexar` (L1)."),
+        _resp(content="Parsea ficheros. `parsear` (L1)."),
+        _resp(content="Es un programa pequeño.\n- `main.py`: arranca.\n- `core/indexer.py`: indexa.\n- `core/parser.py`: parsea."),
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    note_call = router.seen[1]                                     # nota de un modulo: sin herramientas, solo su cabecera
+    assert note_call[0]["role"] == "system" and "resume UN modulo" in note_call[0]["content"]
+    assert "INICIO DEL FICHERO" in note_call[1]["content"] and "def " in note_call[1]["content"]
+    synthesis = router.seen[3]
+    assert "NOTAS POR MODULO" in synthesis[1]["content"] and "Arranca el programa" in synthesis[1]["content"]
+    assert "Parsea ficheros" in synthesis[1]["content"] and TOUR_QUESTION in synthesis[1]["content"]
+    assert result["kind"] == "finish" and result["summary"].startswith("Es un programa pequeño.")
+    assert "no menciona" not in result["summary"]                  # la sintesis nombro todos los modulos
+    assert "Resumidos a partir de su esquema" in result["summary"] and "NO abiertos" not in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_modules_the_synthesis_forgets_are_added_by_the_harness_with_their_note(tour_project, settings, with_notes):
+    router = _ScriptedRouter(
+        _resp(content="Arranca."), _resp(content="Indexa documentos."), _resp(content="Parsea ficheros."),
+        _resp(content="Es un programa. `main.py` arranca y `core/parser.py` parsea."),          # olvida core/indexer.py
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    assert "Modulos que la explicacion anterior no menciona:" in result["summary"]
+    assert "- `core/indexer.py` (2 lin.): Indexa documentos." in result["summary"]
+    assert "- `main.py`" not in result["summary"].split("no menciona:")[1]
+
+
+@pytest.mark.asyncio
+async def test_if_the_synthesis_fails_the_user_gets_the_notes_themselves(tour_project, settings, with_notes):
+    router = _ScriptedRouter(
+        _resp(content="Arranca."), _resp(content="Indexa."), _resp(content="Parsea."),
+        SimpleNamespace(error="ollama_error | boom", content="", tool_calls=None),
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    assert result["summary"].startswith("No pude redactar la sintesis")
+    assert "- main.py (5 lin.): Arranca." in result["summary"] and "- core/parser.py (2 lin.): Parsea." in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_note_stops_the_notes_but_the_rest_still_gets_a_synthesis(tour_project, settings, with_notes):
+    router = _ScriptedRouter(
+        _resp(content="Arranca."),
+        SimpleNamespace(error="ollama_error | boom", content="", tool_calls=None),
+        _resp(content="Es un programa. `main.py` arranca."),
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    notes = router.seen[2][1]["content"]
+    assert "- main.py (5 lin.): Arranca." in notes and "sin resumir" in notes
+    assert "no menciona" in result["summary"] and "core/parser.py" in result["summary"]      # el arnes los anade
+    assert "NO abiertos" in result["summary"]                                                # y se reconocen como deduccion
+
+
+@pytest.mark.asyncio
+async def test_notes_are_not_requested_without_an_own_model(tour_project, settings):
+    router = _ScriptedRouter(*[_resp(_call(f"c{i}", "finish", summary="x")) for i in range(4)])
+
+    await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    assert "NOTAS POR MODULO" not in router.seen[0][0]["content"] and "MAPA DEL PROYECTO" in router.seen[0][0]["content"]

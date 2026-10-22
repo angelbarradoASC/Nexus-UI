@@ -129,6 +129,22 @@ class PacedRouter:
         deadline = self._deadline_fn() if self._deadline_fn else None
         return deadline is not None and self._pacer.clock() + self._pacer.eta(estimate) > deadline
 
+    async def _bounded_call(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+        """La llamada al modelo no puede durar mas que lo que queda de tarea. Medido el 2026-10-22: una peticion al
+        servidor se quedo colgada 24 minutos (sin CPU, conexion abierta) y el limite de la tarea (10 min), que solo se
+        comprobaba ENTRE llamadas, no se aplico."""
+        deadline = self._deadline_fn() if self._deadline_fn else None
+        if deadline is None:
+            return await self._router.call(messages=messages, **kwargs)
+        remaining = deadline - self._pacer.clock()
+        if remaining <= 0:
+            return _deadline_response()
+        try:
+            return await asyncio.wait_for(self._router.call(messages=messages, **kwargs), timeout=remaining)
+        except asyncio.TimeoutError:
+            logger.warning("CodeAgent: la llamada al modelo no respondio dentro del tiempo de la tarea; se cancela")
+            return _deadline_response()
+
     async def call(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
         estimate = estimate_request_tokens(messages, kwargs.get("tools"), int(kwargs.get("max_tokens") or 0))
         if self._out_of_time(estimate):
@@ -137,7 +153,7 @@ class PacedRouter:
         if waited >= 1:
             logger.info("CodeAgent esperó %.0fs para respetar la cuota de tokens/minuto (~%d tokens)", waited, estimate)
 
-        response = await self._router.call(messages=messages, **kwargs)
+        response = await self._bounded_call(messages, **kwargs)
         for pause in self._RETRY_WAITS:
             if "429" not in str(getattr(response, "error", "") or ""):
                 break
@@ -146,5 +162,5 @@ class PacedRouter:
             if self._out_of_time(estimate):
                 return _deadline_response()
             await self._pacer.acquire(estimate)
-            response = await self._router.call(messages=messages, **kwargs)
+            response = await self._bounded_call(messages, **kwargs)
         return response

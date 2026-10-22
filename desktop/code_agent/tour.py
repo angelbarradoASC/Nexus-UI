@@ -9,10 +9,13 @@ ignoro los otros diez y tomo el nombre de la propia aplicacion por un antivirus.
 planifica un recorrido; lo que si hace bien es resumir lo que tiene delante. Por eso el arnes:
 
   1. detecta la peticion de recorrido (`is_tour_question`),
-  2. construye SIN LLM un mapa real del proyecto (ficheros, resumen, funciones y lineas) que va en el prompt,
-  3. exige que la respuesta nombre cada modulo y que se hayan abierto varios ficheros (`missing_units`),
-  4. al terminar anade que ficheros se leyeron de verdad y cuales solo se conocen por el mapa
-     (`coverage_footer`), para que el usuario sepa que parte de la respuesta es deduccion.
+  2. construye SIN LLM un mapa real del proyecto (ficheros, resumen, funciones y lineas),
+  3. lee cada fichero (esquema + cabecera) y pide al modelo UNA nota corta por modulo: una tarea pequeña,
+     sin herramientas, que un modelo de 8B si hace bien (`module_input`, `NOTE_SYSTEM`). Medido el mismo dia:
+     con el mapa y las objeciones pero dejando que el modelo navegase, hizo 21 llamadas a `find_code`
+     (las 10 ultimas identicas, ignorando el aviso de repeticion) sin abrir un solo fichero,
+  4. exige que la respuesta final nombre cada modulo (`missing_units`),
+  5. al terminar anade que se leyo de verdad y que es deduccion (`coverage_footer`).
 """
 
 from __future__ import annotations
@@ -23,11 +26,24 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from .index import Chunk, CodeIndex
+from .tools import read_file
+from .workspace import Workspace
 
 MAP_MAX_CHARS = 5_000
 MAX_FILE_UNITS = 25            # por encima, la cobertura se exige por carpeta y no por fichero
-MIN_FILES_READ = 4             # un recorrido que lee menos que esto es un resumen de nombres
+MIN_FILES_READ = 4             # un recorrido sin notas por modulo que lee menos que esto es un resumen de nombres
 TOUR_FINISH_REVIEWS = 3
+HEAD_LINES = 70                # cabecera de cada fichero que lee el arnes para su nota
+NOTE_INPUT_MAX_CHARS = 4_500
+NOTE_MAX_CHARS = 420
+NOTES_BUDGET_SHARE = 0.55      # fraccion del tiempo de la tarea que pueden gastar las notas; el resto, para la sintesis
+
+NOTE_SYSTEM = (
+    "Eres un asistente que resume UN modulo de un programa. Escribe 1 o 2 frases en español diciendo QUE HACE el modulo "
+    "(su responsabilidad), basandote SOLO en el texto que se te da. Menciona la clase o funcion mas importante con su linea "
+    "(por ejemplo: `capturar` (L58)). No inventes nada que no este en el texto. Los nombres propios que aparecen son nombres "
+    "del propio programa, no productos externos. Responde solo con el resumen, sin titulo ni lista."
+)
 
 _ENTRY_POINTS = ("main.py", "__main__.py", "app.py", "manage.py", "run.py", "index.js", "main.js", "server.js", "index.ts")
 
@@ -172,19 +188,87 @@ def missing_units(answer: str, units: list[str]) -> list[str]:
     return missing
 
 
-def coverage_footer(outlines: list[ModuleOutline], opened: set[str]) -> str:
-    """Pie honesto del recorrido: que se leyo de verdad y que solo se conoce por el mapa (nombres y firmas)."""
+def coverage_footer(outlines: list[ModuleOutline], opened: set[str], summarised: set[str] | None = None) -> str:
+    """Pie honesto del recorrido: que se leyo de verdad, que se resumio solo por su cabecera y que es deduccion."""
     files = [o.path for o in outlines if not o.is_test]
     if not files:
         return ""
+    summarised = summarised or set()
     read = [p for p in files if p in opened]
-    unread = [p for p in files if p not in opened]
-    lines = [f"Cobertura de este recorrido: lei {len(read)} de {len(files)} ficheros."]
+    skimmed = [p for p in files if p in summarised and p not in opened]
+    unread = [p for p in files if p not in opened and p not in summarised]
+    lines = [f"Cobertura de este recorrido: {len(files)} ficheros con codigo."]
+    if skimmed:
+        lines.append(
+            f"Resumidos a partir de su esquema (clases y funciones) y de sus primeras {HEAD_LINES} lineas, sin leer el "
+            f"resto: {', '.join(skimmed)}."
+        )
     if read:
-        lines.append("Leidos: " + ", ".join(read) + ".")
+        lines.append("Leidos a fondo: " + ", ".join(read) + ".")
     if unread:
         lines.append(
             "NO abiertos (solo conozco sus nombres y funciones por el mapa, asi que lo que digo de ellos es una "
             "deduccion): " + ", ".join(unread) + "."
         )
     return "\n\n---\n" + "\n".join(lines)
+
+
+# ── Notas por modulo ─────────────────────────────────────────────────────────
+
+def module_input(ws: Workspace, outline: ModuleOutline, project: str) -> str:
+    """Lo que el arnes le da al modelo para escribir la nota de UN modulo: su esquema y su cabecera (con lineas)."""
+    head = read_file(ws, outline.path, 1, HEAD_LINES)
+    text = f"Programa: {project}\n\nESQUEMA:\n{_format_module(outline, 0)}\n\nINICIO DEL FICHERO:\n{head}"
+    return text[:NOTE_INPUT_MAX_CHARS]
+
+
+def clean_note(text: str) -> str:
+    """Una nota util: sin razonamiento, sin saltos ni adornos y de longitud acotada."""
+    note = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+    note = re.sub(r"\s+", " ", note).lstrip("-*# ").strip()
+    if len(note) > NOTE_MAX_CHARS:
+        note = note[:NOTE_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+    return note
+
+
+def format_notes(outlines: list[ModuleOutline], notes: dict[str, str]) -> str:
+    """Una linea por modulo, en el orden del mapa: ruta, tamaño y nota (o 'sin resumir')."""
+    lines = []
+    for outline in outlines:
+        if outline.is_test:
+            continue
+        note = notes.get(outline.path)
+        lines.append(f"- {outline.path} ({outline.lines} lin.): " + (note if note else "(sin resumir; solo se conocen sus nombres)"))
+    return "\n".join(lines)
+
+
+# ── Sintesis ─────────────────────────────────────────────────────────────────
+
+SYNTH_SYSTEM = (
+    "Eres PEPO. Te dan las NOTAS POR MODULO de un programa (las escribio el sistema leyendo el esquema y la cabecera de "
+    "cada fichero) y la peticion del usuario. Redacta el recorrido en español, claro y conciso:\n"
+    "1. Que es el programa y para que sirve (2-3 frases).\n"
+    "2. Una linea por modulo, con el nombre del fichero entre comillas invertidas (`ruta/fichero.py`) y lo que hace.\n"
+    "3. Como se conectan los modulos entre si (solo lo que se deduzca de las notas).\n"
+    "Usa SOLO las notas; no inventes funciones ni comportamientos. Un nombre propio que aparezca es el nombre del propio "
+    "programa, no un producto externo. Si un modulo figura como 'sin resumir', dilo."
+)
+
+
+def clean_synthesis(text: str) -> str:
+    """Respuesta del modelo sin bloques de razonamiento ni espacios de mas."""
+    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
+
+
+def complete_answer(answer: str, outlines: list[ModuleOutline], notes: dict[str, str], units: list[str]) -> str:
+    """Anade, con su nota, los modulos que la sintesis no nombra: la cobertura la garantiza el arnes, no el modelo."""
+    missing = missing_units(answer, units)
+    if not missing:
+        return answer
+    by_path = {o.path: o for o in outlines}
+    lines = []
+    for path in missing:
+        outline = by_path.get(path)
+        note = notes.get(path) or "(sin resumir; solo se conocen sus nombres)"
+        lines.append(f"- `{path}`" + (f" ({outline.lines} lin.)" if outline else "") + f": {note}")
+    return answer.rstrip() + "\n\nModulos que la explicacion anterior no menciona:\n" + "\n".join(lines)

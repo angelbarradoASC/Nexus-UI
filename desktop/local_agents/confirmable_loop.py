@@ -219,6 +219,10 @@ class ConfirmableAgent:
         """Resumen para list_pending() — override si pending.task no basta."""
         return pending.task
 
+    def _review_budget(self) -> int:
+        """Cuantos intentos de terminar se pueden rechazar en esta tarea (las subclases pueden subirlo)."""
+        return self.max_finish_reviews
+
     def _finish_objection(self, messages: list[dict[str, Any]], summary: str) -> str | None:
         """Texto que se devuelve al modelo para rechazar un intento de terminar, o None
         para aceptarlo. Solo se consulta mientras queden `max_finish_reviews`."""
@@ -239,7 +243,7 @@ class ConfirmableAgent:
         if not messages or messages[0].get("role") != "system":
             messages = [{"role": "system", "content": resolve_prompt_sync(self.prompt_key)}, *messages]
 
-        review_state = {"reviews_left": self.max_finish_reviews}
+        review_state = {"reviews_left": self._review_budget()}
 
         for _ in range(self.max_loop_steps):
             try:

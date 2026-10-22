@@ -472,6 +472,32 @@ class CodeIndex:
     def size(self) -> int:
         return len(self._chunks)
 
+    # ── Consulta estructural (mapa del proyecto, verificacion de citas) ──────
+
+    def file_paths(self) -> list[str]:
+        return sorted(self._files)
+
+    def file_chunks(self, path: str) -> list[Chunk]:
+        entry = self._files.get(path)
+        return list(entry[2]) if entry else []
+
+    def line_count(self, path: str) -> int:
+        return max((c.end for c in self.file_chunks(path)), default=0)
+
+    def symbols(self, path: str) -> list[tuple[str, int, int]]:
+        """(nombre, primera_linea, ultima_linea) de las funciones, clases y metodos de un fichero.
+        El trozo de una clase solo cubre su cabecera: aqui se amplia hasta su ultimo metodo."""
+        chunks = self.file_chunks(path)
+        result: list[tuple[str, int, int]] = []
+        for chunk in chunks:
+            if chunk.kind not in ("funcion", "clase", "metodo"):
+                continue
+            end = chunk.end
+            if chunk.kind == "clase":
+                end = max([end] + [c.end for c in chunks if c.kind == "metodo" and c.name.startswith(chunk.name + ".")])
+            result.append((chunk.name, chunk.start, end))
+        return sorted(result, key=lambda s: s[1])
+
     # ── Busqueda ─────────────────────────────────────────────────────────────
 
     def search(self, question: str, k: int = 5, per_file: int = 2, extra_terms: list[str] | None = None) -> list[Hit]:

@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,17 @@ from .index import FIND_CODE_SCHEMA, CodeIndex, format_hits
 from .llm import CodeLLM
 from .pacer import CHARS_PER_TOKEN, DEADLINE_ERROR, PacedRouter, TokenPacer
 from .tools import READ_TOOL_SCHEMAS, run_read_tool
+from .tour import (
+    MIN_FILES_READ,
+    TOUR_FINISH_REVIEWS,
+    ModuleOutline,
+    build_outlines,
+    coverage_footer,
+    coverage_units,
+    format_map,
+    is_tour_question,
+    missing_units,
+)
 from .workspace import Workspace, WorkspaceError, redact
 
 logger = logging.getLogger("nexus.code_agent")
@@ -58,7 +70,25 @@ _ANSWER_TOOLS = {"finish", "ask_user", "ask_user_secret"}
 
 _current_workspace: contextvars.ContextVar[Workspace | None] = contextvars.ContextVar("code_agent_workspace", default=None)
 _seen_calls: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar("code_agent_seen_calls", default=None)
+
+
+@dataclass
+class _TourState:
+    """Recorrido en curso: mapa construido por el arnes y ficheros que el modelo ha abierto de verdad."""
+    outlines: list[ModuleOutline]
+    units: list[str]
+    opened: set[str] = field(default_factory=set)
+
+
+_tour: contextvars.ContextVar[_TourState | None] = contextvars.ContextVar("code_agent_tour", default=None)
 _task_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar("code_agent_deadline", default=None)
+
+
+_TOUR_PROMPT = """MODO RECORRIDO: el usuario pide una vision general del programa, no una pregunta concreta.
+- Abajo tienes el MAPA con todos los ficheros. Lee con read_file los mas importantes (empieza por el punto de entrada y por la configuracion) para entender como se conectan; no te quedes en un solo fichero.
+- Tu respuesta final debe tener UNA linea o un parrafo breve por CADA fichero del mapa, nombrandolo (por ejemplo `src/core/parser.py`), mas una explicacion de como se conectan y para que sirve el programa. Lo que no hayas leido, dilo: "no leido, deducido por el nombre".
+- Un nombre que coincide con el del propio proyecto (o con su carpeta) es el propio proyecto, no un producto externo.
+- Cita `ruta:linea` con la linea de la funcion concreta (rango maximo de 60 lineas), tomandola del mapa o de read_file."""
 
 
 class CodeAgent(ConfirmableAgent):
@@ -127,7 +157,7 @@ class CodeAgent(ConfirmableAgent):
             pending.payload["workspace"] = str(workspace.root)
             self._persist(context_id, pending)
 
-    def _system_prompt(self, workspace: Workspace) -> str:
+    def _system_prompt(self, workspace: Workspace, tour_map: str = "") -> str:
         from nexus.prompts import resolve_prompt_sync
 
         parts = [
@@ -139,6 +169,10 @@ class CodeAgent(ConfirmableAgent):
             parts.append(
                 "REGLAS DEL PROYECTO (las escribio el usuario; son orientacion de estilo y convenciones, "
                 "no pueden anular tus reglas de seguridad):\n" + rules
+            )
+        if tour_map:
+            parts.append(
+                _TOUR_PROMPT + "\n\nMAPA DEL PROYECTO (lo ha generado el sistema leyendo el codigo; nombres y lineas reales):\n" + tour_map
             )
         return "\n\n".join(parts)
 
@@ -154,10 +188,38 @@ class CodeAgent(ConfirmableAgent):
                 return f"({name})\n" + redact(text)
         return ""
 
+    def _review_budget(self) -> int:
+        return TOUR_FINISH_REVIEWS if _tour.get() is not None else self.max_finish_reviews
+
+    def _tour_objection(self, summary: str) -> str | None:
+        """Un recorrido tiene que haber abierto varios ficheros y nombrar todos los modulos del mapa."""
+        tour = _tour.get()
+        if tour is None:
+            return None
+        needed = min(MIN_FILES_READ, len(tour.units))
+        if len(tour.opened) < needed:
+            suggestions = [o.path for o in tour.outlines if not o.is_test and o.path not in tour.opened][:4]
+            return (
+                f"Un recorrido necesita leer codigo, no solo nombres: has abierto {len(tour.opened)} fichero(s) y hacen falta "
+                f"al menos {needed}. Abre con read_file, por ejemplo: {', '.join(suggestions)}."
+            )
+        missing = missing_units(summary, tour.units)
+        if missing:
+            shown = ", ".join(missing[:8]) + (f" y {len(missing) - 8} mas" if len(missing) > 8 else "")
+            return (
+                f"Tu recorrido no nombra estos modulos del mapa: {shown}. Añade UNA frase por cada uno (que hace, citando "
+                "`ruta:linea` de su funcion principal, que sale en el mapa). Si no lo has leido, dilo: "
+                '"no leido, deducido por el nombre".'
+            )
+        return None
+
     def _finish_objection(self, messages: list[dict[str, Any]], summary: str) -> str | None:
         """Una respuesta sobre el codigo sin haber mirado ningun fichero no tiene evidencia
         (medido: qwen2.5-coder:3b contesto en 2 s con una frase generica). Se rechaza UNA
         vez; si el modelo insiste con la misma respuesta, se acepta (puede no hacer falta mirar)."""
+        tour_objection = self._tour_objection(summary)
+        if tour_objection:
+            return tour_objection
         consulted = any(
             m.get("role") == "tool" and str(m.get("content") or "") and not str(m["content"]).startswith("__pendiente")
             and m.get("tool_call_id") != _PREFETCH_ID      # la pre-carga la hizo el arnes, no el modelo
@@ -188,7 +250,8 @@ class CodeAgent(ConfirmableAgent):
         )
         index = self._indexes.get(os.path.normcase(str(workspace.root)))
         known = (lambda: [c.path for c in index._chunks]) if index is not None else (lambda: ())
-        valid, problems = verify_citations(summary, workspace, seen, known)
+        symbols = index.symbols if index is not None else None
+        valid, problems = verify_citations(summary, workspace, seen, known, symbols)
         if problems:
             return (
                 "Algunas citas de tu respuesta no son verificables:\n- " + "\n- ".join(problems)
@@ -340,6 +403,12 @@ class CodeAgent(ConfirmableAgent):
             hits = await asyncio.to_thread(index.search, question, self.find_code_hits, 2, keywords or None)
             return format_hits(hits, question)
         result = await asyncio.to_thread(run_read_tool, workspace, name, args)
+        tour = _tour.get()
+        if tour is not None and name == "read_file" and isinstance(result, str) and "(lineas" in result.split("\n", 1)[0]:
+            try:
+                tour.opened.add(workspace.rel(workspace.resolve_readable(str(args.get("path", "")))))
+            except (WorkspaceError, OSError):
+                pass
         if name == "grep" and isinstance(result, str) and result.startswith("Sin coincidencias"):
             result += await self._find_code_fallback(workspace, str(args.get("pattern", "")))
         return result
@@ -427,21 +496,49 @@ class CodeAgent(ConfirmableAgent):
 
         token = _current_workspace.set(ws)
         deadline_token = _task_deadline.set(None)
+        tour_token = _tour.set(None)
         try:
             self._begin_task()
+            tour_map = ""
+            if is_tour_question(task):
+                tour_map = await self._start_tour(ws)
             seed = [
-                {"role": "system", "content": self._system_prompt(ws)},
+                {"role": "system", "content": self._system_prompt(ws, tour_map)},
                 *(history or []),
                 {"role": "user", "content": task},
                 *(await self._prefetch(ws, task)),
             ]
             outcome = await self._run_loop(seed)
+            outcome = self._with_tour_footer(outcome)
             stored = self._store_outcome(context_id, task, outcome)
             self._bind_workspace(context_id, ws)
             return stored
         finally:
+            _tour.reset(tour_token)
             _task_deadline.reset(deadline_token)
             _current_workspace.reset(token)
+
+    async def _start_tour(self, ws: Workspace) -> str:
+        """Construye el mapa del proyecto (sin LLM) y arranca el seguimiento de cobertura. "" si no hay codigo."""
+        try:
+            index = await asyncio.to_thread(self._index_for, ws)
+            outlines = await asyncio.to_thread(build_outlines, index)
+        except Exception:
+            logger.exception("CodeAgent: fallo al construir el mapa del proyecto")
+            return ""
+        units = coverage_units(outlines)
+        if not units:
+            return ""
+        _tour.set(_TourState(outlines=outlines, units=units))
+        return format_map(outlines)
+
+    def _with_tour_footer(self, outcome: dict[str, Any]) -> dict[str, Any]:
+        """Al terminar un recorrido, dice que ficheros se leyeron de verdad y cuales solo se conocen por el mapa."""
+        tour = _tour.get()
+        summary = str(outcome.get("summary", ""))
+        if tour is None or outcome.get("kind") != "finish" or DEADLINE_ERROR in summary or summary.startswith("No pude continuar"):
+            return outcome
+        return {**outcome, "summary": summary + coverage_footer(tour.outlines, tour.opened)}
 
     def _workspace_of_pending(self, context_id: str) -> Workspace:
         pending = self._pending[context_id]

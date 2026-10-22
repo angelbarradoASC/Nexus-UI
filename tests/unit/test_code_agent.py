@@ -643,3 +643,97 @@ async def test_repeats_are_counted_per_task_not_across_tasks(project, settings):
 
     for seen in router.seen[3:]:
         assert all("Ya hiciste" not in str(m.get("content")) for m in seen)
+
+
+# ── Recorrido (tour) ─────────────────────────────────────────────────────────
+
+@pytest.fixture
+def tour_project(tmp_path, settings):
+    root = tmp_path / "programa"
+    (root / "core").mkdir(parents=True)
+    (root / "main.py").write_text('"""Arranque del programa."""\n\n\ndef main():\n    return 1\n', encoding="utf-8")
+    (root / "core" / "parser.py").write_text("def parsear():\n    return 2\n", encoding="utf-8")
+    (root / "core" / "indexer.py").write_text("def indexar():\n    return 3\n", encoding="utf-8")
+    settings.add_workspace(str(root))
+    return root
+
+
+TOUR_QUESTION = "Haz un recorrido por este programa y dime que parece ser"
+
+
+@pytest.mark.asyncio
+async def test_a_tour_gets_a_real_map_of_the_project_in_the_system_prompt(tour_project, settings):
+    router = _ScriptedRouter(*[_resp(_call(f"c{i}", "finish", summary="x")) for i in range(4)])   # 3 revisiones + aceptar
+
+    await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    system = router.seen[0][0]["content"]
+    assert "MODO RECORRIDO" in system and "MAPA DEL PROYECTO" in system
+    assert "main.py" in system and "core/parser.py" in system and "parsear:1" in system
+
+
+@pytest.mark.asyncio
+async def test_a_specific_question_gets_no_map(project, settings):
+    router = _ScriptedRouter(_resp(_call("c1", "finish", summary="x")))
+
+    await _agent(router, settings).propose("ctx", "¿donde esta saluda?", workspace=str(project))
+
+    assert "MAPA DEL PROYECTO" not in router.seen[0][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_tour_cannot_finish_without_opening_files_nor_skipping_modules(tour_project, settings):
+    """Medido: el modelo leyo 1 fichero de 16 y describio solo ese."""
+    router = _ScriptedRouter(
+        _resp(_call("c1", "finish", summary="Parece un programa. main.py:4")),                       # 0 ficheros abiertos
+        _resp(*[_call(f"r{i}", "read_file", path=p) for i, p in enumerate(("main.py", "core/parser.py", "core/indexer.py"))]),
+        _resp(_call("c2", "finish", summary="`main.py:4` arranca y `core/parser.py:1` parsea.")),   # falta indexer.py
+        _resp(_call("c3", "finish", summary="main.py:4 arranca; core/parser.py:1 parsea; core/indexer.py:1 indexa.")),
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    assert "has abierto 0 fichero" in _tool_result(router.seen[1], "c1")
+    missing = _tool_result(router.seen[3], "c2")
+    assert "no nombra estos modulos" in missing and "core/indexer.py" in missing and "main.py" not in missing
+    assert result["kind"] == "finish" and "core/indexer.py:1 indexa" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_a_finished_tour_says_which_files_were_never_opened(tour_project, settings):
+    router = _ScriptedRouter(
+        _resp(*[_call(f"r{i}", "read_file", path=p) for i, p in enumerate(("main.py", "core/parser.py", "core/indexer.py"))]),
+        _resp(_call("c1", "finish", summary="main.py:4 arranca; core/parser.py:1 parsea; core/indexer.py:1 indexa.")),
+    )
+
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    assert "lei 3 de 3 ficheros" in result["summary"] and "NO abiertos" not in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_the_footer_lists_unopened_files_when_the_reviews_run_out(tour_project, settings):
+    router = _ScriptedRouter(
+        *[_resp(_call(f"f{i}", "finish", summary="Solo main.py:4")) for i in range(4)],
+    )
+    # El modelo insiste en su respuesta incompleta: agotadas las 3 revisiones se acepta, pero el pie avisa.
+    result = await _agent(router, settings).propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    summary = result["summary"]
+    assert summary.startswith("Solo main.py:4")
+    assert "NO abiertos" in summary and "core/parser.py" in summary and "deduccion" in summary
+
+
+@pytest.mark.asyncio
+async def test_tour_state_does_not_leak_into_the_next_question(tour_project, settings):
+    router = _ScriptedRouter(
+        _resp(_call("a1", "finish", summary="x")), _resp(_call("a2", "finish", summary="x")), _resp(_call("a3", "finish", summary="x")),
+        _resp(_call("a4", "finish", summary="x")),
+        _resp(_call("b1", "finish", summary="x")),
+    )
+    agent = _agent(router, settings)
+    await agent.propose("ctx", TOUR_QUESTION, workspace=str(tour_project))
+
+    result = await agent.propose("ctx2", "¿donde esta parsear?", workspace=str(tour_project))
+
+    assert result["summary"] == "x"          # sin pie de cobertura

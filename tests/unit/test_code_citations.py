@@ -211,3 +211,58 @@ async def test_if_the_model_insists_the_answer_is_accepted_after_the_reviews(age
     assert result["summary"] == "sin cita"
     assert len(router.seen) == 4                       # 2 rechazos y a la tercera se acepta
     assert CodeAgent.max_finish_reviews == 2
+
+
+# ── Rangos acotados y funcion citada en su sitio ─────────────────────────────
+
+def test_a_range_wider_than_the_limit_is_rejected(ws):
+    """Visto en vivo: un recorrido citaba tramos de 60-100 lineas que eran lo que el modelo habia leido."""
+    (ws.root / "src" / "largo.py").write_text("\n".join("x" for _ in range(300)), encoding="utf-8")
+
+    valid, problems = verify_citations("Mira `src/largo.py:100-199`.", ws, "src/largo.py")
+
+    assert not valid and "demasiado ancho" in problems[0] and "100 lineas" in problems[0]
+
+
+def test_a_range_at_the_limit_is_accepted(ws):
+    (ws.root / "src" / "largo.py").write_text("\n".join("x" for _ in range(300)), encoding="utf-8")
+
+    valid, problems = verify_citations("`src/largo.py:100-159`", ws, "src/largo.py")
+
+    assert valid == [("src/largo.py", 100, 159)] and not problems
+
+
+SYMBOLS = {"src/app.py": [("saluda", 10, 14), ("Servicio", 20, 35), ("Servicio.corre", 22, 30)]}
+
+
+def test_a_named_function_outside_the_cited_lines_is_flagged(ws):
+    valid, problems = verify_citations(
+        "`saluda` esta en `src/app.py:30`.", ws, SEEN, symbols_of=lambda path: SYMBOLS.get(path, []),
+    )
+
+    assert not valid
+    assert "`saluda` esta definida en src/app.py:10-14" in problems[0]
+
+
+def test_a_named_function_inside_the_cited_lines_passes(ws):
+    answer = "`saluda` esta en `src/app.py:12`.\nEl metodo `corre` en `src/app.py:25-28`."
+
+    valid, problems = verify_citations(answer, ws, SEEN, symbols_of=lambda path: SYMBOLS.get(path, []))
+
+    assert len(valid) == 2 and not problems
+
+
+def test_a_name_that_is_not_defined_in_that_file_is_not_second_guessed(ws):
+    valid, problems = verify_citations(
+        "`otra_cosa` en `src/app.py:30`.", ws, SEEN, symbols_of=lambda path: SYMBOLS.get(path, []),
+    )
+
+    assert valid and not problems
+
+
+def test_symbols_are_not_checked_when_a_line_has_several_citations(ws):
+    valid, problems = verify_citations(
+        "`saluda` en `src/app.py:30` y `src/pkg/util.py:1`.", ws, SEEN, symbols_of=lambda path: SYMBOLS.get(path, []),
+    )
+
+    assert len(valid) == 2 and not problems

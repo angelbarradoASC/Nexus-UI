@@ -96,20 +96,25 @@ def preview_diff(old: str, new: str, path: str) -> str:
 
 @dataclass
 class Change:
-    kind: str                     # "create" | "append"
-    path: str                     # relativa a la boveda
-    new_text: str                 # contenido COMPLETO resultante
+    kind: str                     # "create" | "append" | "replace" | "move"
+    path: str                     # relativa a la boveda (origen, si es un movimiento)
+    new_text: str                 # contenido COMPLETO resultante (vacio en un movimiento)
     old_hash: str = ""            # hash del contenido que se leyo al proponer ("" si es nueva)
     added: str = ""               # solo lo añadido (para la vista previa)
+    dest: str = ""                # destino de un movimiento
+    old_text: str = ""            # contenido leido al proponer (para el diff de la vista previa; no se persiste)
 
     def to_dict(self) -> dict:
-        return {"kind": self.kind, "path": self.path, "new_text": self.new_text, "old_hash": self.old_hash, "added": self.added}
+        return {
+            "kind": self.kind, "path": self.path, "new_text": self.new_text, "old_hash": self.old_hash,
+            "added": self.added, "dest": self.dest,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> Change:
         return cls(
             kind=str(data.get("kind", "")), path=str(data.get("path", "")), new_text=str(data.get("new_text", "")),
-            old_hash=str(data.get("old_hash", "")), added=str(data.get("added", "")),
+            old_hash=str(data.get("old_hash", "")), added=str(data.get("added", "")), dest=str(data.get("dest", "")),
         )
 
 
@@ -177,6 +182,38 @@ def _write_bytes_atomic(path: Path, data: bytes) -> None:
         raise
 
 
+def read_raw(vault: Vault, rel: str) -> str:
+    """Contenido de una nota tal cual (sin traducir saltos de linea), para planificar cambios que la conservan."""
+    path = _target(vault, rel)
+    try:
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+            return handle.read()
+    except OSError as exc:
+        raise ChangeError(f"No puedo leer `{rel}`: {exc}") from exc
+
+
+def plan_replace(vault: Vault, rel: str, new_text_lf: str) -> Change | None:
+    """Reemplaza el contenido de una nota existente por `new_text_lf` (con saltos \\n; se convierten al estilo que
+    tenia el fichero). None si no hay ningun cambio. Se aplica con copia previa y comprobacion de hash."""
+    old_raw = read_raw(vault, rel)
+    new_raw = new_text_lf.replace("\n", "\r\n") if "\r\n" in old_raw else new_text_lf
+    if new_raw == old_raw:
+        return None
+    return Change("replace", rel, new_raw, sha(old_raw), old_text=old_raw)
+
+
+def plan_move(vault: Vault, rel: str, dest: str) -> Change:
+    old_raw = read_raw(vault, rel)
+    _target(vault, dest)
+    return Change("move", rel, "", sha(old_raw), dest=dest)
+
+
+def _backup(vault: Vault, path: Path, rel: str, now: datetime) -> str:
+    backup_rel = f".pepo/backups/{now:%Y%m%d-%H%M%S}/{rel}"
+    _write_bytes_atomic(vault.root / backup_rel, path.read_bytes())
+    return backup_rel
+
+
 def apply_change(vault: Vault, change: Change, now: datetime | None = None) -> dict:
     """Aplica un cambio ya confirmado. Devuelve {path, kind, backup}. Lanza ChangeError si algo no cuadra."""
     path = _target(vault, change.path)
@@ -185,21 +222,51 @@ def apply_change(vault: Vault, change: Change, now: datetime | None = None) -> d
     if change.kind == "create":
         if path.exists():
             raise ChangeError(f"`{change.path}` ya existe (alguien la creo mientras tanto); no la sobrescribo.")
-    elif change.kind == "append":
-        try:
-            with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-                current = handle.read()
-        except OSError as exc:
-            raise ChangeError(f"No puedo leer `{change.path}`: {exc}") from exc
-        if sha(current) != change.old_hash:
+    elif change.kind in {"append", "replace", "move"}:
+        if not path.exists():
+            raise ChangeError(f"`{change.path}` ya no existe.")
+        if sha(read_raw(vault, change.path)) != change.old_hash:
             raise ChangeError(f"`{change.path}` ha cambiado desde que te hice la propuesta; no la toco. Pídemelo otra vez.")
-        backup_rel = f".pepo/backups/{now:%Y%m%d-%H%M%S}/{change.path}"
-        backup_path = vault.root / backup_rel
-        _write_bytes_atomic(backup_path, path.read_bytes())
+        if change.kind == "move":
+            dest = _target(vault, change.dest)
+            if dest.exists():
+                raise ChangeError(f"`{change.dest}` ya existe; no sobrescribo.")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if change.new_text:
+                # Mover Y modificar a la vez: copia previa, contenido nuevo en el destino y se retira el origen
+                # (el contenido original sigue en .pepo/backups).
+                backup_rel = _backup(vault, path, change.path, now)
+                _write_bytes_atomic(dest, change.new_text.encode("utf-8"))
+                path.unlink()
+            else:
+                os.replace(path, dest)
+            return {"path": change.dest, "kind": "move", "backup": backup_rel, "from": change.path}
+        backup_rel = _backup(vault, path, change.path, now)
     else:
         raise ChangeError(f"Tipo de cambio desconocido: {change.kind}")
     _write_bytes_atomic(path, change.new_text.encode("utf-8"))
     return {"path": change.path, "kind": change.kind, "backup": backup_rel}
+
+
+@dataclass
+class BatchResult:
+    applied: list[dict]
+    failed: list[tuple[str, str]]          # (ruta, motivo)
+
+
+def apply_batch(vault: Vault, changes: list[Change], now: datetime | None = None) -> BatchResult:
+    """Aplica cada cambio por separado: uno que falla (la nota cambio, ya existe...) no impide los demas, y el
+    resultado dice cuales fallaron y por que. Cada escritura es atomica; el lote no es transaccional."""
+    now = now or datetime.now()
+    result = BatchResult([], [])
+    for change in changes:
+        try:
+            result.applied.append(apply_change(vault, change, now))
+        except ChangeError as exc:
+            result.failed.append((change.path, str(exc)))
+        except OSError as exc:
+            result.failed.append((change.path, f"error del sistema de ficheros: {exc}"))
+    return result
 
 
 def relative_folder(path: str) -> str:

@@ -39,32 +39,55 @@ async function apiJson(url, opts = {}) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
-// Un mensaje de PEPO puede traer un bloque ```...``` (el script que va a
-// ejecutar). El usuario final no quiere ver PowerShell en crudo — se separa
-// el texto en lenguaje llano del codigo, y el codigo se oculta detras de un
-// <details> plegable (mismo patron que "Ver proceso de pensamiento"). Todo
-// el contenido dinamico se sigue escapando por separado: solo las etiquetas
-// <details>/<summary> son HTML literal nuestro, nunca texto del LLM.
-function renderBubbleContent(text) {
-    const codeFence = /```[a-zA-Z]*\n?([\s\S]*?)```/;
-    const match = text.match(codeFence);
-    if (!match) {
-        return escHtml(text).replace(/\n/g, '<br>');
+// Un mensaje de PEPO puede traer bloques ```...```:
+//  - con lenguaje markdown/diff/nota (la VISTA PREVIA de una nota o los cambios que PEPO propone en tu boveda):
+//    se muestran siempre, porque el usuario tiene que leerlos antes de confirmar;
+//  - sin lenguaje u otro (el script que va a ejecutar): plegados tras un <details>, porque el usuario final no quiere
+//    ver PowerShell en crudo (mismo patron que "Ver proceso de pensamiento").
+// Todo el contenido dinamico se escapa SIEMPRE primero; despues solo se introducen etiquetas fijas nuestras
+// (<strong>, <code>, <details>, <pre>, <span>): nunca HTML que venga del texto del LLM.
+const PREVIEW_LANGS = new Set(['markdown', 'md', 'diff', 'nota']);
+
+function inlineMarkdown(text) {
+    return escHtml(text)
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+}
+
+function renderDiff(code) {
+    return code.split('\n').map((line) => {
+        const safe = escHtml(line);
+        if (line.startsWith('+')) return `<span class="pepo-diff-add">${safe}</span>`;
+        if (line.startsWith('-')) return `<span class="pepo-diff-del">${safe}</span>`;
+        if (line.startsWith('@@')) return `<span class="pepo-diff-hunk">${safe}</span>`;
+        return safe;
+    }).join('\n');
+}
+
+function renderCodeBlock(lang, code) {
+    if (PREVIEW_LANGS.has(lang)) {
+        const body = lang === 'diff' ? renderDiff(code) : escHtml(code);
+        return `<pre class="pepo-preview"><code>${body}</code></pre>`;
     }
+    return `<details class="pepo-code-toggle"><summary>Ver script</summary><pre><code>${escHtml(code)}</code></pre></details>`;
+}
 
-    const before = text.slice(0, match.index).trim();
-    const after = text.slice(match.index + match[0].length).trim();
-    const code = match[1].trim();
-
-    const beforeHtml = before ? `${escHtml(before).replace(/\n/g, '<br>')}` : '';
-    const afterHtml = after ? `<div class="pepo-bubble-after">${escHtml(after).replace(/\n/g, '<br>')}</div>` : '';
-
-    return `${beforeHtml}
-        <details class="pepo-code-toggle">
-            <summary>Ver script</summary>
-            <pre><code>${escHtml(code)}</code></pre>
-        </details>
-        ${afterHtml}`;
+function renderBubbleContent(text) {
+    const fence = /(`{3,})([a-zA-Z]*)[ \t]*\n?([\s\S]*?)\1/g;
+    let html = '';
+    let last = 0;
+    let match;
+    const textPart = (chunk) => {
+        const trimmed = chunk.trim();
+        return trimmed ? `<div class="pepo-bubble-text">${inlineMarkdown(trimmed)}</div>` : '';
+    };
+    while ((match = fence.exec(text)) !== null) {
+        html += textPart(text.slice(last, match.index));
+        html += renderCodeBlock(match[2].toLowerCase(), match[3].replace(/^\n+|\n+$/g, ''));
+        last = match.index + match[0].length;
+    }
+    return html + textPart(text.slice(last));
 }
 
 function appendMsg(role, text, isThinking = false) {

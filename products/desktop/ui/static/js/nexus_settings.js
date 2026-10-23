@@ -979,6 +979,75 @@ async function toggleCodeEnabled(enabled) {
     renderCodeSettings(await api.put("/api/desktop/code/enabled", { enabled }));
 }
 
+// ── Obsidian (bóveda de notas) ──────────────────────────────────────────────
+
+function renderObsidianSettings(data) {
+    const badge = document.getElementById("obsidianStatusBadge");
+    const info = document.getElementById("obsidianVaultInfo");
+    document.getElementById("obsidianEnabledToggle").checked = Boolean(data.enabled);
+    const vault = data.vault;
+    badge.textContent = !data.enabled ? "desactivado" : (vault ? vault.name : "sin bóveda");
+    badge.className = `info-badge ${data.enabled && vault ? "" : "info-badge-muted"}`;
+    const origin = vault && vault.source === "configured" ? "elegida por ti" : "la abierta en Obsidian";
+    info.innerHTML = vault
+        ? `<p><strong>${esc(vault.name)}</strong> — ${esc(vault.path)} <em>(${origin})</em></p>`
+        : "<p>No encuentro ninguna bóveda. Abre una en Obsidian o elige la carpeta aquí.</p>";
+}
+
+async function loadObsidianSettings() {
+    renderObsidianSettings(await api.get("/api/desktop/obsidian/settings"));
+}
+
+async function saveObsidianVault(path) {
+    const input = document.getElementById("obsidianVaultInput");
+    const note = document.getElementById("obsidianVaultNote");
+    note.textContent = "";
+    try {
+        renderObsidianSettings(await api.put("/api/desktop/obsidian/vault", { path }));
+        input.value = "";
+    } catch (error) {
+        note.textContent = error.message;
+    }
+}
+
+async function browseObsidianVault() {
+    const input = document.getElementById("obsidianVaultInput");
+    const note = document.getElementById("obsidianVaultNote");
+    const bridge = window.pywebview && window.pywebview.api;
+    if (!bridge || !bridge.pick_folder) {
+        note.textContent = "El selector de carpetas solo está en la app de escritorio: escribe la ruta a mano.";
+        return;
+    }
+    const chosen = await bridge.pick_folder(input.value.trim());
+    if (chosen) {
+        input.value = chosen;
+        await saveObsidianVault(chosen);
+    }
+}
+
+async function runObsidianAudit() {
+    const button = document.getElementById("obsidianAuditBtn");
+    const note = document.getElementById("obsidianAuditNote");
+    const output = document.getElementById("obsidianAuditOutput");
+    note.textContent = "Repasando…";
+    button.disabled = true;
+    try {
+        const result = await api.get("/api/desktop/obsidian/audit");
+        output.textContent = result.text;
+        output.style.display = "block";
+        note.textContent = "";
+    } catch (error) {
+        output.style.display = "none";
+        note.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function toggleObsidianEnabled(enabled) {
+    renderObsidianSettings(await api.put("/api/desktop/obsidian/enabled", { enabled }));
+}
+
 function wireEvents() {
     document.getElementById("saveRouterBtn").addEventListener("click", () => {
         saveRouterConfig().catch((error) => {
@@ -1053,6 +1122,28 @@ function wireEvents() {
     document.getElementById("codeWorkspaceInput").addEventListener("keydown", (event) => {
         if (event.key === "Enter") { event.preventDefault(); addCodeWorkspace(); }
     });
+    document.getElementById("obsidianEnabledToggle").addEventListener("change", (event) => {
+        toggleObsidianEnabled(event.target.checked).catch((error) => {
+            document.getElementById("obsidianVaultNote").textContent = error.message;
+        });
+    });
+    document.getElementById("obsidianVaultSaveBtn").addEventListener("click", () => {
+        saveObsidianVault(document.getElementById("obsidianVaultInput").value.trim());
+    });
+    document.getElementById("obsidianVaultAutoBtn").addEventListener("click", () => {
+        saveObsidianVault("");
+    });
+    document.getElementById("obsidianVaultBrowseBtn").addEventListener("click", () => {
+        browseObsidianVault().catch((error) => {
+            document.getElementById("obsidianVaultNote").textContent = error.message;
+        });
+    });
+    document.getElementById("obsidianVaultInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); saveObsidianVault(event.target.value.trim()); }
+    });
+    document.getElementById("obsidianAuditBtn").addEventListener("click", () => {
+        runObsidianAudit();
+    });
     document.getElementById("codeEnabledToggle").addEventListener("change", (event) => {
         toggleCodeEnabled(event.target.checked).catch((error) => {
             document.getElementById("codeWorkspaceNote").textContent = error.message;
@@ -1096,6 +1187,10 @@ async function bootstrap() {
         }),
         loadOutlookConfig().catch(() => {
             const el = document.getElementById("outlookStatusBadge");
+            if (el) { el.textContent = "no disponible"; }
+        }),
+        loadObsidianSettings().catch(() => {
+            const el = document.getElementById("obsidianStatusBadge");
             if (el) { el.textContent = "no disponible"; }
         }),
         loadCodeSettings().catch(() => {

@@ -107,10 +107,10 @@ async def test_writing_without_an_llm_says_so_and_touches_nothing(tmp_path, vaul
 
 
 @pytest.mark.asyncio
-async def test_modify_requests_show_the_report_and_say_nothing_was_changed(tmp_path, vault_root):
+async def test_a_maintenance_request_on_a_vault_with_nothing_to_do_says_so(tmp_path, vault_root):
     text = await ObsidianAssistant(_store(tmp_path, detected=vault_root)).handle("enlaza mis notas")
 
-    assert "Repaso de la bóveda" in text and "todavía no modifico notas" in text
+    assert "no hay nada que cambiar" in text
 
 
 @pytest.mark.asyncio

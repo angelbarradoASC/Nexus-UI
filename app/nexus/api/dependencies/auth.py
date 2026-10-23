@@ -132,8 +132,15 @@ def build_runtime(cfg) -> NexusRuntime:
             settings=CodeSettingsStore(desktop_settings.code_settings_path),
         )
         # Asistente de la boveda de Obsidian: repasa y propone notas; escribe solo tras confirmar.
+        async def _obsidian_web_search(query: str) -> list[dict]:
+            # Contraste de las notas GENERADAS: solo sale a internet el titulo, con la misma busqueda gratuita
+            # del chat (DuckDuckGo; nunca Brave de pago). `prospecting` se crea mas abajo: se resuelve al llamar.
+            result = await prospecting.web_search(query, count=6)
+            return list(result.get("results", []))
+
         obsidian_assistant = ObsidianAssistant(
             ObsidianSettingsStore(desktop_settings.obsidian_settings_path), llm_router=llm_router, store=pending_store,
+            web_search=_obsidian_web_search,
         )
         for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent, code_agent, obsidian_assistant):
             _agent.load_pending_from_store()

@@ -36,6 +36,7 @@
                     <button type="button" class="settings-nav-btn" data-section="itsm">ITSM</button>
                     <button type="button" class="settings-nav-btn" data-section="correo">Correo</button>
                     <button type="button" class="settings-nav-btn" data-section="codigo">Modo código</button>
+                    <button type="button" class="settings-nav-btn" data-section="obsidian">Obsidian</button>
                 </div>
                 <div class="settings-sidebar-note">
                     <p>Todo lo de Nexus Desktop se gobierna desde aqui: modelos, prompts por modulo, integraciones de Operator, y config de Sales y Campana.</p>
@@ -994,10 +995,78 @@
                     </div>
                 </section>
 
+                <section class="card settings-panel" data-panel="obsidian">
+                    <div class="panel-hero">
+                        <div>
+                            <p class="eyebrow eyebrow-tight">PEPO</p>
+                            <h2>Obsidian</h2>
+                        </div>
+                        <span id="obsidianStatusBadge" class="info-badge info-badge-muted">Cargando...</span>
+                    </div>
+                    <div class="module-form-shell">
+                        <div class="module-form-body">
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Interruptor</p>
+                                <h3>Asistente de tu bóveda de notas</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                PEPO escribe notas en tu bóveda, las enlaza, les da formato, mantiene el
+                                índice y la ordena. Pídeselo en el chat: "apunta en Obsidian una nota
+                                sobre…", "repasa mi bóveda", "enlaza mis notas", "mantén mi bóveda
+                                ordenada". <strong>Nunca escribe sin enseñarte antes la propuesta y
+                                recibir tu "sí"</strong>, nunca borra, y guarda una copia de cada nota
+                                antes de modificarla (en la carpeta oculta .pepo/backups).
+                            </p>
+                            <label class="assets-form-note">
+                                <input id="obsidianEnabledToggle" type="checkbox"> Permitir el asistente de Obsidian
+                            </label>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Bóveda</p>
+                                <h3>Carpeta de la bóveda</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Por defecto PEPO usa la bóveda que tienes abierta en Obsidian. Si quieres
+                                otra, elígela aquí (debe ser una bóveda de Obsidian, con su carpeta
+                                .obsidian). Para redactar o contrastar, <strong>el texto de las notas
+                                relacionadas se envía al modelo de lenguaje configurado</strong> (con las
+                                claves y contraseñas tapadas); las notas con nombre de credenciales no
+                                se leen nunca. Al contrastar con internet solo sale el título de la nota.
+                            </p>
+                            <div id="obsidianVaultInfo" class="info-list">Cargando…</div>
+                            <div class="form-actions">
+                                <input id="obsidianVaultInput" type="text" placeholder="C:\Users\tu-usuario\Documents\MiBoveda" style="min-width:320px">
+                                <button id="obsidianVaultBrowseBtn" type="button" class="camp-btn camp-btn--secondary">Examinar…</button>
+                                <button id="obsidianVaultSaveBtn" type="button">Usar esta bóveda</button>
+                                <button id="obsidianVaultAutoBtn" type="button" class="camp-btn camp-btn--secondary">Usar la abierta en Obsidian</button>
+                                <span id="obsidianVaultNote" class="assets-form-note"></span>
+                            </div>
+                        </div>
+                        <div class="module-section">
+                            <div class="module-section-head">
+                                <p class="eyebrow eyebrow-tight">Repaso</p>
+                                <h3>Estado de la bóveda</h3>
+                            </div>
+                            <p class="assets-form-note">
+                                Informe de solo lectura: enlaces rotos, notas vacías, huérfanas o
+                                duplicadas y menciones que podrían ser enlaces. No gasta tokens.
+                            </p>
+                            <div class="form-actions">
+                                <button id="obsidianAuditBtn" type="button">Repasar ahora</button>
+                                <span id="obsidianAuditNote" class="assets-form-note"></span>
+                            </div>
+                            <pre id="obsidianAuditOutput" class="assets-form-note" style="white-space:pre-wrap;display:none"></pre>
+                        </div>
+                        </div><!-- /module-form-body -->
+                    </div>
+                </section>
+
             </section>
         </section>
     </main>
 
-    <script src="/static/js/nexus_settings.js?v=20261020b"></script>
+    <script src="/static/js/nexus_settings.js?v=20261023a"></script>
 </body>
 </html>

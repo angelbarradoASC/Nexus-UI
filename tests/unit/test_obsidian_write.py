@@ -315,7 +315,7 @@ async def test_a_proposal_shows_a_preview_and_writes_nothing_until_confirmed(tmp
     text = await assistant.handle("apunta en Obsidian una nota sobre las landing zones de Azure", "ctx")
 
     assert "**Propuesta: crear la nota** `Landing zones de Azure.md`" in text
-    assert "Etiquetas: azure, redes" in text and "[[Spine Leaf]]" in text and "generada por PEPO, sin verificar" in text
+    assert "Etiquetas: azure, redes" in text and "[[Spine Leaf]]" in text and "Origen: generada por PEPO (sin verificar)" in text
     assert "¿La escribo? Responde **sí** o **no**." in text
     assert not (vault_root / "Landing zones de Azure.md").exists() and assistant.has_pending("ctx")
 
@@ -350,7 +350,7 @@ async def test_dictated_content_is_marked_as_the_users_and_not_flagged_as_unveri
     await assistant.confirm("c")
 
     note = (vault_root / "Reunion con Laura.md").read_text(encoding="utf-8")
-    assert "tu texto, con formato" in text and "origen: apuntada por el usuario" in note and "[!warning]" not in note
+    assert "Origen: apuntada por el usuario, con formato de PEPO" in text and "origen: apuntada por el usuario" in note and "[!warning]" not in note
     assert "CONTENIDO DEL USUARIO:\nreunión con Laura" in router.calls[0]["user"] or "reunión con Laura" in router.calls[0]["user"]
 
 

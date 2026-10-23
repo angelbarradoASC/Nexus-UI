@@ -787,12 +787,39 @@ Responde SOLO con un objeto JSON, sin texto alrededor ni bloques de codigo:
         group="pepo",
         description="Compara una nota nueva con las notas parecidas que ya existen y avisa de duplicados o contradicciones.",
         default_text="""Comparas una NOTA NUEVA con NOTAS EXISTENTES de la boveda de Obsidian del usuario. Devuelve SOLO un objeto JSON, sin texto alrededor:
-{"duplicates": [{"nota": "<titulo exacto>", "motivo": "..."}], "contradictions": [{"nota": "<titulo exacto>", "motivo": "..."}]}
+{"duplicates": [{"nota": "<titulo exacto>", "motivo": "..."}], "contradictions": [{"nota": "<titulo exacto>", "motivo": "..."}], "relacionadas": ["<titulo exacto>"]}
 
 - duplicates: la nota existente ya cubre sustancialmente lo mismo que la nueva (mucho solapamiento).
 - contradictions: una afirmacion concreta de la nueva choca con la existente (cita ambas brevemente en el motivo).
+- relacionadas: notas existentes que tratan del MISMO tema y que el usuario querria tener enlazadas desde la nueva (maximo 3). Si dudas, no la incluyas: una palabra en comun no basta.
 - Usa SOLO titulos de la lista que se te da. Si no hay nada, deja las listas vacias.
-- Se estricto: no marques diferencias de estilo, de nivel de detalle ni temas que solo se parecen.""",
+- Se estricto: no marques diferencias de estilo, de nivel de detalle ni temas que solo se parecen.
+- Brevedad: cada motivo es UNA frase de maximo 25 palabras y no mas de 3 hallazgos en total.""",
+    ),
+    "pepo.obsidian_tags": PromptDefinition(
+        key="pepo.obsidian_tags",
+        title="PEPO Obsidian: etiquetar nota",
+        group="pepo",
+        description="Sugiere hasta 3 etiquetas para UNA nota que no tiene, reutilizando las que ya existen en la boveda.",
+        default_text="""Sugieres etiquetas para UNA nota de la boveda de Obsidian del usuario. Recibes el titulo, el comienzo de la nota y las ETIQUETAS EXISTENTES de la boveda.
+Reglas:
+- Hasta 3 etiquetas cortas, en minusculas, sin # ni espacios (usa guiones).
+- REUTILIZA las existentes siempre que encajen; crea una nueva solo si ninguna describe el tema.
+- Si no estas seguro, devuelve una lista vacia: mejor sin etiqueta que con una equivocada.
+Responde SOLO con JSON: {"tags": ["..."]}""",
+    ),
+    "pepo.obsidian_webcheck": PromptDefinition(
+        key="pepo.obsidian_webcheck",
+        title="PEPO Obsidian: contrastar con internet",
+        group="pepo",
+        description="Comprueba una nota generada contra resultados reales de una busqueda web y avisa de afirmaciones no respaldadas.",
+        default_text="""Contrastas una NOTA con RESULTADOS reales de una busqueda web (numerados). Usa SOLO esos resultados; no uses tu conocimiento previo. Responde SOLO con JSON:
+{"problemas": [{"afirmacion": "...", "motivo": "..."}], "fuentes": [1, 2]}
+
+- problemas: afirmaciones CONCRETAS de la nota (cifras, fechas, nombres de producto o version, requisitos) que los resultados contradicen, o datos concretos que ningun resultado respalda. No marques frases generales ni diferencias de estilo.
+- fuentes: numeros de los resultados que respaldan lo esencial de la nota.
+- Si los resultados no tratan el tema, deja ambas listas vacias.
+- Brevedad: cada motivo es UNA frase de maximo 25 palabras y no mas de 4 problemas en total.""",
     ),
     "pepo.outlook_draft_reply": PromptDefinition(
         key="pepo.outlook_draft_reply",

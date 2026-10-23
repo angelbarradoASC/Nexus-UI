@@ -259,6 +259,43 @@ html { zoom: 0.75; }
 
 .pepo-bubble-after { margin-top: 4px; }
 
+/* ── Vista previa de una nota / cambios propuestos en la boveda ──────────── */
+.pepo-bubble-text { margin: 2px 0; }
+
+.pepo-bubble code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8em;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(127, 127, 127, 0.16);
+}
+
+.pepo-preview {
+    margin: 8px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    max-height: 340px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.pepo-preview code {
+    padding: 0;
+    background: none;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text);
+}
+
+.pepo-diff-add { display: inline-block; width: 100%; background: rgba(46, 160, 67, 0.20); }
+.pepo-diff-del { display: inline-block; width: 100%; background: rgba(248, 81, 73, 0.20); }
+.pepo-diff-hunk { color: var(--muted); }
+
+
 /* ── Indicador de "pensando" ─────────────────────────────────────────────── */
 .pepo-thinking {
     display: flex;

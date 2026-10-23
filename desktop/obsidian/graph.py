@@ -149,6 +149,7 @@ class VaultGraph:
         for link in extract_links(masked):
             masked = masked.replace(link.raw, re.sub(r"[^\n]", " ", link.raw))
         masked = re.sub(r"https?://\S+", lambda m: " " * len(m.group(0)), masked)
+        masked = re.sub(r"(?m)^#{1,6}[ \t].*$", lambda m: " " * len(m.group(0)), masked)      # no se enlazan los encabezados
         replacements: list[tuple[int, int, str]] = []
         done: set[str] = set()
         for match in pattern.finditer(masked):

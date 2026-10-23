@@ -109,23 +109,80 @@ class VaultGraph:
     def outgoing_notes(self, path: str) -> list[str]:
         return sorted({r.path for _, r in self.resolutions.get(path, []) if r.path and r.path != path and r.status in {"ok", "ambiguous"}})
 
-    def unlinked_mentions(self) -> list[Mention]:
-        """Sitios donde una nota nombra el titulo (o alias) de OTRA sin enlazarla. Se omiten titulos cortos o que
-        son fechas, y las notas que ya enlazan a ese destino en cualquier otro punto (menos ruido)."""
+    def mention_index(self) -> tuple[dict[str, str], re.Pattern[str] | None, set[str]]:
+        """(nombre_en_minusculas -> nota, regex que los localiza, nombres AMBIGUOS). Un nombre es ambiguo si lo
+        llevan varias notas (titulo o alias): se localiza, pero no se debe enlazar solo."""
+        cached = getattr(self, "_mention_cache", None)
+        if cached is not None:
+            return cached
         names: dict[str, str] = {}
+        ambiguous: set[str] = set()
         for path, note in self.notes.items():
             for name in [note.title, *note.aliases]:
                 clean = name.strip()
-                if len(clean) >= MIN_MENTION_LEN and not _DATE_TITLE.match(clean):
-                    names.setdefault(clean.lower(), path)
+                if len(clean) < MIN_MENTION_LEN or _DATE_TITLE.match(clean):
+                    continue
+                key = clean.lower()
+                if key in names and names[key] != path:
+                    ambiguous.add(key)
+                names.setdefault(key, path)
         if len(names) > MAX_MENTION_TITLES:
             names = {n: p for n, p in names.items() if len(n) >= 7}
-        if not names:
+        pattern = None
+        if names:
+            pattern = re.compile(
+                r"(?<![\w])(" + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r")(?![\w])",
+                re.IGNORECASE | re.UNICODE,
+            )
+        self._mention_cache = (names, pattern, ambiguous)
+        return self._mention_cache
+
+    def link_mentions(self, text: str, exclude: set[str] | None = None) -> tuple[str, list[str]]:
+        """Enlaza en un texto NUEVO la primera mencion de cada nota existente (por titulo o alias): `[[Titulo]]` o
+        `[[Titulo|como aparece]]`. No toca codigo, enlaces ni URLs, ni nombres ambiguos. Devuelve (texto, rutas
+        enlazadas). Es el codigo, no el LLM, quien enlaza: asi nunca aparece un enlace a una nota que no existe."""
+        names, pattern, ambiguous = self.mention_index()
+        if pattern is None:
+            return text, []
+        exclude = exclude or set()
+        masked = mask_code(text)
+        for link in extract_links(masked):
+            masked = masked.replace(link.raw, re.sub(r"[^\n]", " ", link.raw))
+        masked = re.sub(r"https?://\S+", lambda m: " " * len(m.group(0)), masked)
+        replacements: list[tuple[int, int, str]] = []
+        done: set[str] = set()
+        for match in pattern.finditer(masked):
+            key = match.group(1).lower()
+            target = names[key]
+            if key in ambiguous or target in exclude or target in done:
+                continue
+            done.add(target)
+            shown = text[match.start():match.end()]
+            title = self.notes[target].title
+            replacements.append((match.start(), match.end(), f"[[{title}]]" if shown == title else f"[[{title}|{shown}]]"))
+        for start, end, new in reversed(replacements):
+            text = text[:start] + new + text[end:]
+        return text, sorted(done)
+
+    def sanitize_links(self, text: str, source: str = "") -> tuple[str, list[str]]:
+        """Quita los `[[enlaces]]` de un texto nuevo que no apuntan a ninguna nota (los deja como texto plano, con su
+        alias si lo tenian). Devuelve (texto, destinos eliminados). Red de seguridad por si el LLM escribe enlaces."""
+        masked = mask_code(text)
+        removed: list[str] = []
+        for link in extract_links(masked):
+            if link.kind != "wiki" or link.embed:
+                continue
+            if self.resolve(link, source).status == "broken":
+                removed.append(link.target)
+                text = text.replace(link.raw, link.alias or link.target or link.anchor, 1)
+        return text, removed
+
+    def unlinked_mentions(self) -> list[Mention]:
+        """Sitios donde una nota nombra el titulo (o alias) de OTRA sin enlazarla. Se omiten titulos cortos o que
+        son fechas, y las notas que ya enlazan a ese destino en cualquier otro punto (menos ruido)."""
+        names, pattern, _ = self.mention_index()
+        if pattern is None:
             return []
-        pattern = re.compile(
-            r"(?<![\w])(" + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r")(?![\w])",
-            re.IGNORECASE | re.UNICODE,
-        )
         found: list[Mention] = []
         for path, note in self.notes.items():
             linked = set(self.outgoing_notes(path))

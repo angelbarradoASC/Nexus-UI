@@ -96,14 +96,14 @@ async def test_an_audit_request_returns_the_report(tmp_path, vault_root):
 
 
 @pytest.mark.asyncio
-async def test_writing_is_declined_honestly_and_nothing_is_touched(tmp_path, vault_root):
-    assistant = ObsidianAssistant(_store(tmp_path, detected=vault_root))
+async def test_writing_without_an_llm_says_so_and_touches_nothing(tmp_path, vault_root):
+    assistant = ObsidianAssistant(_store(tmp_path, detected=vault_root))          # sin router
     before = sorted(p.name for p in vault_root.iterdir())
 
     text = await assistant.handle("apunta en Obsidian una nota sobre redes")
 
-    assert "Todavía no escribo ni modifico notas" in text
-    assert sorted(p.name for p in vault_root.iterdir()) == before
+    assert "No tengo un modelo de lenguaje" in text
+    assert sorted(p.name for p in vault_root.iterdir()) == before and not assistant.has_pending("default")
 
 
 @pytest.mark.asyncio
@@ -162,7 +162,10 @@ async def test_the_coordinator_answers_vault_requests_without_touching_the_llm(t
 @pytest.mark.asyncio
 async def test_a_failure_reading_the_vault_is_reported_not_raised(tmp_path):
     class _Broken:
-        async def handle(self, message):
+        def has_pending(self, context_id):
+            return False
+
+        async def handle(self, message, context_id="default"):
             raise RuntimeError("disco desconectado")
 
     coordinator = NexusCoordinator(

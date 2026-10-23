@@ -131,9 +131,11 @@ def build_runtime(cfg) -> NexusRuntime:
             cfg, llm_router=llm_router, store=pending_store,
             settings=CodeSettingsStore(desktop_settings.code_settings_path),
         )
-        # Asistente de la boveda de Obsidian (fase 0: repaso de solo lectura).
-        obsidian_assistant = ObsidianAssistant(ObsidianSettingsStore(desktop_settings.obsidian_settings_path))
-        for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent, code_agent):
+        # Asistente de la boveda de Obsidian: repasa y propone notas; escribe solo tras confirmar.
+        obsidian_assistant = ObsidianAssistant(
+            ObsidianSettingsStore(desktop_settings.obsidian_settings_path), llm_router=llm_router, store=pending_store,
+        )
+        for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent, code_agent, obsidian_assistant):
             _agent.load_pending_from_store()
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
         # Un unico DesktopSkillRouter (con el override de permisos ya cargado)

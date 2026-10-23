@@ -172,13 +172,13 @@ class NexusCoordinator:
 
     async def list_pending_actions(self) -> list[dict[str, Any]]:
         pending: list[dict[str, Any]] = []
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._campaign_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent, self._obsidian):
             if agent is not None and hasattr(agent, "list_pending"):
                 pending.extend(await agent.list_pending())
         return pending
 
     def _find_pending_agent(self, context_id: str) -> Any | None:
-        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent):
+        for agent in (self._mouse_agent, self._system_task_agent, self._remote_ops_agent, self._self_config_agent, self._mcp_agent, self._ticket_agent, self._outlook_reply_agent, self._code_agent, self._obsidian):
             if agent is not None and agent.has_pending(context_id):
                 return agent
         return None
@@ -210,6 +210,8 @@ class NexusCoordinator:
             result = await self._outlook_reply_agent.confirm(context_id, user_reply)
         elif agent is self._code_agent:
             result = await self._code_agent.confirm(context_id, user_reply)
+        elif agent is self._obsidian:
+            result = await self._obsidian.confirm(context_id, user_reply)
         else:
             result = await self._self_config_agent.confirm(context_id, user_reply)
         return {"status": "ok", "context_id": context_id, "result": result}
@@ -260,6 +262,12 @@ class NexusCoordinator:
             if _match_confirmation(payload.message) is not None:
                 return await self._handle_mouse_speed_pending(payload, audit_id, context_key)
             self._mouse_agent.cancel(context_key)
+        # Nota de Obsidian propuesta: si/no la escribe o la descarta; cualquier otra cosa es cambio de tema
+        # (se descarta: la direccion segura, no se escribe nada) y el mensaje se procesa normal.
+        if self._obsidian is not None and self._obsidian.has_pending(context_key):
+            if _match_confirmation(payload.message) is not None:
+                return await self._handle_obsidian_pending(payload, audit_id, context_key)
+            self._obsidian.cancel(context_key)
         if self._system_task_agent is not None and self._system_task_agent.has_pending(context_key):
             return await self._handle_system_task_pending(payload, audit_id, context_key)
         if self._remote_ops_agent is not None and self._remote_ops_agent.has_pending(context_key):
@@ -287,7 +295,7 @@ class NexusCoordinator:
         if skill_id == "mcp.usar" and self._mcp_agent is not None:
             return await self._handle_mcp_use_propose(payload, audit_id, context_key, history)
         if skill_id == "notes.obsidian" and self._obsidian is not None:
-            return await self._handle_obsidian_chat(payload, audit_id)
+            return await self._handle_obsidian_chat(payload, audit_id, context_key)
         if skill_id == "monitoring.estado":
             return await self._handle_monitoring_status_chat(payload, audit_id)
         if skill_id == "assets.crear_ticket_operador" or (
@@ -721,16 +729,27 @@ class NexusCoordinator:
             redact_next_reply=kind == "ask_user_secret",
         )
 
-    async def _handle_obsidian_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
+    async def _handle_obsidian_chat(self, payload: ChatRequest, audit_id: str, context_key: str) -> ChatResponse:
         """Asistente de la boveda de Obsidian (docs/PLAN_PEPO_OBSIDIAN.md). La boveda sale de los ajustes
-        (nunca del mensaje) y el repaso es determinista: no gasta tokens de LLM."""
+        (nunca del mensaje); el repaso es determinista y escribir una nota solo propone: se escribe al confirmar."""
         try:
-            response = await self._obsidian.handle(payload.message)
+            response = await self._obsidian.handle(payload.message, context_key)
             status = "accepted"
         except Exception:
             logger.exception("Fallo en el asistente de Obsidian")
             response = "No he podido leer tu bóveda de Obsidian. Revisa la ruta en Configuración › Obsidian."
             status = "degraded"
+        return await self._finish_obsidian_turn(payload, audit_id, response, status)
+
+    async def _handle_obsidian_pending(self, payload: ChatRequest, audit_id: str, context_key: str) -> ChatResponse:
+        if _match_confirmation(payload.message) == "yes":
+            response = await self._obsidian.confirm(context_key)
+        else:
+            self._obsidian.cancel(context_key)
+            response = "Vale, no escribo nada."
+        return await self._finish_obsidian_turn(payload, audit_id, response, "accepted")
+
+    async def _finish_obsidian_turn(self, payload: ChatRequest, audit_id: str, response: str, status: str) -> ChatResponse:
         await self._audit(
             flow="chat",
             action="handle_chat",

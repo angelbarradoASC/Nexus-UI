@@ -87,6 +87,7 @@ def build_runtime(cfg) -> NexusRuntime:
     self_config_agent = None
     mcp_agent = None
     code_agent = None
+    obsidian_assistant = None
     mcp_server_store = None
     skill_router = DesktopSkillRouter()
     agent_settings: "AgentSettingsStore | None" = None
@@ -103,8 +104,10 @@ def build_runtime(cfg) -> NexusRuntime:
         from desktop.local_agents.skill_library import SkillLibrary
         from desktop.local_agents.system_task_agent import SystemTaskAgent
         from desktop.runtime.agent_settings import AgentSettingsStore
+        from desktop.obsidian.assistant import ObsidianAssistant
         from desktop.storage.code_settings import CodeSettingsStore
         from desktop.storage.local_state import DesktopLocalState
+        from desktop.storage.obsidian_settings import ObsidianSettingsStore
         from desktop.storage.mcp_servers import DesktopMCPServerStore
         from desktop.storage.pending_actions import DesktopPendingActionStore
         from nexus.mcp.manager import MCPManager
@@ -128,6 +131,8 @@ def build_runtime(cfg) -> NexusRuntime:
             cfg, llm_router=llm_router, store=pending_store,
             settings=CodeSettingsStore(desktop_settings.code_settings_path),
         )
+        # Asistente de la boveda de Obsidian (fase 0: repaso de solo lectura).
+        obsidian_assistant = ObsidianAssistant(ObsidianSettingsStore(desktop_settings.obsidian_settings_path))
         for _agent in (mouse_agent, system_task_agent, remote_ops_agent, self_config_agent, mcp_agent, code_agent):
             _agent.load_pending_from_store()
         agent_settings = AgentSettingsStore(desktop_settings.config_dir / "agent_settings.json")
@@ -221,6 +226,7 @@ def build_runtime(cfg) -> NexusRuntime:
         outlook=outlook,
         outlook_reply_agent=outlook_reply_agent,
         code_agent=code_agent,
+        obsidian_assistant=obsidian_assistant,
     )
     assistant_core = AssistantRuntimeCore(coordinator, llm_router=llm_router, skill_router=skill_router)
     agent_runtime = AgentRuntimeService()

@@ -121,6 +121,7 @@ class NexusCoordinator:
         outlook: Any | None = None,
         outlook_reply_agent: Any | None = None,
         code_agent: Any | None = None,
+        obsidian_assistant: Any | None = None,
     ) -> None:
         self._alertmanager = alertmanager
         self._grafana = grafana
@@ -138,6 +139,7 @@ class NexusCoordinator:
         self._outlook = outlook
         self._outlook_reply_agent = outlook_reply_agent
         self._code_agent = code_agent
+        self._obsidian = obsidian_assistant
         self._mcp_server_store = mcp_server_store
         self._campaign_decomposer = campaign_decomposer
         self._incident_repository = incident_repository
@@ -284,6 +286,8 @@ class NexusCoordinator:
             return await self._handle_mcp_connect_propose(payload, audit_id, context_key, history)
         if skill_id == "mcp.usar" and self._mcp_agent is not None:
             return await self._handle_mcp_use_propose(payload, audit_id, context_key, history)
+        if skill_id == "notes.obsidian" and self._obsidian is not None:
+            return await self._handle_obsidian_chat(payload, audit_id)
         if skill_id == "monitoring.estado":
             return await self._handle_monitoring_status_chat(payload, audit_id)
         if skill_id == "assets.crear_ticket_operador" or (
@@ -716,6 +720,31 @@ class NexusCoordinator:
             audit_id=audit_id,
             redact_next_reply=kind == "ask_user_secret",
         )
+
+    async def _handle_obsidian_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
+        """Asistente de la boveda de Obsidian (docs/PLAN_PEPO_OBSIDIAN.md). La boveda sale de los ajustes
+        (nunca del mensaje) y el repaso es determinista: no gasta tokens de LLM."""
+        try:
+            response = await self._obsidian.handle(payload.message)
+            status = "accepted"
+        except Exception:
+            logger.exception("Fallo en el asistente de Obsidian")
+            response = "No he podido leer tu bóveda de Obsidian. Revisa la ruta en Configuración › Obsidian."
+            status = "degraded"
+        await self._audit(
+            flow="chat",
+            action="handle_chat",
+            actor=payload.user_id,
+            status=status,
+            details={
+                "mode": payload.mode,
+                "context_id": payload.context_id,
+                "message_preview": payload.message[:160],
+                "skill_id": "notes.obsidian",
+            },
+            audit_id=audit_id,
+        )
+        return ChatResponse(status=status, response=response, agent="obsidian-assistant", flow="chat", audit_id=audit_id)
 
     async def _handle_outlook_priority_chat(self, payload: ChatRequest, audit_id: str) -> ChatResponse:
         """Skill de solo lectura — lista la bandeja de entrada puntuada por

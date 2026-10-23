@@ -73,6 +73,7 @@ class DesktopSkillRouter:
         "crm.configurar": ["crm.configure"],
         "mcp.conectar": ["mcp.connect"],
         "mcp.usar": ["mcp.call"],
+        "notes.obsidian": ["obsidian.vault"],
         "general.respuesta": [],
     }
 
@@ -107,6 +108,9 @@ class DesktopSkillRouter:
         "crm.configurar": PermissionLevel.ADMIN,
         "mcp.conectar": PermissionLevel.ADMIN,
         "mcp.usar": PermissionLevel.OPERATE,
+        # OPERATE: escribe y modifica notas de la boveda del usuario (fase 1+, siempre con vista previa y
+        # confirmacion). El repaso de la fase 0 es solo lectura.
+        "notes.obsidian": PermissionLevel.OPERATE,
         "general.respuesta": PermissionLevel.ASSIST,
     }
 
@@ -225,6 +229,19 @@ class DesktopSkillRouter:
             entities = {**entities, **{k: v for k, v in llm_entities.items() if v}}
         return self._build_resolution(skill_id, confidence, rationale, entities)
 
+    _NOTE_VERBS = ("repasa", "revisa", "ordena", "organiza", "enlaza", "apunta", "anota", "escribe", "crea", "guarda", "limpia", "da formato", "arregla")
+
+    @classmethod
+    def _is_obsidian_request(cls, lowered: str) -> bool:
+        """Obsidian por nombre, o 'mi bóveda / mis notas' con un verbo de trabajar con ellas. 'vault' (en ingles) es
+        el almacen de credenciales y 'nota' de un ticket no cuenta: hace falta 'mis notas' o 'mi boveda'."""
+        text = lowered.replace("ó", "o")
+        if "obsidian" in text:
+            return True
+        return any(term in text for term in ("mi boveda", "mis notas", "la boveda de notas")) and any(
+            verb in text for verb in cls._NOTE_VERBS
+        )
+
     def _heuristic_match(
         self,
         lowered: str,
@@ -234,6 +251,8 @@ class DesktopSkillRouter:
             return "fichaje.entrada", 0.98, "La peticion encaja con una accion de fichaje de entrada."
         if any(term in lowered for term in ("ficha mi salida", "me voy a casa", "termino la jornada", "salgo ya")):
             return "fichaje.salida", 0.98, "La peticion encaja con una accion de fichaje de salida."
+        if self._is_obsidian_request(lowered):
+            return "notes.obsidian", 0.93, "La peticion trata de la boveda de notas de Obsidian del usuario."
         if entities.get("ticket_id") and any(term in lowered for term in ("ticket", "estado", "como esta", "como esta", "consulta")):
             return "jira.consultar_ticket", 0.97, "Se ha detectado una consulta clara sobre un ticket existente."
         if any(term in lowered for term in ("hay incidentes", "hay alertas", "hay alarmas", "que incidentes", "que alertas", "algun incidente", "alguna alerta", "estado de las alertas", "estado de los incidentes")):

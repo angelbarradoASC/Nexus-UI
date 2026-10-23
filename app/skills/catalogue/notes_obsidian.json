@@ -1,0 +1,36 @@
+{
+  "id": "notes.obsidian",
+  "name": "Bóveda de Obsidian",
+  "description": "Asistente de la bóveda de notas de Obsidian del usuario (carpeta local de notas en Markdown): repasarla (enlaces rotos, notas vacías, huérfanas o duplicadas, menciones que podrían ser enlaces), escribir una nota nueva con formato y enlaces, enlazar notas entre sí, dar formato y mantener la bóveda ordenada. Señales: 'Obsidian', 'mi bóveda', 'mis notas', 'apunta/anota esto en Obsidian', 'repasa mis notas', 'enlaza mis notas'. NO es para guardar credenciales (eso es el Vault de credenciales) ni para notas de un ticket.",
+  "execution": {
+    "where": "desktop",
+    "timeout": 60,
+    "retry": 0
+  },
+  "llm": {
+    "required": false,
+    "min_level": "L1",
+    "preferred_level": "L2"
+  },
+  "inputs": {
+    "peticion": {"type": "str", "required": true, "description": "Lo que el usuario quiere hacer con su bóveda, en sus palabras."}
+  },
+  "outputs": {
+    "content": "str"
+  },
+  "triggers": [
+    "repasa mi boveda",
+    "revisa mis notas de obsidian",
+    "apunta en obsidian",
+    "anota esto en obsidian",
+    "enlaza mis notas",
+    "ordena mi boveda de obsidian",
+    "crea una nota en obsidian"
+  ],
+  "examples": [
+    "repasa mi bóveda de Obsidian y dime que hay roto",
+    "apunta en Obsidian una nota sobre las landing zones de Azure",
+    "enlaza mis notas entre sí y ordénalas",
+    "que notas tengo huérfanas en Obsidian?"
+  ]
+}

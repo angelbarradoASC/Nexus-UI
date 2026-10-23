@@ -92,6 +92,10 @@ class DesktopSettings:
         return self.config_dir / "code_settings.json"
 
     @property
+    def obsidian_settings_path(self) -> Path:
+        return self.config_dir / "obsidian_settings.json"
+
+    @property
     def sales_config_path(self) -> Path:
         return self.config_dir / "sales_config.json"
 

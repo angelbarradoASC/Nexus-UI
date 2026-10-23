@@ -76,3 +76,5 @@ Convenciones por defecto (editables en una nota `_PEPO/Convenciones.md` de la b�
 ## 9. Registro de avance
 
 - 2026-10-23: plan escrito; bóveda inspeccionada (2 notas vacías).
+- 2026-10-23: **Fase 0 hecha** (`08d05f9`): análisis de notas, bóveda con sandbox, grafo de enlaces, auditoría, ajustes, rutas `/api/desktop/obsidian/*`, skill `notes.obsidian` y manejador en el coordinador. 1169 tests en verde. Verificado en la app real: "repasa mi bóveda de Obsidian" por `/api/nexus/chat` → `obsidian-assistant`, informe correcto sobre `Boveda1` (2 notas vacías, sin enlaces). Sin LLM ni tokens. **No verificado:** que la sección de Configuración exista (no se ha hecho UI todavía: los ajustes se gestionan solo por API).
+- Siguiente: fase 1 (escribir notas con vista previa y confirmación, `ObsidianAgent(ConfirmableAgent)`, validación de enlaces en código, copia de seguridad) y sección en Configuración (norma: toda config editable en la UI).

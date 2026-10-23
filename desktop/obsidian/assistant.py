@@ -274,6 +274,7 @@ class ObsidianAssistant:
         preview = (change.added if change.kind == "append" else change.new_text).strip()
         if len(preview) > PREVIEW_CHARS:
             preview = preview[:PREVIEW_CHARS].rsplit("\n", 1)[0] + "\n[… recortado en la vista previa]"
-        lines.append("\n---\n" + preview + "\n---")
+        # Bloque de codigo de 4 comillas: el frontmatter (---) y cualquier bloque de codigo de la nota no lo rompen.
+        lines.append("\n````markdown\n" + preview + "\n````")
         lines.append("¿La escribo? Responde **sí** o **no**.")
         return "\n".join(lines)
